@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Psychedelic Particle Visualizer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: monospace; }
+  canvas { display: block; }
+  #ui {
+    position: fixed; top: 20px; left: 20px; color: #fff;
+    font-size: 12px; opacity: 0.7; pointer-events: none;
+    text-shadow: 0 0 10px #0ff;
+  }
+  #controls {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+  }
+  button {
+    background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.3);
+    color: #fff; padding: 8px 16px; cursor: pointer; border-radius: 20px;
+    font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+    transition: all 0.3s; backdrop-filter: blur(5px);
+  }
+  button:hover { border-color: #0ff; color: #0ff; box-shadow: 0 0 15px rgba(0,255,255,0.4); }
+  #info {
+    position: fixed; top: 20px; right: 20px; color: rgba(255,255,255,0.5);
+    font-size: 11px; text-align: right;
+  }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div>PARTICLES: <span id="pcount">0</span></div>
+  <div>FPS: <span id="fps">0</span></div>
+  <div>MODE: <span id="mode">VORTEX</span></div>
+</div>
+<div id="info">
+  DRAG to rotate &bull; SCROLL to zoom<br>
+  Click for attractor
+</div>
+<div id="controls">
+  <button onclick="setMode('vortex')">Vortex</button>
+  <button onclick="setMode('explosion')">Explosion</button>
+  <button onclick="setMode('nebula')">Nebula</button>
+  <button onclick="setMode('dna')">DNA</button>
+  <button onclick="setMode('chaos')">Chaos</button>
+  <button onclick="toggleTrails()">Trails</button>
+  <button onclick="addBurst()">Burst</button>
+</div>
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+
+if (!gl) {
+  document.body.innerHTML = '<div style="color:white;text-align:center;padding:50px">WebGL not supported</div>';
+}
+
+// ─── Resize ───────────────────────────────────────────────────────────────────
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── Shader Sources ───────────────────────────────────────────────────────────
+const PARTICLE_VERT = `
+  precision highp float;
+  attribute vec3 aPos;
+  attribute vec3 aVel;
+  attribute float aAge;
+  attribute float aLife;
+  attribute float aSeed;
+
+  uniform mat4 uMVP;
+  uniform float uTime;
+  uniform vec2 uResolution;
+
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying float vSize;
+
+  vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+  }
+
+  void main() {
+    float t = aAge / aLife;
+    float speed = length(aVel);
+
+    // Psychedelic hue based on position, velocity, and time
+    float hue = fract(
+      aSeed * 0.618033988
+      + uTime * 0.08
+      + aPos.y * 0.015
+      + speed * 0.12
+    );
+    float sat = 0.7 + 0.3 * sin(uTime * 1.3 + aSeed * 3.14);
+    float val = mix(1.2, 0.4, t * t);
+
+    vColor = hsv2rgb(vec3(hue, sat, val));
+    vAlpha = (1.0 - t * t) * min(1.0, t * 8.0);
+
+    // Size: larger when fast, fades at end
+    vSize = (3.0 + speed * 2.5 + aSeed * 2.0) * (1.0 - t * 0.6);
+
+    vec4 mvPos = uMVP * vec4(aPos, 1.0);
+    gl_Position = mvPos;
+    gl_PointSize = vSize * (300.0 / -mvPos.z);
+  }
+`;
+
+const PARTICLE_FRAG = `
+  precision highp float;
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying float vSize;
+
+  void main() {
+    vec2 uv = gl_PointCoord * 2.0 - 1.0;
+    float d = dot(uv, uv);
+    if (d > 1.0) discard;
+
+    // Soft glowing orb
+    float core  = exp(-d * 3.5);
+    float glow  = exp(-d * 1.2) * 0.6;
+    float bloom = exp(-d * 0.5) * 0.25;
+    float alpha = (core + glow + bloom) * vAlpha;
+
+    vec3 col = vColor * (core * 2.0 + glow + bloom);
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
+
+const TRAIL_VERT = `
+  precision highp float;
+  attribute vec2 aPos;
+  void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+const TRAIL_FRAG = `
+  precision highp float;
+  uniform float uDecay;
+  uniform sampler2D uTex;
+  uniform vec2 uResolution;
+  void main() {
+    vec2 uv = gl_FragCoord.xy / uResolution;
+    vec4 c = texture2D(uTex, uv);
+    gl_FragColor = c * uDecay;
+  }
+`;
+
+// ─── Compile Shaders ──────────────────────────────────────────────────────────
+function compile(src, type) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+
+function link(vSrc, fSrc) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(vSrc, gl.VERTEX_SHADER));
+  gl.attachShader(p, compile(fSrc, gl.FRAGMENT_SHADER));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    console.error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const particleProg = link(PARTICLE_VERT, PARTICLE_FRAG);
+const trailProg    = link(TRAIL_VERT, TRAIL_FRAG);
+
+// ─── Particles ────────────────────────────────────────────────────────────────
+const MAX = 80000;
+const pos  = new Float32Array(MAX * 3);
+const vel  = new Float32Array(MAX * 3);
+const age  = new Float32Array(MAX);
+const life = new Float32Array(MAX);
+const seed = new Float32Array(MAX);
+
+let count  = 0;
+let currentMode = 'vortex';
+let trailsOn = true;
+let attractors = [];
+
+function spawn(x, y, z, vx, vy, vz, lifespan, s) {
+  if (count >= MAX) return;
+  const i = count++;
+  pos[i*3]   = x;  pos[i*3+1]  = y;  pos[i*3+2]  = z;
+  vel[i*3]   = vx; vel[i*3+1]  = vy; vel[i*3+2]  = vz;
+  age[i]     = 0;
+  life[i]    = lifespan;
+  seed[i]    = s !== undefined ? s : Math.random();
+}
+
+function spawnBatch() {
+  const N   = 300;
+  const t   = time;
+
+  if (currentMode === 'vortex') {
+    for (let k = 0; k < N; k++) {
+      const angle = Math.random() * Math.PI * 2;
+      const r     = 2 + Math.random() * 18;
+      const y     = (Math.random() - 0.5) * 40;
+      const speed = 0.3 + Math.random() * 0.8;
+      spawn(
+        Math.cos(angle) * r,
+        y,
+        Math.sin(angle) * r,
+        -Math.sin(angle) * speed,
+        (Math.random() - 0.5) * 0.3,
+        Math.cos(angle) * speed,
+        2.5 + Math.random() * 3
+      );
+    }
+  } else if (currentMode === 'explosion') {
+    for (let k = 0; k < N; k++) {
+      const th = Math.random() * Math.PI * 2;
+      const ph = Math.acos(2 * Math.random() - 1);
+      const sp = 3 + Math.random() * 12;
+      spawn(
+        0, 0, 0,
+        Math.sin(ph)*Math.cos(th)*sp,
+        Math.sin(ph)*Math.sin(th)*sp,
+        Math.cos(ph)*sp,
+        1.5 + Math.random() * 2
+      );
+    }
+  } else if (currentMode === 'nebula') {
+    for (let k = 0; k < N; k++) {
+      const x = (Math.random() - 0.5) * 60;
+      const y = (Math.random() - 0.5) * 60;
+      const z = (Math.random() - 0.5) * 60;
+      const r = Math.sqrt(x*x+y*y+z*z) + 0.01;
+      const s = 0.5 + Math.random() * 2;
+      spawn(x, y, z, -y/r*s*0.5 + (Math.random()-0.5)*0.5,
+                       x/r*s*0.5 + (Math.random()-0.5)*0.5,
+                       (Math.random()-0.5)*0.8,
+            3 + Math.random() * 5);
+    }
+  } else if (currentMode === 'dna') {
+    for (let k = 0; k < N; k++) {
+      const strand = Math.random() < 0.5 ? 0 : 1;
+      const tt = (Math.random() - 0.5) * 40;
+      const off = strand * Math.PI;
+      const a   = tt * 0.4 + off;
+      const r   = 6 + Math.random() * 2;
+      spawn(
+        Math.cos(a) * r,
+        tt,
+        Math.sin(a) * r,
+        -Math.sin(a) * 0.8 + (Math.random()-0.5)*0.3,
+        (Math.random()-0.5)*0.2,
+         Math.cos(a) * 0.8 + (Math.random()-0.5)*0.3,
+        2 + Math.random() * 3
+      );
+    }
+  } else if (currentMode === 'chaos') {
+    for (let k = 0; k < N; k++) {
+      const x = (Math.random()-0.5)*50;
+      const y = (Math.random()-0.5)*50;
+      const z = (Math.random()-0.5)*50;
+      const vx = (Math.random()-0.5)*5;
+      const vy = (Math.random()-0.5)*5;
+      const vz = (Math.random()-0.5)*5;
+      spawn(x, y, z, vx, vy, vz, 1 + Math.random()*4);
+    }
+  }
+}
+
+// ─── Physics Update ───────────────────────────────────────────────────────────
+let time = 0;
+const dt = 1/60;
+
+function updateParticles() {
+  let alive = 0;
+  const ts = time;
+
+  for (let i = 0; i < count; i++) {
+    age[i] += dt;
+    if (age[i] >= life[i]) continue;
+
+    let px = pos[i*3], py = pos[i*3+1], pz = pos[i*3+2];
+    let vx = vel[i*3], vy = vel[i*3+1], vz = vel[i*3+2];
+
+    // Mode forces
+    if (currentMode === 'vortex') {
+      const r   = Math.sqrt(px*px + pz*pz) + 0.001;
+      const inv = 1 / r;
+      const str = 6.0;
+      vx += (-pz * inv * str - px * 0.2) * dt;
+      vz += ( px * inv * str - pz * 0.2) * dt;
+      vy += -py * 0.15 * dt;
+      // Turbulence
+      vx += Math.sin(ts * 1.1 + py * 0.3) * 0.4 * dt;
+      vy += Math.sin(ts * 0.9 + px * 0.2) * 0.3 * dt;
+      vz += Math.cos(ts * 1.3 + pz * 0.3) * 0.4 * dt;
+    } else if (currentMode === 'explosion') {
+      const r = Math.sqrt(px*px+py*py+pz*pz) + 0.01;
+      vx += px/r * 0.5 * dt;
+      vy += py/r * 0.5 * dt;
+      vz += pz/r * 0.5 * dt;
+      vy -= 1.5 * dt; // gravity
+    } else if (currentMode === 'nebula') {
+      const cx = Math.sin(ts * 0.2) * 15;
+      const cy = Math.cos(ts * 0.17) * 10;
+      const cz = Math.sin(ts * 0.13) * 15;
+      const dx = cx - px, dy = cy - py, dz = cz - pz;
+      const r  = Math.sqrt(dx*dx+dy*dy+dz*dz) + 1;
+      vx += dx/r * 1.5 * dt;
+      vy += dy/r * 1.5 * dt;
+      vz += dz/r * 1.5 * dt;
+      // Curl noise approximation
+      vx += Math.sin(py * 0.1 + ts * 0.7) * 0.6 * dt;
+      vy += Math.sin(pz * 0.1 + ts * 0.5) * 0.6 * dt;
+      vz += Math.sin(px * 0.1 + ts * 0.6) * 0.6 * dt;
+    } else if (currentMode === 'dna') {
+      // Helical attractor
+      const targetR = 7.0;
+      const r = Math.sqrt(px*px+pz*pz) + 0.01;
+      vx += (px/r*(targetR-r)) * 0.8 * dt;
+      vz += (pz/r*(targetR-r)) * 0.8 * dt;
+      // Rotate
+      vx += -pz * 0.5 * dt;
+      vz +=  px * 0.5 * dt;
+      vy += Math.sin(ts*0.4 + r*0.2) * 0.5 * dt;
+    } else if (currentMode === 'chaos') {
+      // Lorenz-inspired attraction points that shift over time
+      const cx = Math.sin(ts * 0.31) * 20;
+      const cy = Math.cos(ts * 0.27) * 20;
+      const cz = Math.sin(ts * 0.19) * 20;
+      const dx = cx - px, dy = cy - py, dz = cz - pz;
+      const r2 = dx*dx+dy*dy+dz*dz + 1;
+      vx += dx/r2 * 80 * dt;
+      vy += dy/r2 * 80 * dt;
+      vz += dz/r2 * 80 * dt;
+      // Repulsor at origin
+      const or2 = px*px+py*py+pz*pz + 0.5;
+      vx -= px/or2 * 30 * dt;
+      vy -= py/or2 * 30 * dt;
+      vz -= pz/or2 * 30 * dt;
+    }
+
+    // Click attractors
+    for (const att of attractors) {
+      const dx = att.x - px, dy = att.y - py, dz = att.z - pz;
+      const r2 = dx*dx + dy*dy + dz*dz + 4;
+      const str = att.str * Math.exp(-r2 * 0.002);
+      vx += dx / r2 * str * dt * 60;
+      vy += dy / r2 * str * dt * 60;
+      vz += dz / r2 * str * dt * 60;
+      att.str *= 0.998;
+    }
+    attractors = attractors.filter(a => a.str > 0.1);
+
+    // Damping
+    const damp = 0.985;
+    vx *= damp; vy *= damp; vz *= damp;
+
+    // Max speed
+    const spd = Math.sqrt(vx*vx+vy*vy+vz*vz);
+    if (spd > 20) { const inv = 20/spd; vx*=inv; vy*=inv; vz*=inv; }
+
+    // Write back — compact living particles
+    pos[alive*3]   = px + vx * dt * 60;
+    pos[alive*3+1] = py + vy * dt * 60;
+    pos[alive*3+2] = pz + vz * dt * 60;
+    vel[alive*3]   = vx;
+    vel[alive*3+1] = vy;
+    vel[alive*3+2] = vz;
+    age[alive]     = age[i];
+    life[alive]    = life[i];
+    seed[alive]    = seed[i];
+    alive++;
+  }
+  count = alive;
+}
+
+// ─── GL Buffers ───────────────────────────────────────────────────────────────
+const posBuf  = gl.createBuffer();
+const velBuf  = gl.createBuffer();
+const ageBuf  = gl.createBuffer();
+const lifeBuf = gl.createBuffer();
+const seedBuf = gl.createBuffer();
+
+function uploadBuffers() {
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, pos.subarray(0, count * 3), gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, velBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, vel.subarray(0, count * 3), gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, ageBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, age.subarray(0, count), gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, lifeBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, life.subarray(0, count), gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, seedBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, seed.subarray(0, count), gl.DYNAMIC_DRAW);
+}
+
+// ─── Trail FBO ────────────────────────────────────────────────────────────────
+let trailFBO, trailTex, trailFBO2, trailTex2;
+
+function makeTrailFBO() {
+  function make() {
+    const fbo = gl.createFramebuffer();
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    return { fbo, tex };
+  }
+  const a = make(), b = make();
+  trailFBO  = a.fbo; trailTex  = a.tex;
+  trailFBO2 = b.fbo; trailTex2 = b.tex;
+}
+makeTrailFBO();
+window.addEventListener('resize', () => {
+  makeTrailFBO();
+});
+
+// Fullscreen quad
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+// ─── Camera / Math ────────────────────────────────────────────────────────────
+let camTheta = 0.3, camPhi = 0.4, camDist = 60;
+let autoSpin = true;
+
+function mat4Mul(a, b) {
+  const out = new Float32Array(16);
+  for (let r = 0; r < 4; r++)
+    for (let c = 0; c < 4; c++)
+      out[r*4+c] = a[r*4]*b[c] + a[r*4+1]*b[4+c] + a[r*4+2]*b[8+c] + a[r*4+3]*b[12+c];
+  return out;
+}
+
+function perspective(fov, asp, near, far) {
+  const f = 1 / Math.tan(fov / 2);
+  const m = new Float32Array(16);
+  m[0]=f/asp; m[5]=f;
+  m[10]=-(far+near)/(far-near); m[11]=-1;
+  m[14]=-2*far*near/(far-near);
+  return m;
+}
+
+function getMVP() {
+  const cx = Math.sin(camPhi) * Math.cos(camTheta) * camDist;
+  const cy = Math.cos(camPhi) * camDist;
+  const cz = Math.sin(camPhi) * Math.sin(camTheta) * camDist;
+
+  // View matrix (look at origin)
+  const fwd = normalize3([-cx,-cy,-cz]);
+  const right = normalize3(cross3(fwd, [0,1,0]));
+  const up    = cross3(right, fwd);
+
+  const view = new Float32Array([
+    right[0], up[0], -fwd[0], 0,
+    right[1], up[1], -fwd[1], 0,
+    right[2], up[2], -fwd[2], 0,
+    -dot3(right,[cx,cy,cz]), -dot3(up,[cx,cy,cz]), dot3(fwd,[cx,cy,cz]), 1
+  ]);
+
+  const proj = perspective(Math.PI/4, canvas.width/canvas.height, 0.1, 1000);
+  return mat4Mul(proj, view);
+}
+
+function normalize3(v) {
+  const l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+  return [v[0]/l,v[1]/l,v[2]/l];
+}
+function cross3(a,b) {
+  return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+}
+function dot3(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+
+// ─── Interaction ──────────────────────────────────────────────────────────────
+let drag = false, lastX = 0, lastY = 0;
+canvas.addEventListener('mousedown', e => {
+  drag = true; lastX = e.clientX; lastY = e.clientY;
+  autoSpin = false;
+});
+canvas.addEventListener('mouseup', e => {
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  if (!drag || (Math.abs(dx) < 3 && Math.abs(dy) < 3)) {
+    // Click: add attractor at projected point
+    addAttractor(e.clientX, e.clientY);
+  }
+  drag = false;
+});
+canvas.addEventListener('mousemove', e => {
+  if (!drag) return;
+  camTheta -= (e.clientX - lastX) * 0.005;
+  camPhi    = Math.max(0.05, Math.min(Math.PI - 0.05, camPhi - (e.clientY - lastY) * 0.005));
+  lastX = e.clientX; lastY = e.clientY;
+});
+canvas.addEventListener('wheel', e => {
+  camDist = Math.max(10, Math.min(150, camDist + e.deltaY * 0.05));
+});
+
+function addAttractor(sx, sy) {
+  const ndcX = (sx / canvas.width * 2 - 1);
+  const ndcY = -(sy / canvas.height * 2 - 1);
+  const spread = camDist * 0.6;
+  const cx = Math.sin(camPhi) * Math.cos(camTheta);
+  const cz = Math.sin(camPhi) * Math.sin(camTheta);
+  const right = normalize3([-cz, 0, cx]);
+  const up    = [0, 1, 0];
+  attractors.push({
+    x: ndcX * spread * right[0] + ndcY * spread * up[0],
+    y: ndcX * spread * right[1] + ndcY * spread * up[1],
+    z: ndcX * spread * right[2] + ndcY * spread * up[2],
+    str: 25
+  });
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function attr(prog, name, buf, size) {
+  const loc = gl.getAttribLocation(prog, name);
+  if (loc < 0) return;
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
+
+function render() {
+  const mvp = getMVP();
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive for glow
+
+  if (trailsOn) {
+    // 1) Decay previous trail into trailFBO2
+    gl.bindFramebuffer(gl.FRAMEBUFFER, trailFBO2);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.useProgram(trailProg);
+    const decayU = gl.getUniformLocation(trailProg, 'uDecay');
+    const resU   = gl.getUniformLocation(trailProg, 'uResolution');
+    const texU   = gl.getUniformLocation(trailProg, 'uTex');
+    gl.uniform1f(decayU, 0.88);
+    gl.uniform2f(resU, canvas.width, canvas.height);
+    gl.uniform1i(texU, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, trailTex);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    const aPos2 = gl.getAttribLocation(trailProg, 'aPos');
+    gl.enableVertexAttribArray(aPos2);
+    gl.vertexAttribPointer(aPos2, 2, gl.FLOAT, false, 0, 0);
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.enable(gl.BLEND);
+
+    // 2) Draw particles into trailFBO2
+    gl.useProgram(particleProg);
+    gl.uniformMatrix4fv(gl.getUniformLocation(particleProg, 'uMVP'), false, mvp);
+    gl.uniform1f(gl.getUniformLocation(particleProg, 'uTime'), time);
+    gl.uniform2f(gl.getUniformLocation(particleProg, 'uResolution'), canvas.width, canvas.height);
+    attr(particleProg, 'aPos',  posBuf,  3);
+    attr(particleProg, 'aVel',  velBuf,  3);
+    attr(particleProg, 'aAge',  ageBuf,  1);
+    attr(particleProg, 'aLife', lifeBuf, 1);
+    attr(particleProg, 'aSeed', seedBuf, 1);
+    gl.drawArrays(gl.POINTS, 0, count);
+
+    // Swap FBOs
+    [trailFBO, trailTex, trailFBO2, trailTex2] = [trailFBO2, trailTex2, trailFBO, trailTex];
+
+    // 3) Blit trailTex to screen
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.disable(gl.BLEND);
+    gl.useProgram(trailProg);
+    gl.uniform1f(decayU, 1.0);
+    gl.uniform2f(resU, canvas.width, canvas.height);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, trailTex);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.enableVertexAttribArray(aPos2);
+    gl.vertexAttribPointer(aPos2, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.enable(gl.BLEND);
+  } else {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(particleProg);
+    gl.uniformMatrix4fv(gl.getUniformLocation(particleProg, 'uMVP'), false, mvp);
+    gl.uniform1f(gl.getUniformLocation(particleProg, 'uTime'), time);
+    gl.uniform2f(gl.getUniformLocation(particleProg, 'uResolution'), canvas.width, canvas.height);
+    attr(particleProg, 'aPos',  posBuf,  3);
+    attr(particleProg, 'aVel',  velBuf,  3);
+    attr(particleProg, 'aAge',  ageBuf,  1);
+    attr(particleProg, 'aLife', lifeBuf, 1);
+    attr(particleProg, 'aSeed', seedBuf, 1);
+    gl.drawArrays(gl.POINTS, 0, count);
+  }
+}
+
+// ─── FPS counter ─────────────────────────────────────────────────────────────
+let fps = 0, fpsTime = 0, fpsCount = 0;
+
+// ─── Main Loop ────────────────────────────────────────────────────────────────
+let spawnTimer = 0;
+
+function loop(ts) {
+  requestAnimationFrame(loop);
+
+  const now = ts / 1000;
+  const frameDt = Math.min(now - fpsTime, 0.1);
+  fpsCount++;
+  if (now - fpsTime > 0.5) {
+    fps = Math.round(fpsCount / (now - fpsTime));
+    fpsTime = now; fpsCount = 0;
+    document.getElementById('fps').textContent    = fps;
+    document.getElementById('pcount').textContent = count;
+    document.getElementById('mode').textContent   = currentMode.toUpperCase();
+  }
+
+  time += dt;
+  if (autoSpin) camTheta += 0.003;
+
+  spawnTimer += dt;
+  if (spawnTimer > 0.03) {
+    spawnTimer = 0;
+    if (count < MAX - 400) spawnBatch();
+  }
+
+  updateParticles();
+  uploadBuffers();
+  render();
+}
+
+// ─── Controls ────────────────────────────────────────────────────────────────
+function setMode(m) {
+  currentMode = m;
+  count = 0; // reset
+}
+
+function toggleTrails() { trailsOn = !trailsOn; }
+
+function addBurst() {
+  const old = currentMode;
+  const saved = count;
+  currentMode = 'explosion';
+  for (let i = 0; i < 5; i++) spawnBatch();
+  currentMode = old;
+}
+
+// ─── Boot ────────────────────────────────────────────────────────────────────
+// Warm up with a batch
+for (let i = 0; i < 10; i++) spawnBatch();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
