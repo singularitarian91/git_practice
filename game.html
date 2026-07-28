@@ -11,7 +11,7 @@
     background: #05060d; overflow: hidden; font-family: monospace;
     color: #fff; user-select: none; -webkit-user-select: none;
   }
-  canvas { display: block; cursor: crosshair; }
+  canvas { display: block; cursor: crosshair; touch-action: none; }
 
   .hud {
     position: fixed; pointer-events: none; font-size: 12px;
@@ -38,6 +38,36 @@
   .pip.on { background: #ff3b6b; border-color: #ff3b6b; box-shadow: 0 0 10px #ff3b6b; }
   .pip.bomb { border-radius: 50%; width: 10px; height: 10px; }
   .pip.bomb.on { background: #ffd23b; border-color: #ffd23b; box-shadow: 0 0 10px #ffd23b; }
+
+  #boss-bar {
+    position: fixed; top: 22px; left: 50%; transform: translateX(-50%);
+    width: min(520px, 64vw); opacity: 0; transition: opacity 0.35s;
+    pointer-events: none;
+  }
+  #boss-bar .name {
+    font-size: 10px; letter-spacing: 6px; text-align: center;
+    margin-bottom: 6px; color: #ff3b6b; text-shadow: 0 0 12px #ff3b6b;
+  }
+  #boss-bar .track {
+    height: 7px; border: 1px solid rgba(255,59,107,0.45); background: rgba(0,0,0,0.45);
+  }
+  #boss-bar .fill {
+    height: 100%; width: 100%; background: #ff3b6b;
+    box-shadow: 0 0 14px #ff3b6b; transition: width 0.12s linear;
+  }
+
+  #touch-btns {
+    position: fixed; right: 20px; bottom: 20px; display: none; gap: 14px;
+  }
+  body.touch.in-game #touch-btns { display: flex; }
+  .tbtn {
+    width: 64px; height: 64px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.25); background: rgba(0,0,0,0.35);
+    color: rgba(255,255,255,0.5); font-size: 10px; letter-spacing: 2px;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tbtn.armed { border-color: #ffd23b; color: #ffd23b; box-shadow: 0 0 14px rgba(255,210,59,0.35); }
 
   .overlay {
     position: fixed; inset: 0; display: flex; flex-direction: column;
@@ -80,14 +110,28 @@
 <div class="hud" id="hud-combo"></div>
 <div id="wave-banner"></div>
 
+<div class="hud" id="boss-bar">
+  <div class="name">Monolith</div>
+  <div class="track"><div class="fill" id="boss-fill"></div></div>
+</div>
+
+<div id="touch-btns">
+  <div class="tbtn" id="btn-dash">DASH</div>
+  <div class="tbtn" id="btn-bomb">BOMB</div>
+</div>
+
 <div class="overlay" id="menu">
   <h1>Neon Drift</h1>
   <div class="sub">
     WASD / Arrows to fly &bull; Mouse to aim &bull; Hold click or Space to fire<br>
-    E or right-click drops a bomb &bull; P pauses &bull; M mutes
+    Shift to dash &bull; E or right-click drops a bomb &bull; P pauses &bull; M mutes<br>
+    Touch: left half to fly, right half to aim and fire
   </div>
   <button id="play-btn">Start Run</button>
-  <div class="sub">Survive the waves. Chain kills to raise the multiplier.</div>
+  <div class="sub">
+    Chain kills to raise the multiplier. Dash through what you can't outrun.<br>
+    Every fifth wave sends a Monolith.
+  </div>
 </div>
 
 <div class="overlay hidden" id="pause">
@@ -171,21 +215,29 @@ const Sound = {
   powerup()  { this.play(520, 0.16, 'triangle', 0.06, 1040); },
   hurt()     { this.play(320, 0.35, 'sawtooth', 0.08,   60); },
   wave()     { this.play(440, 0.3,  'triangle', 0.05,  880); },
-  bomb()     { this.play(70,  0.7,  'sawtooth', 0.09,   25); }
+  bomb()     { this.play(70,  0.7,  'sawtooth', 0.09,   25); },
+  dash()     { this.play(280, 0.16, 'triangle', 0.05,  740); },
+  deflect()  { this.play(900, 0.05, 'square',   0.02, 1400); }
 };
 
 // ----------------------------------------------------------------- input ---
 const keys = Object.create(null);
-const mouse = { x: 0, y: 0, down: false };
+const mouse = { x: W / 2, y: H / 2 - 180, down: false };
+
+// Virtual twin-stick: a floating stick on the left half, aim-and-fire on the right.
+const touch = { moveId: null, ox: 0, oy: 0, tx: 0, ty: 0, mx: 0, my: 0, aimId: null, ax: 0, ay: 0 };
+const STICK_MAX = 58;
 
 window.addEventListener('keydown', e => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
-  keys[e.key.toLowerCase()] = true;
+  const k = e.key.toLowerCase();
+  keys[k] = true;
 
-  if (e.key.toLowerCase() === 'p' && (state === 'playing' || state === 'paused')) togglePause();
-  if (e.key.toLowerCase() === 'm') toggleMute();
-  if (e.key.toLowerCase() === 'r' && state === 'dead') startGame();
-  if (e.key.toLowerCase() === 'e' && state === 'playing') useBomb();
+  if (k === 'p' && (state === 'playing' || state === 'paused')) togglePause();
+  if (k === 'm') toggleMute();
+  if (k === 'r' && state === 'dead') startGame();
+  if (k === 'e' && state === 'playing') useBomb();
+  if (k === 'shift' && !e.repeat && state === 'playing') dash();
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
@@ -193,22 +245,84 @@ cvs.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.client
 cvs.addEventListener('mousedown', e => {
   Sound.init();
   if (e.button === 2) { if (state === 'playing') useBomb(); return; }
+  if (e.button === 1) { if (state === 'playing') dash(); return; }
   mouse.down = true;
 });
 window.addEventListener('mouseup', () => { mouse.down = false; });
 cvs.addEventListener('contextmenu', e => e.preventDefault());
-window.addEventListener('blur', () => {
+
+function releaseInputs() {
   mouse.down = false;
+  touch.moveId = null; touch.aimId = null; touch.mx = 0; touch.my = 0;
   for (const k in keys) keys[k] = false;
+}
+window.addEventListener('blur', () => {
+  releaseInputs();
   if (state === 'playing') togglePause();
 });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { releaseInputs(); if (state === 'playing') togglePause(); }
+});
+
+if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+  document.body.classList.add('touch');
+}
+
+cvs.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch') return;
+  e.preventDefault();
+  document.body.classList.add('touch');
+  Sound.init();
+  if (e.clientX < W * 0.5 && touch.moveId === null) {
+    touch.moveId = e.pointerId;
+    touch.ox = touch.tx = e.clientX;
+    touch.oy = touch.ty = e.clientY;
+    touch.mx = touch.my = 0;
+  } else if (touch.aimId === null) {
+    touch.aimId = e.pointerId;
+    touch.ax = e.clientX; touch.ay = e.clientY;
+  }
+});
+cvs.addEventListener('pointermove', e => {
+  if (e.pointerType !== 'touch') return;
+  if (e.pointerId === touch.moveId) {
+    touch.tx = e.clientX; touch.ty = e.clientY;
+    let dx = e.clientX - touch.ox, dy = e.clientY - touch.oy;
+    const d = Math.hypot(dx, dy);
+    // Drag the stick origin along so the knob never pins to the rim.
+    if (d > STICK_MAX) {
+      touch.ox += (dx / d) * (d - STICK_MAX);
+      touch.oy += (dy / d) * (d - STICK_MAX);
+      dx = (dx / d) * STICK_MAX; dy = (dy / d) * STICK_MAX;
+    }
+    touch.mx = dx / STICK_MAX; touch.my = dy / STICK_MAX;
+  } else if (e.pointerId === touch.aimId) {
+    touch.ax = e.clientX; touch.ay = e.clientY;
+  }
+});
+function endPointer(e) {
+  if (e.pointerId === touch.moveId) { touch.moveId = null; touch.mx = touch.my = 0; }
+  if (e.pointerId === touch.aimId) touch.aimId = null;
+}
+cvs.addEventListener('pointerup', endPointer);
+cvs.addEventListener('pointercancel', endPointer);
+
+function bindTouchButton(id, fn) {
+  const el = document.getElementById(id);
+  el.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Sound.init(); fn(); });
+}
+bindTouchButton('btn-dash', () => { if (state === 'playing') dash(); });
+bindTouchButton('btn-bomb', () => { if (state === 'playing') useBomb(); });
 
 // ------------------------------------------------------------ enemy types --
 const TYPES = {
   drifter: { r: 13, hp: 1, speed: 68,  score: 100, cost: 1, color: '#ff3ba7', unlock: 1 },
   seeker:  { r: 10, hp: 1, speed: 190, score: 150, cost: 2, color: '#ffd23b', unlock: 2 },
   orbiter: { r: 15, hp: 3, speed: 120, score: 260, cost: 3, color: '#3bffd2', unlock: 4 },
-  bruiser: { r: 27, hp: 7, speed: 46,  score: 450, cost: 5, color: '#8b5bff', unlock: 6 }
+  bruiser: { r: 27, hp: 7, speed: 46,  score: 450, cost: 5, color: '#8b5bff', unlock: 6 },
+  // Boss-wave only — never rolled into a normal wave's spawn budget.
+  node:    { r: 12, hp: 4, speed: 0,   score: 250,  cost: 0, color: '#ff8b3b', special: true },
+  boss:    { r: 54, hp: 40, speed: 0,  score: 4000, cost: 0, color: '#ff3b6b', special: true }
 };
 
 const POWERS = {
@@ -222,9 +336,11 @@ const POWERS = {
 // ------------------------------------------------------------- game state --
 const MAX_HP = 4;
 let state = 'menu';           // menu | playing | paused | dead
-let player, bullets, foes, foeShots, parts, drops, shocks;
+let player, bullets, foes, foeShots, parts, drops, shocks, ghosts, pops;
 let score, best, wave, waveTimer, spawnBudget, spawnTimer, betweenWaves;
-let combo, comboTimer, bestCombo, shake, timeScale, gridPhase;
+let combo, comboTimer, bestCombo, shake, timeScale, gridPhase, freeze;
+
+const DASH_SPEED = 1180, DASH_TIME = 0.18, DASH_COOLDOWN = 1.1;
 
 best = Number(localStorage.getItem('neondrift.best') || 0);
 document.getElementById('best').textContent = best;
@@ -233,7 +349,7 @@ function resetPlayer() {
   player = {
     x: W / 2, y: H / 2, vx: 0, vy: 0, r: 13, angle: -Math.PI / 2,
     hp: MAX_HP, bombs: 2, invuln: 1.5, fireT: 0, thrust: 0,
-    rapid: 0, spread: 0, shield: 0
+    rapid: 0, spread: 0, shield: 0, dashing: 0, dashCd: 0
   };
 }
 
@@ -241,10 +357,13 @@ function startGame() {
   Sound.init();
   resetPlayer();
   bullets = []; foes = []; foeShots = []; parts = []; drops = []; shocks = [];
+  ghosts = []; pops = [];
   score = 0; wave = 0; combo = 0; comboTimer = 0; bestCombo = 1;
-  shake = 0; timeScale = 1; gridPhase = 0;
+  shake = 0; timeScale = 1; gridPhase = 0; freeze = 0;
   spawnBudget = 0; spawnTimer = 0; betweenWaves = 1.2; waveTimer = 0;
   state = 'playing';
+  bossPctShown = -1;
+  document.getElementById('boss-bar').style.opacity = '0';
   document.body.classList.add('in-game');
   hide('menu'); hide('pause'); hide('gameover');
   syncHud();
@@ -263,6 +382,7 @@ function toggleMute() {
 function endGame() {
   state = 'dead';
   document.body.classList.remove('in-game');
+  document.getElementById('boss-bar').style.opacity = '0';
   if (score > best) {
     best = score;
     localStorage.setItem('neondrift.best', String(best));
@@ -294,7 +414,42 @@ function shockwave(x, y, color, max) {
   shocks.push({ x, y, r: 4, max, color, life: 1 });
 }
 
+function popText(x, y, text, color, size) {
+  // Jitter so simultaneous kills don't stack into unreadable text.
+  pops.push({
+    x: x + rand(-14, 14), y: y + rand(-6, 6), text, color,
+    size: size || 15, life: 0.95, vy: -46
+  });
+}
+
 // ---------------------------------------------------------------- weapons --
+// Current movement intent, from the keyboard or the virtual stick.
+function moveInput() {
+  if (touch.moveId !== null) {
+    const m = Math.hypot(touch.mx, touch.my);
+    return m > 1 ? { x: touch.mx / m, y: touch.my / m } : { x: touch.mx, y: touch.my };
+  }
+  const x = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
+  const y = (keys['s'] || keys['arrowdown'] ? 1 : 0) - (keys['w'] || keys['arrowup'] ? 1 : 0);
+  const m = Math.hypot(x, y);
+  return m > 1 ? { x: x / m, y: y / m } : { x, y };
+}
+
+// Burst of speed with brief invulnerability — the answer to being surrounded
+// when you have no bomb left.
+function dash() {
+  if (state !== 'playing' || player.hp <= 0 || player.dashCd > 0) return;
+  const mv = moveInput();
+  const a = (mv.x || mv.y) ? Math.atan2(mv.y, mv.x) : player.angle;
+  player.vx = Math.cos(a) * DASH_SPEED;
+  player.vy = Math.sin(a) * DASH_SPEED;
+  player.dashing = DASH_TIME;
+  player.dashCd = DASH_COOLDOWN;
+  player.invuln = Math.max(player.invuln, DASH_TIME + 0.12);
+  shockwave(player.x, player.y, '#00ffe1', 80);
+  Sound.dash();
+}
+
 function fire() {
   const rate = player.rapid > 0 ? 0.06 : 0.13;
   if (player.fireT > 0) return;
@@ -315,12 +470,24 @@ function fire() {
 }
 
 function useBomb() {
-  if (player.bombs <= 0) return;
+  if (player.bombs <= 0 || player.hp <= 0) return;
   player.bombs--;
   shake = Math.max(shake, 22);
   shockwave(player.x, player.y, '#ffd23b', Math.max(W, H));
   Sound.bomb();
-  for (let i = foes.length - 1; i >= 0; i--) killFoe(foes[i], i, false);
+  for (let i = foes.length - 1; i >= 0; i--) {
+    const e = foes[i];
+    // A bomb must not one-shot the Monolith; it chips the exposed core instead.
+    if (e.type === 'boss') {
+      if (!e.shielded) {
+        e.hp -= 12;
+        e.flash = 1;
+        if (e.hp <= 0) killFoe(e, i, true);
+      }
+      continue;
+    }
+    killFoe(e, i, false);
+  }
   foeShots.length = 0;
   syncHud();
 }
@@ -330,13 +497,44 @@ function waveBudget(n) { return Math.floor(5 + n * 2.6); }
 
 function beginWave() {
   wave++;
-  spawnBudget = waveBudget(wave);
   spawnTimer = 0;
   waveTimer = 0;
-  banner('Wave ' + wave);
-  Sound.wave();
-  if (wave % 5 === 0) { player.bombs = Math.min(3, player.bombs + 1); }
+  if (wave % 5 === 0) {
+    // Boss wave: no trickle spawns, just the Monolith and its shield nodes.
+    player.bombs = Math.min(3, player.bombs + 1);
+    spawnBudget = 0;
+    spawnBoss();
+  } else {
+    spawnBudget = waveBudget(wave);
+    banner('Wave ' + wave);
+    Sound.wave();
+  }
   syncHud();
+}
+
+function spawnBoss() {
+  const tier = Math.floor(wave / 5);
+  const hp = 34 + tier * 16;
+  const boss = {
+    type: 'boss', x: W / 2, y: -140, vx: 0, vy: 0, r: TYPES.boss.r,
+    hp, maxHp: hp, color: TYPES.boss.color, angle: 0, spin: 0, flash: 0,
+    born: 0.8, wobble: rand(0, TAU), shielded: true,
+    radialT: 3.2, aimT: 2.2, spiralT: 0, spiralA: 0
+  };
+  foes.push(boss);
+
+  const n = 3 + Math.min(3, tier - 1);
+  for (let i = 0; i < n; i++) {
+    foes.push({
+      type: 'node', parent: boss, orbit: i / n * TAU, orbitR: 104,
+      x: boss.x, y: boss.y, vx: 0, vy: 0, r: TYPES.node.r,
+      hp: 4 + tier, color: TYPES.node.color, angle: rand(0, TAU), spin: 2.4,
+      flash: 0, born: 0.8, shootT: rand(1.6, 3.2)
+    });
+  }
+  banner('Monolith');
+  Sound.big();
+  shake = Math.max(shake, 10);
 }
 
 function banner(text) {
@@ -348,7 +546,8 @@ function banner(text) {
 }
 
 function rollType() {
-  const avail = Object.keys(TYPES).filter(k => wave >= TYPES[k].unlock && TYPES[k].cost <= spawnBudget);
+  const avail = Object.keys(TYPES).filter(k =>
+    !TYPES[k].special && wave >= TYPES[k].unlock && TYPES[k].cost <= spawnBudget);
   if (!avail.length) return null;
   // Bias toward tougher enemies as waves climb.
   const weighted = [];
@@ -417,6 +616,67 @@ function updateFoe(e, dt) {
     e.vx = nx * (t.speed + wave);
     e.vy = ny * (t.speed + wave);
     e.angle += dt * 0.6;
+  } else if (e.type === 'boss') {
+    // Sweeps the upper band of the arena; the fight is about the bullets, not
+    // about the boss running you down.
+    e.wobble += dt * 0.55;
+    const tx = W / 2 + Math.cos(e.wobble) * (W * 0.26);
+    const ty = H * 0.27;
+    e.vx = (tx - e.x) * 1.4;
+    e.vy = (ty - e.y) * 1.4;
+    e.angle += dt * 0.35;
+    e.shielded = foes.some(f => f.type === 'node' && f.parent === e);
+
+    if (e.born <= 0) {
+      const enraged = e.hp < e.maxHp * 0.5;
+
+      e.radialT -= dt;
+      if (e.radialT <= 0) {
+        e.radialT = enraged ? 2.1 : 3.1;
+        const n = enraged ? 18 : 12;
+        for (let i = 0; i < n; i++) {
+          const a = e.angle + i / n * TAU;
+          foeShots.push({ x: e.x, y: e.y, vx: Math.cos(a) * 195, vy: Math.sin(a) * 195, r: 6, life: 7 });
+        }
+        Sound.bomb();
+        shake = Math.max(shake, 6);
+      }
+
+      e.aimT -= dt;
+      if (e.aimT <= 0) {
+        e.aimT = enraged ? 1.15 : 1.8;
+        const base = Math.atan2(dy, dx);
+        for (let i = -1; i <= 1; i++) {
+          const a = base + i * 0.2;
+          foeShots.push({ x: e.x, y: e.y, vx: Math.cos(a) * 305, vy: Math.sin(a) * 305, r: 5, life: 7 });
+        }
+        Sound.hit();
+      }
+
+      if (enraged) {
+        e.spiralT -= dt;
+        if (e.spiralT <= 0) {
+          e.spiralT = 0.11;
+          e.spiralA += 0.52;
+          for (let i = 0; i < 2; i++) {
+            const a = e.spiralA + i * Math.PI;
+            foeShots.push({ x: e.x, y: e.y, vx: Math.cos(a) * 225, vy: Math.sin(a) * 225, r: 5, life: 7 });
+          }
+        }
+      }
+    }
+  } else if (e.type === 'node') {
+    const p = e.parent;
+    e.orbit += dt * 0.85;
+    const tx = p.x + Math.cos(e.orbit) * e.orbitR;
+    const ty = p.y + Math.sin(e.orbit) * e.orbitR;
+    e.vx = (tx - e.x) * 9;
+    e.vy = (ty - e.y) * 9;
+    e.shootT -= dt;
+    if (e.shootT <= 0 && e.born <= 0) {
+      e.shootT = rand(2.3, 3.6);
+      foeShots.push({ x: e.x, y: e.y, vx: nx * 265, vy: ny * 265, r: 5, life: 6 });
+    }
   }
 
   e.x += e.vx * dt;
@@ -426,19 +686,33 @@ function updateFoe(e, dt) {
 function killFoe(e, idx, credit) {
   const t = TYPES[e.type];
   foes.splice(idx, 1);
-  burst(e.x, e.y, e.color, e.type === 'bruiser' ? 46 : 20, e.type === 'bruiser' ? 340 : 220, 0.7);
-  shockwave(e.x, e.y, e.color, e.r * 6);
+  e.dead = true;
 
-  if (e.type === 'bruiser') {
+  if (e.type === 'boss') {
+    burst(e.x, e.y, e.color, 120, 520, 1.3);
+    burst(e.x, e.y, '#ffffff', 40, 300, 1.0);
+    shockwave(e.x, e.y, e.color, Math.max(W, H) * 0.9);
+    shockwave(e.x, e.y, '#ffffff', 320);
+    Sound.big();
+    shake = Math.max(shake, 30);
+    freeze = Math.max(freeze, 0.4);
+    dropPower(e.x - 40, e.y);
+    dropPower(e.x + 40, e.y);
+  } else if (e.type === 'bruiser') {
+    burst(e.x, e.y, e.color, 46, 340, 0.7);
+    shockwave(e.x, e.y, e.color, e.r * 6);
     Sound.big();
     shake = Math.max(shake, 12);
+    freeze = Math.max(freeze, 0.06);
     for (let i = 0; i < 3; i++) {
       const a = rand(0, TAU);
       spawnFoe('drifter', e.x + Math.cos(a) * 34, e.y + Math.sin(a) * 34);
     }
   } else {
+    burst(e.x, e.y, e.color, 20, 220, 0.7);
+    shockwave(e.x, e.y, e.color, e.r * 6);
     Sound.explode();
-    shake = Math.max(shake, 4);
+    shake = Math.max(shake, e.type === 'node' ? 8 : 4);
   }
 
   if (credit) {
@@ -446,10 +720,15 @@ function killFoe(e, idx, credit) {
     comboTimer = 2.3;
     const mult = comboMult();
     if (mult > bestCombo) bestCombo = mult;
-    score += t.score * mult;
+    const points = t.score * mult;
+    score += points;
+    popText(e.x, e.y - e.r, '+' + points,
+      mult >= 6 ? '#ff3ba7' : mult >= 3 ? '#ffd23b' : '#eafcff',
+      e.type === 'boss' ? 30 : 15);
     syncHud();
   }
 
+  if (e.type === 'boss' || e.type === 'node') return;
   const chance = e.type === 'bruiser' ? 1 : e.type === 'orbiter' ? 0.22 : 0.07;
   if (Math.random() < chance) dropPower(e.x, e.y);
 }
@@ -518,17 +797,25 @@ function update(dt) {
   timeScale += (1 - timeScale) * dt * 2;
 
   // --- player movement
-  const ax = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
-  const ay = (keys['s'] || keys['arrowdown'] ? 1 : 0) - (keys['w'] || keys['arrowup'] ? 1 : 0);
-  const mag = Math.hypot(ax, ay) || 1;
-  const accel = 2300;
-  player.vx += (ax / mag) * accel * dt;
-  player.vy += (ay / mag) * accel * dt;
-  player.thrust = (ax || ay) ? Math.min(1, player.thrust + dt * 6) : Math.max(0, player.thrust - dt * 6);
+  player.dashing = Math.max(0, player.dashing - dt);
+  player.dashCd = Math.max(0, player.dashCd - dt);
 
-  const drag = Math.pow(0.0016, dt);
-  player.vx *= drag;
-  player.vy *= drag;
+  const mv = moveInput();
+  if (player.dashing > 0) {
+    // Coast through the dash: no steering, almost no drag, leave afterimages.
+    player.vx *= Math.pow(0.42, dt);
+    player.vy *= Math.pow(0.42, dt);
+    player.thrust = 1;
+    ghosts.push({ x: player.x, y: player.y, angle: player.angle, life: 0.26 });
+  } else {
+    const accel = 2300;
+    player.vx += mv.x * accel * dt;
+    player.vy += mv.y * accel * dt;
+    player.thrust = (mv.x || mv.y) ? Math.min(1, player.thrust + dt * 6) : Math.max(0, player.thrust - dt * 6);
+    const drag = Math.pow(0.0016, dt);
+    player.vx *= drag;
+    player.vy *= drag;
+  }
 
   player.x += player.vx * dt;
   player.y += player.vy * dt;
@@ -539,13 +826,15 @@ function update(dt) {
   if (player.y < m) { player.y = m; player.vy *= -0.4; }
   if (player.y > H - m) { player.y = H - m; player.vy *= -0.4; }
 
-  player.angle = lerpAngle(player.angle, Math.atan2(mouse.y - player.y, mouse.x - player.x), 1 - Math.pow(0.0001, dt));
+  const aimX = touch.aimId !== null ? touch.ax : mouse.x;
+  const aimY = touch.aimId !== null ? touch.ay : mouse.y;
+  player.angle = lerpAngle(player.angle, Math.atan2(aimY - player.y, aimX - player.x), 1 - Math.pow(0.0001, dt));
 
   player.invuln = Math.max(0, player.invuln - dt);
   player.rapid = Math.max(0, player.rapid - dt);
   player.spread = Math.max(0, player.spread - dt);
   player.fireT = Math.max(0, player.fireT - dt);
-  if (mouse.down || keys[' ']) fire();
+  if (player.hp > 0 && (mouse.down || keys[' '] || touch.aimId !== null)) fire();
 
   // --- combo decay
   if (comboTimer > 0) {
@@ -573,7 +862,9 @@ function update(dt) {
       }
     } else if (foes.length === 0) {
       betweenWaves = 1.6;
-      score += 50 * wave;
+      const bonus = 50 * wave;
+      score += bonus;
+      popText(W / 2, H / 2 + 60, 'WAVE CLEAR  +' + bonus, '#00ffe1', 18);
       syncHud();
     }
   }
@@ -590,6 +881,12 @@ function update(dt) {
       const e = foes[j];
       if (dist2(b.x, b.y, e.x, e.y) < (b.r + e.r) * (b.r + e.r)) {
         bullets.splice(i, 1);
+        // The core is untouchable until every shield node is down.
+        if (e.type === 'boss' && e.shielded) {
+          burst(b.x, b.y, '#ff8b3b', 4, 110, 0.25);
+          Sound.deflect();
+          break;
+        }
         e.hp--;
         e.flash = 1;
         e.vx += b.vx * 0.04; e.vy += b.vy * 0.04;
@@ -622,6 +919,11 @@ function update(dt) {
       damagePlayer(1);
       if (e.type === 'drifter' || e.type === 'seeker') {
         killFoe(e, i, false);
+      } else if (e.type === 'boss' || e.type === 'node') {
+        // Ram the Monolith and you bounce off it, not the other way round.
+        const a = Math.atan2(player.y - e.y, player.x - e.x);
+        player.vx += Math.cos(a) * 540;
+        player.vy += Math.sin(a) * 540;
       } else {
         e.hp--;
         e.flash = 1;
@@ -631,6 +933,17 @@ function update(dt) {
       }
     }
   }
+
+  // Safety net: a node whose boss is gone has nothing to orbit.
+  for (let i = foes.length - 1; i >= 0; i--) {
+    const e = foes[i];
+    if (e.type === 'node' && (!e.parent || e.parent.dead)) {
+      burst(e.x, e.y, e.color, 12, 180, 0.5);
+      foes.splice(i, 1);
+    }
+  }
+
+  updateBossBar();
 
   // --- drops
   for (let i = drops.length - 1; i >= 0; i--) {
@@ -661,6 +974,33 @@ function updateEffects(dt) {
     s.r += (s.max - s.r) * dt * 6;
     s.life -= dt * 1.9;
     if (s.life <= 0) shocks.splice(i, 1);
+  }
+  for (let i = ghosts.length - 1; i >= 0; i--) {
+    ghosts[i].life -= dt;
+    if (ghosts[i].life <= 0) ghosts.splice(i, 1);
+  }
+  for (let i = pops.length - 1; i >= 0; i--) {
+    const p = pops[i];
+    p.life -= dt;
+    if (p.life <= 0) { pops.splice(i, 1); continue; }
+    p.y += p.vy * dt;
+    p.vy *= Math.pow(0.2, dt);
+  }
+}
+
+let bossPctShown = -1;
+function updateBossBar() {
+  const bar = document.getElementById('boss-bar');
+  const boss = foes.find(f => f.type === 'boss');
+  if (!boss) {
+    if (bossPctShown !== -1) { bar.style.opacity = '0'; bossPctShown = -1; }
+    return;
+  }
+  const pct = Math.round(clamp(boss.hp / boss.maxHp, 0, 1) * 100);
+  if (pct !== bossPctShown) {
+    if (bossPctShown === -1) bar.style.opacity = '1';
+    document.getElementById('boss-fill').style.width = pct + '%';
+    bossPctShown = pct;
   }
 }
 
@@ -707,7 +1047,41 @@ function poly(x, y, r, sides, angle) {
   ctx.closePath();
 }
 
+function shipPath() {
+  ctx.beginPath();
+  ctx.moveTo(17, 0);
+  ctx.lineTo(-11, -11);
+  ctx.lineTo(-5, 0);
+  ctx.lineTo(-11, 11);
+  ctx.closePath();
+}
+
+function drawGhosts() {
+  for (const g of ghosts) {
+    ctx.save();
+    ctx.translate(g.x, g.y);
+    ctx.rotate(g.angle);
+    ctx.globalAlpha = (g.life / 0.26) * 0.35;
+    shipPath();
+    ctx.strokeStyle = '#00ffe1';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawPlayer() {
+  // Dash cooldown reads as a closing ring under the ship.
+  if (player.dashCd > 0) {
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.r + 15, -Math.PI / 2,
+      -Math.PI / 2 + TAU * (1 - player.dashCd / DASH_COOLDOWN));
+    ctx.strokeStyle = 'rgba(0,255,225,0.35)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   const blink = player.invuln > 0 && Math.floor(player.invuln * 14) % 2 === 0;
   if (blink) return;
 
@@ -729,12 +1103,7 @@ function drawPlayer() {
     ctx.stroke();
   }
 
-  ctx.beginPath();
-  ctx.moveTo(17, 0);
-  ctx.lineTo(-11, -11);
-  ctx.lineTo(-5, 0);
-  ctx.lineTo(-11, 11);
-  ctx.closePath();
+  shipPath();
   glowPath('#00ffe1', 20, 'rgba(0,255,225,0.14)');
   ctx.restore();
 
@@ -756,7 +1125,9 @@ function drawPlayer() {
 function drawFoe(e) {
   const color = e.flash > 0 ? '#ffffff' : e.color;
   ctx.save();
-  ctx.globalAlpha = e.born > 0 ? 1 - e.born * 1.6 : 1;
+  // Clamped: canvas ignores an out-of-range globalAlpha, which would leave the
+  // longer boss/node spawn fade drawing at full opacity.
+  ctx.globalAlpha = e.born > 0 ? clamp(1 - e.born * 1.6, 0.08, 1) : 1;
 
   if (e.type === 'drifter') {
     ctx.save();
@@ -790,6 +1161,34 @@ function drawFoe(e) {
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineWidth = 2;
     ctx.stroke();
+  } else if (e.type === 'node') {
+    if (e.parent) {
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y);
+      ctx.lineTo(e.parent.x, e.parent.y);
+      ctx.strokeStyle = 'rgba(255,139,59,0.16)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    poly(e.x, e.y, e.r, 3, e.angle);
+    glowPath(color, 16, 'rgba(255,139,59,0.16)');
+  } else if (e.type === 'boss') {
+    poly(e.x, e.y, e.r, 8, e.angle);
+    glowPath(color, 30, 'rgba(255,59,107,0.10)');
+    poly(e.x, e.y, e.r * 0.62, 3, -e.angle * 1.5);
+    glowPath(color, 18);
+    poly(e.x, e.y, e.r * 0.28, 3, e.angle * 2.4);
+    glowPath(e.hp < e.maxHp * 0.5 ? '#ffffff' : color, 14);
+    if (e.shielded) {
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r + 30, 0, TAU);
+      ctx.strokeStyle = 'rgba(255,139,59,0.45)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([9, 11]);
+      ctx.lineDashOffset = -gridPhase * 3;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
   ctx.restore();
 }
@@ -869,11 +1268,34 @@ function render() {
     }
     for (const p of drops) drawDrop(p);
     for (const e of foes) drawFoe(e);
+    drawGhosts();
     if (player.hp > 0) drawPlayer();
+
+    ctx.textAlign = 'center';
+    for (const p of pops) {
+      ctx.globalAlpha = clamp(p.life * 1.6, 0, 1);
+      ctx.fillStyle = p.color;
+      ctx.font = p.size + 'px monospace';
+      ctx.fillText(p.text, p.x, p.y);
+    }
+    ctx.globalAlpha = 1;
+
+    if (touch.moveId !== null) drawStick();
   }
 
   ctx.globalCompositeOperation = 'source-over';
   ctx.restore();
+}
+
+function drawStick() {
+  ctx.strokeStyle = 'rgba(0,255,225,0.30)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(touch.ox, touch.oy, STICK_MAX, 0, TAU);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(touch.ox + touch.mx * STICK_MAX, touch.oy + touch.my * STICK_MAX, 20, 0, TAU);
+  ctx.stroke();
 }
 
 // ------------------------------------------------------------------- hud ---
@@ -902,22 +1324,35 @@ function syncHud() {
 
 // ------------------------------------------------------------------ loop ---
 let last = performance.now();
+let dashArmed = true;
 function frame(now) {
   let dt = (now - last) / 1000;
   last = now;
   dt = Math.min(dt, 0.05);
 
-  update(dt * timeScale);
-  updateEffects(dt * timeScale);
+  // Hit-stop: a beat of near-frozen time so heavy kills land.
+  let scale = timeScale;
+  if (freeze > 0) { freeze = Math.max(0, freeze - dt); scale *= 0.08; }
+
+  update(dt * scale);
+  updateEffects(dt * scale);
   render();
+
+  const ready = state === 'playing' && player.dashCd <= 0;
+  if (ready !== dashArmed) {
+    dashArmed = ready;
+    document.getElementById('btn-dash').classList.toggle('armed', ready);
+  }
 
   requestAnimationFrame(frame);
 }
 
 resetPlayer();
 bullets = []; foes = []; foeShots = []; parts = []; drops = []; shocks = [];
+ghosts = []; pops = [];
 score = 0; wave = 1; combo = 0; comboTimer = 0; bestCombo = 1;
-shake = 0; timeScale = 1; gridPhase = 0; betweenWaves = 0; spawnBudget = 0; spawnTimer = 0; waveTimer = 0;
+shake = 0; timeScale = 1; gridPhase = 0; freeze = 0;
+betweenWaves = 0; spawnBudget = 0; spawnTimer = 0; waveTimer = 0;
 syncHud();
 requestAnimationFrame(frame);
 </script>
