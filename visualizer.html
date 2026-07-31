@@ -3,669 +3,1312 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Psychedelic Particle Visualizer</title>
+<title>Psychedelic Particle Visualizer &mdash; Audio Reactive</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #000; overflow: hidden; font-family: monospace; }
-  canvas { display: block; }
-  #ui {
-    position: fixed; top: 20px; left: 20px; color: #fff;
-    font-size: 12px; opacity: 0.7; pointer-events: none;
-    text-shadow: 0 0 10px #0ff;
+  html, body { height: 100%; background: #000; overflow: hidden;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  canvas { display: block; position: fixed; inset: 0; }
+
+  .panel {
+    position: fixed; color: #fff; font-size: 11px; letter-spacing: 0.5px;
+    z-index: 10; transition: opacity 0.4s;
   }
+  #hud { top: 18px; left: 18px; opacity: 0.75; pointer-events: none; line-height: 1.7; }
+  #hud .k { color: rgba(255,255,255,0.4); }
+  #hud .v { color: #6ff; text-shadow: 0 0 8px rgba(0,255,255,0.5); }
+
+  #hint { top: 18px; right: 18px; text-align: right; opacity: 0.4;
+    line-height: 1.7; pointer-events: none; }
+
   #controls {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;
+    max-width: 94vw;
   }
   button {
-    background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.3);
-    color: #fff; padding: 8px 16px; cursor: pointer; border-radius: 20px;
-    font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
-    transition: all 0.3s; backdrop-filter: blur(5px);
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.18);
+    color: rgba(255,255,255,0.75); padding: 7px 13px; cursor: pointer;
+    border-radius: 100px; font: inherit; font-size: 10px; letter-spacing: 1px;
+    text-transform: uppercase; transition: all 0.25s;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
-  button:hover { border-color: #0ff; color: #0ff; box-shadow: 0 0 15px rgba(0,255,255,0.4); }
-  #info {
-    position: fixed; top: 20px; right: 20px; color: rgba(255,255,255,0.5);
-    font-size: 11px; text-align: right;
+  button:hover { border-color: rgba(0,255,255,0.7); color: #9ff;
+    box-shadow: 0 0 18px rgba(0,255,255,0.25); }
+  button.on { border-color: #0ff; color: #0ff; background: rgba(0,255,255,0.10);
+    box-shadow: 0 0 18px rgba(0,255,255,0.3); }
+
+  /* ── Audio meter ─────────────────────────────────── */
+  #meter {
+    bottom: 16px; left: 18px; display: flex; align-items: flex-end;
+    gap: 2px; height: 44px; opacity: 0.55;
   }
+  #meter div { width: 3px; background: linear-gradient(#0ff, #f0f); border-radius: 2px;
+    height: 2px; transition: height 0.05s linear; }
+
+  /* ── Start overlay ───────────────────────────────── */
+  #gate {
+    position: fixed; inset: 0; z-index: 100; display: flex;
+    flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #10021f 0%, #000 70%);
+    color: #fff; text-align: center; padding: 24px; gap: 22px;
+  }
+  #gate h1 { font-size: 26px; font-weight: 400; letter-spacing: 6px;
+    text-transform: uppercase;
+    background: linear-gradient(90deg,#0ff,#f0f,#ff0,#0ff);
+    background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: shift 6s linear infinite; }
+  @keyframes shift { to { background-position: 300% 0; } }
+  #gate p { font-size: 12px; line-height: 1.9; color: rgba(255,255,255,0.55);
+    max-width: 520px; }
+  #gate .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  #gate button { padding: 13px 24px; font-size: 11px; }
+  #gate .primary { border-color: #0ff; color: #0ff; background: rgba(0,255,255,0.08); }
+  #gate .note { font-size: 10px; color: rgba(255,255,255,0.3); max-width: 460px;
+    line-height: 1.8; }
+  #err { color: #f66; font-size: 11px; min-height: 16px; }
+  .hidden { display: none !important; }
+  .faded { opacity: 0 !important; }
 </style>
 </head>
 <body>
-<div id="ui">
-  <div>PARTICLES: <span id="pcount">0</span></div>
-  <div>FPS: <span id="fps">0</span></div>
-  <div>MODE: <span id="mode">VORTEX</span></div>
-</div>
-<div id="info">
-  DRAG to rotate &bull; SCROLL to zoom<br>
-  Click for attractor
-</div>
-<div id="controls">
-  <button onclick="setMode('vortex')">Vortex</button>
-  <button onclick="setMode('explosion')">Explosion</button>
-  <button onclick="setMode('nebula')">Nebula</button>
-  <button onclick="setMode('dna')">DNA</button>
-  <button onclick="setMode('chaos')">Chaos</button>
-  <button onclick="toggleTrails()">Trails</button>
-  <button onclick="addBurst()">Burst</button>
-</div>
+
 <canvas id="c"></canvas>
 
+<div id="hud" class="panel">
+  <div><span class="k">particles</span> <span class="v" id="s-count">0</span></div>
+  <div><span class="k">fps</span> <span class="v" id="s-fps">0</span></div>
+  <div><span class="k">mode</span> <span class="v" id="s-mode">vortex</span></div>
+  <div><span class="k">audio</span> <span class="v" id="s-audio">idle</span></div>
+  <div><span class="k">bpm</span> <span class="v" id="s-bpm">--</span></div>
+</div>
+
+<div id="hint" class="panel">
+  drag &middot; orbit<br>
+  scroll &middot; zoom<br>
+  click &middot; attractor<br>
+  <span style="opacity:.6">[space] burst &nbsp; [h] hide ui</span>
+</div>
+
+<div id="meter" class="panel"></div>
+
+<div id="controls" class="panel">
+  <button data-mode="vortex"    class="on">Vortex</button>
+  <button data-mode="nebula">Nebula</button>
+  <button data-mode="tunnel">Tunnel</button>
+  <button data-mode="spectrum">Spectrum</button>
+  <button data-mode="dna">Helix</button>
+  <button data-mode="chaos">Chaos</button>
+  <button data-mode="supernova">Supernova</button>
+  <span style="width:14px"></span>
+  <button id="b-trails" class="on">Trails</button>
+  <button id="b-bloom"  class="on">Bloom</button>
+  <button id="b-ring"   class="on">Ring</button>
+  <button id="b-spin"   class="on">Autospin</button>
+  <button id="b-audio">Audio&hellip;</button>
+</div>
+
+<div id="gate">
+  <h1>Particle Field</h1>
+  <p>A psychedelic 3D particle system that dances to whatever your computer is playing.</p>
+  <div class="row">
+    <button class="primary" id="g-system">Use System / Tab Audio</button>
+    <button id="g-mic">Use Microphone</button>
+    <button id="g-none">No Audio</button>
+  </div>
+  <div id="err"></div>
+  <div class="note">
+    <b>System audio</b> (Chrome / Edge, best quality): pick a <b>tab</b> &mdash; e.g. Spotify
+    or YouTube &mdash; and tick <b>&ldquo;Also share tab audio&rdquo;</b>. To capture
+    <i>everything</i>, choose <b>Entire Screen</b> + <b>share system audio</b>
+    (Windows / ChromeOS only).<br><br>
+    <b>Microphone</b> works everywhere &mdash; it simply listens to your speakers.
+  </div>
+</div>
+
 <script>
+"use strict";
+
+/* ══════════════════════════════════════════════════════════════════════════
+   AUDIO ENGINE
+   Captures system/tab audio (getDisplayMedia) or microphone (getUserMedia),
+   runs an FFT, and exposes normalized frequency bands + beat detection.
+   ══════════════════════════════════════════════════════════════════════════ */
+const Audio = {
+  ctx: null, analyser: null, stream: null, source: null,
+  freq: null, wave: null, active: false, label: 'idle',
+
+  // Smoothed, normalized 0..1 outputs consumed by the sim & shaders.
+  sub: 0, bass: 0, lowMid: 0, mid: 0, highMid: 0, treble: 0,
+  energy: 0, centroid: 0.5, flux: 0,
+
+  // Beat state
+  beat: 0,                       // decaying 1 -> 0 impulse
+  beatFired: false,              // true only on the frame a beat lands
+  bpm: 0,
+  _hist: new Float32Array(50), _hi: 0, _lastBeat: 0, _intervals: [],
+  _prevSpectrum: null,
+
+  // 12 coarse bands for the ring / spectrum mode
+  bands: new Float32Array(12),
+
+  async start(kind) {
+    const constraints = {
+      echoCancellation: false, noiseSuppression: false,
+      autoGainControl: false, channelCount: 2,
+    };
+
+    let stream;
+    if (kind === 'system') {
+      if (!navigator.mediaDevices?.getDisplayMedia)
+        throw new Error('getDisplayMedia unsupported — try Chrome or Edge.');
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { width: 1, height: 1, frameRate: 1 },
+        audio: constraints,
+      });
+      if (stream.getAudioTracks().length === 0) {
+        stream.getTracks().forEach(t => t.stop());
+        throw new Error('No audio track shared. Re-run and tick "share tab audio".');
+      }
+    } else {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    }
+
+    this.stop();
+    this.stream = stream;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await this.ctx.resume();
+
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 2048;
+    this.analyser.smoothingTimeConstant = 0.62;
+    this.analyser.minDecibels = -95;
+    this.analyser.maxDecibels = -12;
+
+    this.source = this.ctx.createMediaStreamSource(stream);
+    this.source.connect(this.analyser);
+    // NOTE: deliberately not connected to destination — no echo / feedback.
+
+    this.freq = new Uint8Array(this.analyser.frequencyBinCount);
+    this.wave = new Uint8Array(this.analyser.frequencyBinCount);
+    this._prevSpectrum = new Float32Array(this.analyser.frequencyBinCount);
+
+    this.active = true;
+    this.label = kind === 'system' ? 'system' : 'mic';
+
+    // If the user stops sharing from the browser chrome, fall back gracefully.
+    stream.getTracks().forEach(t => t.addEventListener('ended', () => {
+      this.stop(); this.label = 'ended';
+    }));
+  },
+
+  stop() {
+    if (this.stream) this.stream.getTracks().forEach(t => t.stop());
+    if (this.ctx) this.ctx.close().catch(() => {});
+    this.stream = this.ctx = this.analyser = this.source = null;
+    this.active = false;
+  },
+
+  /** Average magnitude across a frequency span, in Hz. */
+  _band(lo, hi) {
+    const nyq  = this.ctx.sampleRate / 2;
+    const n    = this.freq.length;
+    let a = Math.max(0, Math.floor(lo / nyq * n));
+    let b = Math.min(n - 1, Math.ceil(hi / nyq * n));
+    let sum = 0;
+    for (let i = a; i <= b; i++) sum += this.freq[i];
+    return sum / ((b - a + 1) * 255);
+  },
+
+  update(t, dt) {
+    this.beatFired = false;
+    this.beat = Math.max(0, this.beat - dt * 4.0);
+
+    if (!this.active) { this._idle(t, dt); return; }
+
+    this.analyser.getByteFrequencyData(this.freq);
+    this.analyser.getByteTimeDomainData(this.wave);
+
+    // ── Bands ────────────────────────────────────────────────────────────
+    const smooth = (cur, target, rate) => cur + (target - cur) * Math.min(1, rate * dt);
+    this.sub     = smooth(this.sub,     this._band(20,    60),   22);
+    this.bass    = smooth(this.bass,    this._band(60,   250),   22);
+    this.lowMid  = smooth(this.lowMid,  this._band(250,  500),   16);
+    this.mid     = smooth(this.mid,     this._band(500, 2000),   14);
+    this.highMid = smooth(this.highMid, this._band(2000,4000),   14);
+    this.treble  = smooth(this.treble,  this._band(4000,14000),  14);
+
+    const raw = (this.sub*1.2 + this.bass*1.4 + this.mid + this.treble*0.8) / 4.4;
+    this.energy = smooth(this.energy, Math.min(1, raw * 1.6), 10);
+
+    // ── 12 coarse log-spaced bands (for ring + spectrum mode) ────────────
+    for (let i = 0; i < 12; i++) {
+      const lo = 30 * Math.pow(14000 / 30, i / 12);
+      const hi = 30 * Math.pow(14000 / 30, (i + 1) / 12);
+      const v  = Math.min(1, this._band(lo, hi) * 1.5);
+      this.bands[i] += (v - this.bands[i]) * Math.min(1, 18 * dt);
+    }
+
+    // ── Spectral centroid → drives global hue ────────────────────────────
+    let num = 0, den = 0;
+    for (let i = 1; i < this.freq.length; i++) { num += i * this.freq[i]; den += this.freq[i]; }
+    const c = den > 0 ? (num / den) / this.freq.length : 0.15;
+    this.centroid = smooth(this.centroid, Math.min(1, c * 4), 5);
+
+    // ── Spectral flux (onset strength) ───────────────────────────────────
+    let flux = 0;
+    for (let i = 0; i < this.freq.length; i++) {
+      const v = this.freq[i] / 255;
+      const d = v - this._prevSpectrum[i];
+      if (d > 0) flux += d;
+      this._prevSpectrum[i] = v;
+    }
+    this.flux = smooth(this.flux, Math.min(1, flux / 40), 20);
+
+    // ── Beat detection: adaptive threshold on low-end energy ─────────────
+    const inst = this.sub * 1.3 + this.bass;
+    this._hist[this._hi] = inst;
+    this._hi = (this._hi + 1) % this._hist.length;
+
+    let mean = 0;
+    for (let i = 0; i < this._hist.length; i++) mean += this._hist[i];
+    mean /= this._hist.length;
+    let varr = 0;
+    for (let i = 0; i < this._hist.length; i++) {
+      const d = this._hist[i] - mean; varr += d * d;
+    }
+    varr /= this._hist.length;
+
+    // High variance (punchy track) → lower the bar; flat drone → raise it.
+    const sensitivity = Math.max(1.12, Math.min(1.55, -12 * varr + 1.42));
+    if (inst > mean * sensitivity && inst > 0.08 && t - this._lastBeat > 0.14) {
+      this._fireBeat(t);
+    }
+  },
+
+  _fireBeat(t) {
+    const gap = t - this._lastBeat;
+    this._lastBeat = t;
+    this.beat = 1;
+    this.beatFired = true;
+
+    if (gap > 0.25 && gap < 2.0) {
+      this._intervals.push(gap);
+      if (this._intervals.length > 12) this._intervals.shift();
+      const sorted = [...this._intervals].sort((a, b) => a - b);
+      const median = sorted[sorted.length >> 1];
+      this.bpm = Math.round(60 / median);
+    }
+  },
+
+  /** No audio connected — synthesize a pleasant 120 BPM groove so it still moves. */
+  _idle(t, dt) {
+    const beatLen = 0.5;
+    const phase   = (t % beatLen) / beatLen;
+    const kick    = Math.pow(1 - phase, 5);
+    this.sub = this.bass = kick * 0.55 + 0.06;
+    this.lowMid = 0.20 + 0.12 * Math.sin(t * 1.7);
+    this.mid    = 0.24 + 0.16 * Math.sin(t * 0.9 + 1.3);
+    this.highMid= 0.18 + 0.12 * Math.sin(t * 2.3 + 0.4);
+    this.treble = 0.14 + 0.10 * Math.sin(t * 3.1 + 2.0);
+    this.energy = 0.30 + kick * 0.28;
+    this.centroid = 0.42 + 0.12 * Math.sin(t * 0.21);
+    this.flux = kick * 0.5;
+    for (let i = 0; i < 12; i++)
+      this.bands[i] = 0.15 + 0.5 * Math.abs(Math.sin(t * (0.6 + i * 0.17) + i));
+    this.bpm = 120;
+    if (t - this._lastBeat >= beatLen - 1e-3) { this._lastBeat = t; this.beat = 1; this.beatFired = true; }
+  },
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   GL BOOTSTRAP
+   ══════════════════════════════════════════════════════════════════════════ */
 const canvas = document.getElementById('c');
-const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+const gl = canvas.getContext('webgl2', { antialias: false, alpha: false })
+        || canvas.getContext('webgl',  { antialias: false, alpha: false });
 
 if (!gl) {
-  document.body.innerHTML = '<div style="color:white;text-align:center;padding:50px">WebGL not supported</div>';
+  document.body.innerHTML =
+    '<div style="color:#fff;font:14px monospace;padding:60px;text-align:center">' +
+    'WebGL is not available in this browser.</div>';
+  throw new Error('no webgl');
 }
 
-// ─── Resize ───────────────────────────────────────────────────────────────────
+let DPR = Math.min(window.devicePixelRatio || 1, 1.75);
+let W = 0, H = 0, BW = 0, BH = 0;   // full res, and half-res bloom buffers
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SHADERS
+   ══════════════════════════════════════════════════════════════════════════ */
+const V_PARTICLE = `
+precision highp float;
+attribute vec3  aPos;
+attribute vec3  aVel;
+attribute float aAge;
+attribute float aLife;
+attribute float aSeed;
+
+uniform mat4  uMVP;
+uniform float uTime, uBass, uMid, uTreble, uBeat, uEnergy, uCentroid;
+uniform float uPixelScale;
+
+varying vec3  vColor;
+varying float vAlpha;
+
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+void main() {
+  float t     = clamp(aAge / aLife, 0.0, 1.0);
+  float speed = length(aVel);
+  float rad   = length(aPos);
+
+  // Hue: golden-ratio per-particle offset, drifting with time, pushed by the
+  // spectral centroid (bright music -> hue sweeps), banded by radius.
+  float hue = fract(
+      aSeed * 0.6180339887
+    + uTime * 0.045
+    + uCentroid * 0.55
+    + rad * 0.006
+    + speed * 0.030
+    + uTreble * 0.30 * sin(aSeed * 12.0)   // hi-hats shimmer the palette
+  );
+
+  // Mids widen the saturation swing; beats momentarily blow out to white.
+  float sat = clamp(0.62 + (0.22 + uMid * 0.45) * sin(uTime * 0.9 + aSeed * 6.28)
+                    - uBeat * 0.30, 0.0, 1.0);
+  float val = mix(1.35, 0.30, t * t) * (0.55 + uEnergy * 1.5 + uBeat * 0.7);
+
+  vColor = hsv2rgb(vec3(hue, sat, val));
+  vAlpha = (1.0 - t * t) * smoothstep(0.0, 0.10, t);
+
+  float size = (1.6 + aSeed * 2.2 + speed * 0.85)
+             * (1.0 - t * 0.55)
+             * (0.75 + uBass * 1.5 + uBeat * 0.8);
+
+  vec4 clip = uMVP * vec4(aPos, 1.0);
+  gl_Position  = clip;
+  gl_PointSize = clamp(size * uPixelScale / max(clip.w, 0.1), 1.0, 64.0);
+}`;
+
+const F_PARTICLE = `
+precision highp float;
+varying vec3  vColor;
+varying float vAlpha;
+void main() {
+  vec2 uv = gl_PointCoord * 2.0 - 1.0;
+  float d = dot(uv, uv);
+  if (d > 1.0) discard;
+  // Layered falloff: hot core, soft glow, wide bloom seed.
+  float core  = exp(-d *  7.0);
+  float glow  = exp(-d *  2.0) * 0.55;
+  float halo  = exp(-d *  0.7) * 0.18;
+  float a = (core + glow + halo) * vAlpha;
+  gl_FragColor = vec4(vColor * (core * 1.8 + glow + halo), a);
+}`;
+
+const V_RING = `
+precision highp float;
+attribute vec3  aPos;
+attribute float aMag;
+uniform mat4  uMVP;
+uniform float uTime, uCentroid, uBeat;
+varying vec3  vColor;
+varying float vA;
+vec3 hsv2rgb(vec3 c){
+  vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+  vec3 p = abs(fract(c.xxx+K.xyz)*6.0-K.www);
+  return c.z*mix(K.xxx,clamp(p-K.xxx,0.0,1.0),c.y);
+}
+void main(){
+  vColor = hsv2rgb(vec3(fract(uCentroid + aMag*0.35 + uTime*0.05), 0.85, 0.7 + aMag*1.4 + uBeat*0.4));
+  vA = 0.25 + aMag * 0.9;
+  gl_Position = uMVP * vec4(aPos, 1.0);
+}`;
+
+const F_RING = `
+precision highp float;
+varying vec3 vColor; varying float vA;
+void main(){ gl_FragColor = vec4(vColor * vA, vA * 0.85); }`;
+
+// ── Fullscreen passes ───────────────────────────────────────────────────
+const V_QUAD = `
+precision highp float;
+attribute vec2 aPos;
+varying vec2 vUv;
+void main(){ vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const F_DECAY = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform float uDecay;
+uniform float uSwirl;
+void main(){
+  // Slight rotational drift of the trail buffer -> silky feedback smear.
+  vec2 c = vUv - 0.5;
+  vec2 uv = 0.5 + mat2(cos(uSwirl), -sin(uSwirl), sin(uSwirl), cos(uSwirl)) * c * 0.9985;
+  gl_FragColor = texture2D(uTex, uv) * uDecay;
+}`;
+
+const F_BRIGHT = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform float uThreshold;
+void main(){
+  vec3 c = texture2D(uTex, vUv).rgb;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float k = max(l - uThreshold, 0.0) / max(l, 1e-4);
+  gl_FragColor = vec4(c * k, 1.0);
+}`;
+
+const F_BLUR = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uDir;         // texel-sized step, horizontal or vertical
+void main(){
+  vec3 s = texture2D(uTex, vUv).rgb * 0.2270270270;
+  s += texture2D(uTex, vUv + uDir * 1.3846153846).rgb * 0.3162162162;
+  s += texture2D(uTex, vUv - uDir * 1.3846153846).rgb * 0.3162162162;
+  s += texture2D(uTex, vUv + uDir * 3.2307692308).rgb * 0.0702702703;
+  s += texture2D(uTex, vUv - uDir * 3.2307692308).rgb * 0.0702702703;
+  gl_FragColor = vec4(s, 1.0);
+}`;
+
+const F_COMPOSITE = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScene, uBloom;
+uniform float uBloomAmt, uAberr, uWarp, uEnergy, uTime, uBeat, uVignette;
+
+void main(){
+  vec2 c  = vUv - 0.5;
+  float r2 = dot(c, c);
+
+  // Beat-driven barrel warp — the whole frame breathes on the kick.
+  vec2 uv = vUv + c * r2 * uWarp;
+
+  // Chromatic aberration, stronger toward the edges.
+  float ab = uAberr * (0.25 + r2 * 2.5);
+  vec3 col;
+  col.r = texture2D(uScene, uv + c * ab).r;
+  col.g = texture2D(uScene, uv).g;
+  col.b = texture2D(uScene, uv - c * ab).b;
+
+  vec3 bl;
+  bl.r = texture2D(uBloom, uv + c * ab * 2.0).r;
+  bl.g = texture2D(uBloom, uv).g;
+  bl.b = texture2D(uBloom, uv - c * ab * 2.0).b;
+
+  col += bl * uBloomAmt;
+
+  // Loud passages push saturation; each beat adds a brief white flash.
+  float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(vec3(lum), col, 1.0 + uEnergy * 0.55);
+  col += uBeat * uBeat * 0.10;
+
+  // Vignette + gentle filmic tone map, then a lift so darks stay inky.
+  col *= 1.0 - r2 * uVignette;
+  col  = col / (1.0 + col * 0.75);
+  col  = pow(max(col, 0.0), vec3(0.85));
+
+  // Micro grain keeps large flat glows from banding.
+  float g = fract(sin(dot(gl_FragCoord.xy + uTime, vec2(12.9898, 78.233))) * 43758.5453);
+  col += (g - 0.5) * 0.018;
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+/* ── shader helpers ────────────────────────────────────────────────────── */
+function compile(src, type) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    throw new Error(gl.getShaderInfoLog(s) + '\n' + src);
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(vs, gl.VERTEX_SHADER));
+  gl.attachShader(p, compile(fs, gl.FRAGMENT_SHADER));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    throw new Error(gl.getProgramInfoLog(p));
+  // Cache uniform + attribute locations.
+  p.u = {}; p.a = {};
+  const nu = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < nu; i++) {
+    const n = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, '');
+    p.u[n] = gl.getUniformLocation(p, n);
+  }
+  const na = gl.getProgramParameter(p, gl.ACTIVE_ATTRIBUTES);
+  for (let i = 0; i < na; i++) {
+    const n = gl.getActiveAttrib(p, i).name;
+    p.a[n] = gl.getAttribLocation(p, n);
+  }
+  return p;
+}
+
+const P = {
+  particle : program(V_PARTICLE, F_PARTICLE),
+  ring     : program(V_RING,     F_RING),
+  decay    : program(V_QUAD,     F_DECAY),
+  bright   : program(V_QUAD,     F_BRIGHT),
+  blur     : program(V_QUAD,     F_BLUR),
+  comp     : program(V_QUAD,     F_COMPOSITE),
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER TARGETS
+   ══════════════════════════════════════════════════════════════════════════ */
+function makeTarget(w, h) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { fbo, tex, w, h };
+}
+function freeTarget(t) {
+  if (!t) return;
+  gl.deleteFramebuffer(t.fbo);
+  gl.deleteTexture(t.tex);
+}
+
+let RT = { trailA: null, trailB: null, bright: null, blurA: null, blurB: null };
+
 function resize() {
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
-  gl.viewport(0, 0, canvas.width, canvas.height);
+  DPR = Math.min(window.devicePixelRatio || 1, 1.75);
+  W = canvas.width  = Math.floor(window.innerWidth  * DPR);
+  H = canvas.height = Math.floor(window.innerHeight * DPR);
+  canvas.style.width  = window.innerWidth  + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  BW = Math.max(1, W >> 1);
+  BH = Math.max(1, H >> 1);
+
+  Object.values(RT).forEach(freeTarget);
+  RT.trailA = makeTarget(W, H);
+  RT.trailB = makeTarget(W, H);
+  RT.bright = makeTarget(BW, BH);
+  RT.blurA  = makeTarget(BW, BH);
+  RT.blurB  = makeTarget(BW, BH);
+
+  // Clear both trail buffers so we never sample uninitialized memory.
+  for (const t of [RT.trailA, RT.trailB]) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 window.addEventListener('resize', resize);
 resize();
 
-// ─── Shader Sources ───────────────────────────────────────────────────────────
-const PARTICLE_VERT = `
-  precision highp float;
-  attribute vec3 aPos;
-  attribute vec3 aVel;
-  attribute float aAge;
-  attribute float aLife;
-  attribute float aSeed;
+// Fullscreen triangle-strip quad
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
 
-  uniform mat4 uMVP;
-  uniform float uTime;
-  uniform vec2 uResolution;
-
-  varying vec3 vColor;
-  varying float vAlpha;
-  varying float vSize;
-
-  vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-  }
-
-  void main() {
-    float t = aAge / aLife;
-    float speed = length(aVel);
-
-    // Psychedelic hue based on position, velocity, and time
-    float hue = fract(
-      aSeed * 0.618033988
-      + uTime * 0.08
-      + aPos.y * 0.015
-      + speed * 0.12
-    );
-    float sat = 0.7 + 0.3 * sin(uTime * 1.3 + aSeed * 3.14);
-    float val = mix(1.2, 0.4, t * t);
-
-    vColor = hsv2rgb(vec3(hue, sat, val));
-    vAlpha = (1.0 - t * t) * min(1.0, t * 8.0);
-
-    // Size: larger when fast, fades at end
-    vSize = (3.0 + speed * 2.5 + aSeed * 2.0) * (1.0 - t * 0.6);
-
-    vec4 mvPos = uMVP * vec4(aPos, 1.0);
-    gl_Position = mvPos;
-    gl_PointSize = vSize * (300.0 / -mvPos.z);
-  }
-`;
-
-const PARTICLE_FRAG = `
-  precision highp float;
-  varying vec3 vColor;
-  varying float vAlpha;
-  varying float vSize;
-
-  void main() {
-    vec2 uv = gl_PointCoord * 2.0 - 1.0;
-    float d = dot(uv, uv);
-    if (d > 1.0) discard;
-
-    // Soft glowing orb
-    float core  = exp(-d * 3.5);
-    float glow  = exp(-d * 1.2) * 0.6;
-    float bloom = exp(-d * 0.5) * 0.25;
-    float alpha = (core + glow + bloom) * vAlpha;
-
-    vec3 col = vColor * (core * 2.0 + glow + bloom);
-    gl_FragColor = vec4(col, alpha);
-  }
-`;
-
-const TRAIL_VERT = `
-  precision highp float;
-  attribute vec2 aPos;
-  void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
-`;
-
-const TRAIL_FRAG = `
-  precision highp float;
-  uniform float uDecay;
-  uniform sampler2D uTex;
-  uniform vec2 uResolution;
-  void main() {
-    vec2 uv = gl_FragCoord.xy / uResolution;
-    vec4 c = texture2D(uTex, uv);
-    gl_FragColor = c * uDecay;
-  }
-`;
-
-// ─── Compile Shaders ──────────────────────────────────────────────────────────
-function compile(src, type) {
-  const s = gl.createShader(type);
-  gl.shaderSource(s, src);
-  gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
-    console.error(gl.getShaderInfoLog(s));
-  return s;
+function drawQuad(prog) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(prog.a.aPos);
+  gl.vertexAttribPointer(prog.a.aPos, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+function bindTarget(t) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fbo : null);
+  gl.viewport(0, 0, t ? t.w : W, t ? t.h : H);
+}
+function useTex(unit, tex, loc) {
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(loc, unit);
 }
 
-function link(vSrc, fSrc) {
-  const p = gl.createProgram();
-  gl.attachShader(p, compile(vSrc, gl.VERTEX_SHADER));
-  gl.attachShader(p, compile(fSrc, gl.FRAGMENT_SHADER));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
-    console.error(gl.getProgramInfoLog(p));
-  return p;
-}
-
-const particleProg = link(PARTICLE_VERT, PARTICLE_FRAG);
-const trailProg    = link(TRAIL_VERT, TRAIL_FRAG);
-
-// ─── Particles ────────────────────────────────────────────────────────────────
-const MAX = 80000;
+/* ══════════════════════════════════════════════════════════════════════════
+   PARTICLE SYSTEM
+   ══════════════════════════════════════════════════════════════════════════ */
+const MAX = 60000;
 const pos  = new Float32Array(MAX * 3);
 const vel  = new Float32Array(MAX * 3);
 const age  = new Float32Array(MAX);
 const life = new Float32Array(MAX);
 const seed = new Float32Array(MAX);
 
-let count  = 0;
-let currentMode = 'vortex';
-let trailsOn = true;
+let count = 0;
+let mode  = 'vortex';
 let attractors = [];
 
-function spawn(x, y, z, vx, vy, vz, lifespan, s) {
+function spawn(x, y, z, vx, vy, vz, lifespan) {
   if (count >= MAX) return;
   const i = count++;
-  pos[i*3]   = x;  pos[i*3+1]  = y;  pos[i*3+2]  = z;
-  vel[i*3]   = vx; vel[i*3+1]  = vy; vel[i*3+2]  = vz;
-  age[i]     = 0;
-  life[i]    = lifespan;
-  seed[i]    = s !== undefined ? s : Math.random();
+  pos[i*3] = x; pos[i*3+1] = y; pos[i*3+2] = z;
+  vel[i*3] = vx; vel[i*3+1] = vy; vel[i*3+2] = vz;
+  age[i] = 0; life[i] = lifespan; seed[i] = Math.random();
 }
 
-function spawnBatch() {
-  const N   = 300;
-  const t   = time;
+const TAU = Math.PI * 2;
 
-  if (currentMode === 'vortex') {
-    for (let k = 0; k < N; k++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r     = 2 + Math.random() * 18;
-      const y     = (Math.random() - 0.5) * 40;
-      const speed = 0.3 + Math.random() * 0.8;
-      spawn(
-        Math.cos(angle) * r,
-        y,
-        Math.sin(angle) * r,
-        -Math.sin(angle) * speed,
-        (Math.random() - 0.5) * 0.3,
-        Math.cos(angle) * speed,
-        2.5 + Math.random() * 3
-      );
+/** Per-mode emitters. `n` scales with audio energy so loud passages get denser. */
+function emit(n, t) {
+  const A = Audio;
+
+  switch (mode) {
+    case 'vortex': {
+      for (let k = 0; k < n; k++) {
+        const a = Math.random() * TAU;
+        const r = 3 + Math.random() * (16 + A.bass * 22);
+        const y = (Math.random() - 0.5) * 46;
+        const s = 0.4 + Math.random() * 0.9 + A.mid * 1.4;
+        spawn(Math.cos(a)*r, y, Math.sin(a)*r,
+             -Math.sin(a)*s, (Math.random()-0.5)*0.4, Math.cos(a)*s,
+              2.2 + Math.random() * 3.2);
+      }
+      break;
     }
-  } else if (currentMode === 'explosion') {
-    for (let k = 0; k < N; k++) {
-      const th = Math.random() * Math.PI * 2;
-      const ph = Math.acos(2 * Math.random() - 1);
-      const sp = 3 + Math.random() * 12;
-      spawn(
-        0, 0, 0,
-        Math.sin(ph)*Math.cos(th)*sp,
-        Math.sin(ph)*Math.sin(th)*sp,
-        Math.cos(ph)*sp,
-        1.5 + Math.random() * 2
-      );
+    case 'nebula': {
+      for (let k = 0; k < n; k++) {
+        const x = (Math.random()-0.5) * 70, y = (Math.random()-0.5) * 70, z = (Math.random()-0.5) * 70;
+        const r = Math.hypot(x, y, z) + 0.01;
+        const s = 0.4 + Math.random() * 1.6;
+        spawn(x, y, z,
+             -y/r*s*0.6 + (Math.random()-0.5)*0.6,
+              x/r*s*0.6 + (Math.random()-0.5)*0.6,
+                          (Math.random()-0.5)*0.8,
+              3.0 + Math.random() * 5.0);
+      }
+      break;
     }
-  } else if (currentMode === 'nebula') {
-    for (let k = 0; k < N; k++) {
-      const x = (Math.random() - 0.5) * 60;
-      const y = (Math.random() - 0.5) * 60;
-      const z = (Math.random() - 0.5) * 60;
-      const r = Math.sqrt(x*x+y*y+z*z) + 0.01;
-      const s = 0.5 + Math.random() * 2;
-      spawn(x, y, z, -y/r*s*0.5 + (Math.random()-0.5)*0.5,
-                       x/r*s*0.5 + (Math.random()-0.5)*0.5,
-                       (Math.random()-0.5)*0.8,
-            3 + Math.random() * 5);
+    case 'tunnel': {
+      for (let k = 0; k < n; k++) {
+        const a  = Math.random() * TAU;
+        const bi = Math.floor((a / TAU) * 12) % 12;
+        const r  = 9 + A.bands[bi] * 16 + Math.random() * 3;
+        spawn(Math.cos(a)*r, Math.sin(a)*r, -95,
+              0, 0, 26 + Math.random()*16 + A.energy*40,
+              3.4 + Math.random()*1.2);
+      }
+      break;
     }
-  } else if (currentMode === 'dna') {
-    for (let k = 0; k < N; k++) {
-      const strand = Math.random() < 0.5 ? 0 : 1;
-      const tt = (Math.random() - 0.5) * 40;
-      const off = strand * Math.PI;
-      const a   = tt * 0.4 + off;
-      const r   = 6 + Math.random() * 2;
-      spawn(
-        Math.cos(a) * r,
-        tt,
-        Math.sin(a) * r,
-        -Math.sin(a) * 0.8 + (Math.random()-0.5)*0.3,
-        (Math.random()-0.5)*0.2,
-         Math.cos(a) * 0.8 + (Math.random()-0.5)*0.3,
-        2 + Math.random() * 3
-      );
+    case 'spectrum': {
+      for (let k = 0; k < n; k++) {
+        const bi = k % 12;
+        // Must match the atan2-based wedge lookup in step(): angle = bi/12*TAU - PI
+        const a  = (bi / 12) * TAU - Math.PI + Math.random() * (TAU / 12);
+        const h  = A.bands[bi];
+        const r  = 14 + h * 26;
+        spawn(Math.cos(a)*r, -26 + Math.random()*3, Math.sin(a)*r,
+              Math.cos(a)*0.4, 6 + h * 26, Math.sin(a)*0.4,
+              1.8 + Math.random()*1.6);
+      }
+      break;
     }
-  } else if (currentMode === 'chaos') {
-    for (let k = 0; k < N; k++) {
-      const x = (Math.random()-0.5)*50;
-      const y = (Math.random()-0.5)*50;
-      const z = (Math.random()-0.5)*50;
-      const vx = (Math.random()-0.5)*5;
-      const vy = (Math.random()-0.5)*5;
-      const vz = (Math.random()-0.5)*5;
-      spawn(x, y, z, vx, vy, vz, 1 + Math.random()*4);
+    case 'dna': {
+      for (let k = 0; k < n; k++) {
+        const strand = (Math.random() < 0.5) ? 0 : Math.PI;
+        const ty = (Math.random() - 0.5) * 46;
+        const a  = ty * 0.36 + strand + t * 0.5;
+        const r  = 6.5 + A.bass * 6 + Math.random() * 1.6;
+        spawn(Math.cos(a)*r, ty, Math.sin(a)*r,
+             -Math.sin(a)*0.9, (Math.random()-0.5)*0.25, Math.cos(a)*0.9,
+              2.0 + Math.random()*2.8);
+      }
+      break;
+    }
+    case 'chaos': {
+      for (let k = 0; k < n; k++) {
+        spawn((Math.random()-0.5)*55, (Math.random()-0.5)*55, (Math.random()-0.5)*55,
+              (Math.random()-0.5)*5,  (Math.random()-0.5)*5,  (Math.random()-0.5)*5,
+              1.2 + Math.random()*3.8);
+      }
+      break;
+    }
+    case 'supernova': {
+      for (let k = 0; k < n; k++) {
+        const th = Math.random() * TAU;
+        const ph = Math.acos(2 * Math.random() - 1);
+        const s  = 2 + Math.random() * 6;
+        spawn(0, 0, 0,
+              Math.sin(ph)*Math.cos(th)*s,
+              Math.sin(ph)*Math.sin(th)*s,
+              Math.cos(ph)*s,
+              2.0 + Math.random()*2.5);
+      }
+      break;
     }
   }
 }
 
-// ─── Physics Update ───────────────────────────────────────────────────────────
-let time = 0;
-const dt = 1/60;
+/** A shockwave of particles fired outward — triggered on strong beats. */
+function shockwave(strength) {
+  const n = Math.floor(220 * strength);
+  for (let k = 0; k < n; k++) {
+    const th = Math.random() * TAU;
+    const ph = Math.acos(2 * Math.random() - 1);
+    const s  = (7 + Math.random() * 12) * strength;
+    spawn(0, 0, 0,
+          Math.sin(ph)*Math.cos(th)*s,
+          Math.sin(ph)*Math.sin(th)*s,
+          Math.cos(ph)*s,
+          1.0 + Math.random() * 1.6);
+  }
+}
 
-function updateParticles() {
+/* ── Physics integration ──────────────────────────────────────────────── */
+function step(t, dt) {
+  const A = Audio;
+  const bass = A.bass, mid = A.mid, treb = A.treble, beat = A.beat, en = A.energy;
+
+  // Audio-driven global parameters
+  const turb   = 0.35 + treb * 3.2;                 // high-freq → jitter
+  const swirl  = 5.0 + bass * 16.0 + beat * 8.0;    // low-freq  → rotation
+  const push   = beat * 26.0;                       // beat      → radial kick
+  const drag   = 0.985 - en * 0.010;
+
+  // Moving attractor centres for the softer modes
+  const cx = Math.sin(t * 0.21) * (12 + mid * 16);
+  const cy = Math.cos(t * 0.17) * (9  + mid * 12);
+  const cz = Math.sin(t * 0.13) * (12 + mid * 16);
+
   let alive = 0;
-  const ts = time;
 
   for (let i = 0; i < count; i++) {
-    age[i] += dt;
-    if (age[i] >= life[i]) continue;
+    const a = age[i] + dt;
+    if (a >= life[i]) continue;
 
-    let px = pos[i*3], py = pos[i*3+1], pz = pos[i*3+2];
-    let vx = vel[i*3], vy = vel[i*3+1], vz = vel[i*3+2];
+    const i3 = i * 3;
+    let px = pos[i3], py = pos[i3+1], pz = pos[i3+2];
+    let vx = vel[i3], vy = vel[i3+1], vz = vel[i3+2];
 
-    // Mode forces
-    if (currentMode === 'vortex') {
-      const r   = Math.sqrt(px*px + pz*pz) + 0.001;
-      const inv = 1 / r;
-      const str = 6.0;
-      vx += (-pz * inv * str - px * 0.2) * dt;
-      vz += ( px * inv * str - pz * 0.2) * dt;
-      vy += -py * 0.15 * dt;
-      // Turbulence
-      vx += Math.sin(ts * 1.1 + py * 0.3) * 0.4 * dt;
-      vy += Math.sin(ts * 0.9 + px * 0.2) * 0.3 * dt;
-      vz += Math.cos(ts * 1.3 + pz * 0.3) * 0.4 * dt;
-    } else if (currentMode === 'explosion') {
-      const r = Math.sqrt(px*px+py*py+pz*pz) + 0.01;
-      vx += px/r * 0.5 * dt;
-      vy += py/r * 0.5 * dt;
-      vz += pz/r * 0.5 * dt;
-      vy -= 1.5 * dt; // gravity
-    } else if (currentMode === 'nebula') {
-      const cx = Math.sin(ts * 0.2) * 15;
-      const cy = Math.cos(ts * 0.17) * 10;
-      const cz = Math.sin(ts * 0.13) * 15;
-      const dx = cx - px, dy = cy - py, dz = cz - pz;
-      const r  = Math.sqrt(dx*dx+dy*dy+dz*dz) + 1;
-      vx += dx/r * 1.5 * dt;
-      vy += dy/r * 1.5 * dt;
-      vz += dz/r * 1.5 * dt;
-      // Curl noise approximation
-      vx += Math.sin(py * 0.1 + ts * 0.7) * 0.6 * dt;
-      vy += Math.sin(pz * 0.1 + ts * 0.5) * 0.6 * dt;
-      vz += Math.sin(px * 0.1 + ts * 0.6) * 0.6 * dt;
-    } else if (currentMode === 'dna') {
-      // Helical attractor
-      const targetR = 7.0;
-      const r = Math.sqrt(px*px+pz*pz) + 0.01;
-      vx += (px/r*(targetR-r)) * 0.8 * dt;
-      vz += (pz/r*(targetR-r)) * 0.8 * dt;
-      // Rotate
-      vx += -pz * 0.5 * dt;
-      vz +=  px * 0.5 * dt;
-      vy += Math.sin(ts*0.4 + r*0.2) * 0.5 * dt;
-    } else if (currentMode === 'chaos') {
-      // Lorenz-inspired attraction points that shift over time
-      const cx = Math.sin(ts * 0.31) * 20;
-      const cy = Math.cos(ts * 0.27) * 20;
-      const cz = Math.sin(ts * 0.19) * 20;
-      const dx = cx - px, dy = cy - py, dz = cz - pz;
-      const r2 = dx*dx+dy*dy+dz*dz + 1;
-      vx += dx/r2 * 80 * dt;
-      vy += dy/r2 * 80 * dt;
-      vz += dz/r2 * 80 * dt;
-      // Repulsor at origin
-      const or2 = px*px+py*py+pz*pz + 0.5;
-      vx -= px/or2 * 30 * dt;
-      vy -= py/or2 * 30 * dt;
-      vz -= pz/or2 * 30 * dt;
+    switch (mode) {
+      case 'vortex': {
+        const r = Math.sqrt(px*px + pz*pz) + 1e-3, inv = 1 / r;
+        vx += (-pz*inv*swirl - px*0.22) * dt;
+        vz += ( px*inv*swirl - pz*0.22) * dt;
+        vy += (-py * (0.12 + bass * 0.5)) * dt;
+        vx += px*inv * push * dt;
+        vz += pz*inv * push * dt;
+        break;
+      }
+      case 'nebula': {
+        const dx = cx-px, dy = cy-py, dz = cz-pz;
+        const r  = Math.sqrt(dx*dx+dy*dy+dz*dz) + 1;
+        const g  = 1.6 + bass * 7.0;
+        vx += dx/r * g * dt; vy += dy/r * g * dt; vz += dz/r * g * dt;
+        break;
+      }
+      case 'tunnel': {
+        const r = Math.sqrt(px*px + py*py) + 1e-3, inv = 1 / r;
+        const target = 11 + bass * 20;
+        vx += (px*inv * (target - r)) * 2.2 * dt;
+        vy += (py*inv * (target - r)) * 2.2 * dt;
+        vx += -py*inv * (1.6 + mid * 7.0) * dt;   // barrel roll
+        vy +=  px*inv * (1.6 + mid * 7.0) * dt;
+        vz += (10 + en * 40) * dt;                // constant forward flow
+        break;
+      }
+      case 'spectrum': {
+        const ang = Math.atan2(pz, px);
+        const bi  = ((Math.floor((ang + Math.PI) / TAU * 12) % 12) + 12) % 12;
+        const h   = A.bands[bi];
+        vy += (h * 34 - 5) * dt;                  // band magnitude lifts its wedge
+        const r = Math.sqrt(px*px+pz*pz) + 1e-3;
+        vx += -pz/r * (1.0 + h * 5.0) * dt;
+        vz +=  px/r * (1.0 + h * 5.0) * dt;
+        vy -= 3.0 * dt;                           // gravity
+        break;
+      }
+      case 'dna': {
+        const target = 7.0 + bass * 7.0;
+        const r = Math.sqrt(px*px+pz*pz) + 1e-3, inv = 1 / r;
+        vx += px*inv * (target - r) * 1.4 * dt;
+        vz += pz*inv * (target - r) * 1.4 * dt;
+        vx += -pz * (0.5 + treb * 2.2) * dt;
+        vz +=  px * (0.5 + treb * 2.2) * dt;
+        vy += Math.sin(t * 0.7 + r * 0.3) * (0.6 + beat * 3.0) * dt;
+        break;
+      }
+      case 'chaos': {
+        const dx = cx-px, dy = cy-py, dz = cz-pz;
+        const r2 = dx*dx+dy*dy+dz*dz + 1;
+        const g  = 70 + bass * 260;
+        vx += dx/r2 * g * dt; vy += dy/r2 * g * dt; vz += dz/r2 * g * dt;
+        const o2 = px*px+py*py+pz*pz + 0.5;        // core repulsor
+        const rp = 26 + beat * 130;
+        vx -= px/o2 * rp * dt; vy -= py/o2 * rp * dt; vz -= pz/o2 * rp * dt;
+        break;
+      }
+      case 'supernova': {
+        const r = Math.sqrt(px*px+py*py+pz*pz) + 1e-2, inv = 1 / r;
+        vx += px*inv * (1.2 + push) * dt;
+        vy += py*inv * (1.2 + push) * dt;
+        vz += pz*inv * (1.2 + push) * dt;
+        vx += -pz*inv * (bass * 9.0) * dt;         // spiral arms
+        vz +=  px*inv * (bass * 9.0) * dt;
+        vy -= 1.2 * dt;
+        break;
+      }
     }
 
-    // Click attractors
-    for (const att of attractors) {
-      const dx = att.x - px, dy = att.y - py, dz = att.z - pz;
-      const r2 = dx*dx + dy*dy + dz*dz + 4;
-      const str = att.str * Math.exp(-r2 * 0.002);
-      vx += dx / r2 * str * dt * 60;
-      vy += dy / r2 * str * dt * 60;
-      vz += dz / r2 * str * dt * 60;
-      att.str *= 0.998;
+    // ── Curl-ish turbulence (cheap sinusoidal field, treble-scaled) ─────
+    vx += Math.sin(py * 0.11 + t * 1.7) * turb * dt;
+    vy += Math.sin(pz * 0.11 + t * 1.3) * turb * dt;
+    vz += Math.sin(px * 0.11 + t * 1.5) * turb * dt;
+
+    // ── User-placed attractors ──────────────────────────────────────────
+    for (let j = 0; j < attractors.length; j++) {
+      const at = attractors[j];
+      const dx = at.x - px, dy = at.y - py, dz = at.z - pz;
+      const r2 = dx*dx + dy*dy + dz*dz + 6;
+      const g  = at.str * 45 / r2;
+      vx += dx * g * dt; vy += dy * g * dt; vz += dz * g * dt;
     }
-    attractors = attractors.filter(a => a.str > 0.1);
 
-    // Damping
-    const damp = 0.985;
-    vx *= damp; vy *= damp; vz *= damp;
+    vx *= drag; vy *= drag; vz *= drag;
 
-    // Max speed
-    const spd = Math.sqrt(vx*vx+vy*vy+vz*vz);
-    if (spd > 20) { const inv = 20/spd; vx*=inv; vy*=inv; vz*=inv; }
+    const sp = Math.sqrt(vx*vx + vy*vy + vz*vz);
+    if (sp > 34) { const k = 34 / sp; vx *= k; vy *= k; vz *= k; }
 
-    // Write back — compact living particles
-    pos[alive*3]   = px + vx * dt * 60;
-    pos[alive*3+1] = py + vy * dt * 60;
-    pos[alive*3+2] = pz + vz * dt * 60;
-    vel[alive*3]   = vx;
-    vel[alive*3+1] = vy;
-    vel[alive*3+2] = vz;
-    age[alive]     = age[i];
-    life[alive]    = life[i];
-    seed[alive]    = seed[i];
+    // ── Compact live particles toward the front of the arrays ───────────
+    const o3 = alive * 3;
+    pos[o3]   = px + vx * dt;
+    pos[o3+1] = py + vy * dt;
+    pos[o3+2] = pz + vz * dt;
+    vel[o3]   = vx; vel[o3+1] = vy; vel[o3+2] = vz;
+    age[alive]  = a;
+    life[alive] = life[i];
+    seed[alive] = seed[i];
     alive++;
   }
   count = alive;
-}
 
-// ─── GL Buffers ───────────────────────────────────────────────────────────────
-const posBuf  = gl.createBuffer();
-const velBuf  = gl.createBuffer();
-const ageBuf  = gl.createBuffer();
-const lifeBuf = gl.createBuffer();
-const seedBuf = gl.createBuffer();
-
-function uploadBuffers() {
-  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, pos.subarray(0, count * 3), gl.DYNAMIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER, velBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, vel.subarray(0, count * 3), gl.DYNAMIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER, ageBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, age.subarray(0, count), gl.DYNAMIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER, lifeBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, life.subarray(0, count), gl.DYNAMIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER, seedBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, seed.subarray(0, count), gl.DYNAMIC_DRAW);
-}
-
-// ─── Trail FBO ────────────────────────────────────────────────────────────────
-let trailFBO, trailTex, trailFBO2, trailTex2;
-
-function makeTrailFBO() {
-  function make() {
-    const fbo = gl.createFramebuffer();
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    return { fbo, tex };
+  for (let j = attractors.length - 1; j >= 0; j--) {
+    attractors[j].str *= Math.pow(0.25, dt);
+    if (attractors[j].str < 0.05) attractors.splice(j, 1);
   }
-  const a = make(), b = make();
-  trailFBO  = a.fbo; trailTex  = a.tex;
-  trailFBO2 = b.fbo; trailTex2 = b.tex;
 }
-makeTrailFBO();
-window.addEventListener('resize', () => {
-  makeTrailFBO();
-});
 
-// Fullscreen quad
-const quadBuf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+/* ── GPU buffers ──────────────────────────────────────────────────────── */
+const buf = {
+  pos: gl.createBuffer(), vel: gl.createBuffer(),
+  age: gl.createBuffer(), life: gl.createBuffer(), seed: gl.createBuffer(),
+};
+function upload() {
+  const put = (b, data, n) => {
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, n), gl.DYNAMIC_DRAW);
+  };
+  put(buf.pos,  pos,  count * 3);
+  put(buf.vel,  vel,  count * 3);
+  put(buf.age,  age,  count);
+  put(buf.life, life, count);
+  put(buf.seed, seed, count);
+}
+function bindAttr(prog, name, b, size) {
+  const loc = prog.a[name];
+  if (loc === undefined || loc < 0) return;
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
 
-// ─── Camera / Math ────────────────────────────────────────────────────────────
-let camTheta = 0.3, camPhi = 0.4, camDist = 60;
+/* ══════════════════════════════════════════════════════════════════════════
+   SPECTRUM RING  (a glowing 128-segment loop that pulses with the FFT)
+   ══════════════════════════════════════════════════════════════════════════ */
+const RING_N = 128;
+const ringPos = new Float32Array(RING_N * 3);
+const ringMag = new Float32Array(RING_N);
+const ringPosBuf = gl.createBuffer();
+const ringMagBuf = gl.createBuffer();
+
+function updateRing(t) {
+  const A = Audio;
+  for (let i = 0; i < RING_N; i++) {
+    const a  = (i / RING_N) * TAU;
+    // Mirror the 12 bands around the circle for symmetry.
+    const f  = Math.abs(((i / RING_N) * 2) % 2 - 1);
+    const bi = Math.min(11, Math.floor(f * 12));
+    const m  = A.bands[bi];
+    const r  = 26 + m * 26 + Math.sin(t * 1.5 + a * 3) * 1.5;
+    ringPos[i*3]   = Math.cos(a) * r;
+    ringPos[i*3+1] = Math.sin(t * 0.4 + a * 2) * (2 + A.bass * 9);
+    ringPos[i*3+2] = Math.sin(a) * r;
+    ringMag[i]     = m;
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, ringPosBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, ringPos, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, ringMagBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, ringMag, gl.DYNAMIC_DRAW);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CAMERA
+   ══════════════════════════════════════════════════════════════════════════ */
+const cam = { theta: 0.4, phi: 1.15, dist: 78, targetDist: 78, shake: 0 };
 let autoSpin = true;
 
-function mat4Mul(a, b) {
-  const out = new Float32Array(16);
+function mul4(a, b) {
+  const o = new Float32Array(16);
   for (let r = 0; r < 4; r++)
     for (let c = 0; c < 4; c++)
-      out[r*4+c] = a[r*4]*b[c] + a[r*4+1]*b[4+c] + a[r*4+2]*b[8+c] + a[r*4+3]*b[12+c];
-  return out;
+      o[r*4+c] = a[r*4]*b[c] + a[r*4+1]*b[4+c] + a[r*4+2]*b[8+c] + a[r*4+3]*b[12+c];
+  return o;
 }
-
-function perspective(fov, asp, near, far) {
-  const f = 1 / Math.tan(fov / 2);
-  const m = new Float32Array(16);
-  m[0]=f/asp; m[5]=f;
-  m[10]=-(far+near)/(far-near); m[11]=-1;
-  m[14]=-2*far*near/(far-near);
+function perspective(fovy, asp, near, far) {
+  const f = 1 / Math.tan(fovy / 2), m = new Float32Array(16);
+  m[0] = f / asp; m[5] = f;
+  m[10] = (far + near) / (near - far); m[11] = -1;
+  m[14] = 2 * far * near / (near - far);
   return m;
 }
+function norm3(v) { const l = Math.hypot(v[0],v[1],v[2]) || 1; return [v[0]/l,v[1]/l,v[2]/l]; }
+function cross3(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 
-function getMVP() {
-  const cx = Math.sin(camPhi) * Math.cos(camTheta) * camDist;
-  const cy = Math.cos(camPhi) * camDist;
-  const cz = Math.sin(camPhi) * Math.sin(camTheta) * camDist;
+let camBasis = { right: [1,0,0], up: [0,1,0], eye: [0,0,1] };
 
-  // View matrix (look at origin)
-  const fwd = normalize3([-cx,-cy,-cz]);
-  const right = normalize3(cross3(fwd, [0,1,0]));
+function viewProj(t) {
+  const sh = cam.shake;
+  const ex = Math.sin(cam.phi) * Math.cos(cam.theta) * cam.dist + Math.sin(t*37) * sh;
+  const ey = Math.cos(cam.phi) * cam.dist               + Math.sin(t*43) * sh;
+  const ez = Math.sin(cam.phi) * Math.sin(cam.theta) * cam.dist + Math.sin(t*29) * sh;
+
+  const fwd   = norm3([-ex, -ey, -ez]);
+  const right = norm3(cross3(fwd, [0, 1, 0]));
   const up    = cross3(right, fwd);
+  camBasis = { right, up, eye: [ex, ey, ez] };
 
   const view = new Float32Array([
     right[0], up[0], -fwd[0], 0,
     right[1], up[1], -fwd[1], 0,
     right[2], up[2], -fwd[2], 0,
-    -dot3(right,[cx,cy,cz]), -dot3(up,[cx,cy,cz]), dot3(fwd,[cx,cy,cz]), 1
+    -dot3(right, [ex,ey,ez]), -dot3(up, [ex,ey,ez]), dot3(fwd, [ex,ey,ez]), 1,
   ]);
 
-  const proj = perspective(Math.PI/4, canvas.width/canvas.height, 0.1, 1000);
-  return mat4Mul(proj, view);
+  // FOV punches outward on the beat.
+  const fov = (Math.PI / 4) * (1 + Audio.beat * 0.09);
+  return mul4(perspective(fov, W / H, 0.1, 900), view);
 }
 
-function normalize3(v) {
-  const l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
-  return [v[0]/l,v[1]/l,v[2]/l];
-}
-function cross3(a,b) {
-  return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
-}
-function dot3(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+/* ══════════════════════════════════════════════════════════════════════════
+   INPUT
+   ══════════════════════════════════════════════════════════════════════════ */
+let dragging = false, downX = 0, downY = 0, lastX = 0, lastY = 0, moved = 0;
 
-// ─── Interaction ──────────────────────────────────────────────────────────────
-let drag = false, lastX = 0, lastY = 0;
-canvas.addEventListener('mousedown', e => {
-  drag = true; lastX = e.clientX; lastY = e.clientY;
-  autoSpin = false;
+canvas.addEventListener('pointerdown', e => {
+  dragging = true; moved = 0;
+  downX = lastX = e.clientX; downY = lastY = e.clientY;
+  canvas.setPointerCapture(e.pointerId);
 });
-canvas.addEventListener('mouseup', e => {
+canvas.addEventListener('pointermove', e => {
+  if (!dragging) return;
   const dx = e.clientX - lastX, dy = e.clientY - lastY;
-  if (!drag || (Math.abs(dx) < 3 && Math.abs(dy) < 3)) {
-    // Click: add attractor at projected point
-    addAttractor(e.clientX, e.clientY);
-  }
-  drag = false;
-});
-canvas.addEventListener('mousemove', e => {
-  if (!drag) return;
-  camTheta -= (e.clientX - lastX) * 0.005;
-  camPhi    = Math.max(0.05, Math.min(Math.PI - 0.05, camPhi - (e.clientY - lastY) * 0.005));
+  moved += Math.abs(dx) + Math.abs(dy);
+  cam.theta -= dx * 0.005;
+  cam.phi = Math.max(0.06, Math.min(Math.PI - 0.06, cam.phi - dy * 0.005));
   lastX = e.clientX; lastY = e.clientY;
+  if (moved > 6 && autoSpin) { autoSpin = false; syncButtons(); }
+});
+canvas.addEventListener('pointerup', e => {
+  if (dragging && moved < 6) addAttractor(e.clientX, e.clientY);
+  dragging = false;
 });
 canvas.addEventListener('wheel', e => {
-  camDist = Math.max(10, Math.min(150, camDist + e.deltaY * 0.05));
-});
+  e.preventDefault();
+  cam.targetDist = Math.max(14, Math.min(220, cam.targetDist + e.deltaY * 0.06));
+}, { passive: false });
 
+/** Project a screen click onto the plane through the origin facing the camera. */
 function addAttractor(sx, sy) {
-  const ndcX = (sx / canvas.width * 2 - 1);
-  const ndcY = -(sy / canvas.height * 2 - 1);
-  const spread = camDist * 0.6;
-  const cx = Math.sin(camPhi) * Math.cos(camTheta);
-  const cz = Math.sin(camPhi) * Math.sin(camTheta);
-  const right = normalize3([-cz, 0, cx]);
-  const up    = [0, 1, 0];
+  const nx = (sx / window.innerWidth)  * 2 - 1;
+  const ny = -((sy / window.innerHeight) * 2 - 1);
+  const spread = cam.dist * 0.45;
+  const { right, up } = camBasis;
   attractors.push({
-    x: ndcX * spread * right[0] + ndcY * spread * up[0],
-    y: ndcX * spread * right[1] + ndcY * spread * up[1],
-    z: ndcX * spread * right[2] + ndcY * spread * up[2],
-    str: 25
+    x: nx * spread * right[0] + ny * spread * up[0],
+    y: nx * spread * right[1] + ny * spread * up[1],
+    z: nx * spread * right[2] + ny * spread * up[2],
+    str: 3.0,
   });
 }
 
-// ─── Render ───────────────────────────────────────────────────────────────────
-function attr(prog, name, buf, size) {
-  const loc = gl.getAttribLocation(prog, name);
-  if (loc < 0) return;
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); shockwave(1.4); cam.shake = 1.2; }
+  if (e.key === 'h' || e.key === 'H') {
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('faded'));
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UI
+   ══════════════════════════════════════════════════════════════════════════ */
+const ui = {
+  count: document.getElementById('s-count'),
+  fps:   document.getElementById('s-fps'),
+  mode:  document.getElementById('s-mode'),
+  audio: document.getElementById('s-audio'),
+  bpm:   document.getElementById('s-bpm'),
+};
+const opt = { trails: true, bloom: true, ring: true };
+
+document.querySelectorAll('#controls button[data-mode]').forEach(b => {
+  b.addEventListener('click', () => {
+    mode = b.dataset.mode;
+    count = 0;
+    attractors.length = 0;
+    syncButtons();
+  });
+});
+
+const btn = {
+  trails: document.getElementById('b-trails'),
+  bloom:  document.getElementById('b-bloom'),
+  ring:   document.getElementById('b-ring'),
+  spin:   document.getElementById('b-spin'),
+};
+btn.trails.onclick = () => { opt.trails = !opt.trails; syncButtons(); };
+btn.bloom .onclick = () => { opt.bloom  = !opt.bloom;  syncButtons(); };
+btn.ring  .onclick = () => { opt.ring   = !opt.ring;   syncButtons(); };
+btn.spin  .onclick = () => { autoSpin   = !autoSpin;   syncButtons(); };
+document.getElementById('b-audio').onclick = () => {
+  document.getElementById('err').textContent = '';
+  document.getElementById('gate').classList.remove('hidden');
+};
+
+function syncButtons() {
+  document.querySelectorAll('#controls button[data-mode]')
+    .forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  btn.trails.classList.toggle('on', opt.trails);
+  btn.bloom .classList.toggle('on', opt.bloom);
+  btn.ring  .classList.toggle('on', opt.ring);
+  btn.spin  .classList.toggle('on', autoSpin);
 }
 
-function render() {
-  const mvp = getMVP();
+// Meter bars
+const meterEl = document.getElementById('meter');
+const bars = [];
+for (let i = 0; i < 12; i++) {
+  const d = document.createElement('div');
+  meterEl.appendChild(d); bars.push(d);
+}
 
+// ── Start gate ────────────────────────────────────────────────────────────
+const gate = document.getElementById('gate');
+const errEl = document.getElementById('err');
+
+async function begin(kind) {
+  errEl.textContent = '';
+  try {
+    if (kind !== 'none') await Audio.start(kind);
+    gate.classList.add('hidden');
+  } catch (err) {
+    errEl.textContent = (err && err.message) ? err.message : String(err);
+    // Permission denials are normal — keep the gate open so they can retry.
+    if (err && err.name === 'NotAllowedError')
+      errEl.textContent = 'Permission denied. Try another source, or continue without audio.';
+  }
+}
+document.getElementById('g-system').onclick = () => begin('system');
+document.getElementById('g-mic').onclick    = () => begin('mic');
+document.getElementById('g-none').onclick   = () => begin('none');
+
+// Browsers may suspend the context when the page loses focus; nudge it back.
+window.addEventListener('pointerdown', () => {
+  if (Audio.ctx && Audio.ctx.state === 'suspended') Audio.ctx.resume().catch(() => {});
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER
+   ══════════════════════════════════════════════════════════════════════════ */
+function drawScene(mvp, t) {
   gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive for glow
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);   // additive
+  gl.disable(gl.DEPTH_TEST);
 
-  if (trailsOn) {
-    // 1) Decay previous trail into trailFBO2
-    gl.bindFramebuffer(gl.FRAMEBUFFER, trailFBO2);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.useProgram(trailProg);
-    const decayU = gl.getUniformLocation(trailProg, 'uDecay');
-    const resU   = gl.getUniformLocation(trailProg, 'uResolution');
-    const texU   = gl.getUniformLocation(trailProg, 'uTex');
-    gl.uniform1f(decayU, 0.88);
-    gl.uniform2f(resU, canvas.width, canvas.height);
-    gl.uniform1i(texU, 0);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, trailTex);
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-    const aPos2 = gl.getAttribLocation(trailProg, 'aPos');
-    gl.enableVertexAttribArray(aPos2);
-    gl.vertexAttribPointer(aPos2, 2, gl.FLOAT, false, 0, 0);
+  const p = P.particle;
+  gl.useProgram(p);
+  gl.uniformMatrix4fv(p.u.uMVP, false, mvp);
+  gl.uniform1f(p.u.uTime,       t);
+  gl.uniform1f(p.u.uBass,       Audio.bass);
+  gl.uniform1f(p.u.uMid,        Audio.mid);
+  gl.uniform1f(p.u.uTreble,     Audio.treble);
+  gl.uniform1f(p.u.uBeat,       Audio.beat);
+  gl.uniform1f(p.u.uEnergy,     Audio.energy);
+  gl.uniform1f(p.u.uCentroid,   Audio.centroid);
+  gl.uniform1f(p.u.uPixelScale, H * 0.20);
+  bindAttr(p, 'aPos',  buf.pos,  3);
+  bindAttr(p, 'aVel',  buf.vel,  3);
+  bindAttr(p, 'aAge',  buf.age,  1);
+  bindAttr(p, 'aLife', buf.life, 1);
+  bindAttr(p, 'aSeed', buf.seed, 1);
+  gl.drawArrays(gl.POINTS, 0, count);
+
+  if (opt.ring) {
+    const r = P.ring;
+    gl.useProgram(r);
+    gl.uniformMatrix4fv(r.u.uMVP, false, mvp);
+    gl.uniform1f(r.u.uTime, t);
+    gl.uniform1f(r.u.uCentroid, Audio.centroid);
+    gl.uniform1f(r.u.uBeat, Audio.beat);
+    bindAttr(r, 'aPos', ringPosBuf, 3);
+    bindAttr(r, 'aMag', ringMagBuf, 1);
+    gl.drawArrays(gl.LINE_LOOP, 0, RING_N);
+  }
+}
+
+function render(t) {
+  const mvp = viewProj(t);
+
+  // ── 1. Scene → trail buffer ────────────────────────────────────────────
+  if (opt.trails) {
+    // Decay the previous accumulation into B, then draw fresh particles on top.
+    bindTarget(RT.trailB);
     gl.disable(gl.BLEND);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.enable(gl.BLEND);
+    gl.useProgram(P.decay);
+    gl.uniform1f(P.decay.u.uDecay, 0.90 - Audio.energy * 0.09);
+    gl.uniform1f(P.decay.u.uSwirl, 0.0016 + Audio.mid * 0.004);
+    useTex(0, RT.trailA.tex, P.decay.u.uTex);
+    drawQuad(P.decay);
 
-    // 2) Draw particles into trailFBO2
-    gl.useProgram(particleProg);
-    gl.uniformMatrix4fv(gl.getUniformLocation(particleProg, 'uMVP'), false, mvp);
-    gl.uniform1f(gl.getUniformLocation(particleProg, 'uTime'), time);
-    gl.uniform2f(gl.getUniformLocation(particleProg, 'uResolution'), canvas.width, canvas.height);
-    attr(particleProg, 'aPos',  posBuf,  3);
-    attr(particleProg, 'aVel',  velBuf,  3);
-    attr(particleProg, 'aAge',  ageBuf,  1);
-    attr(particleProg, 'aLife', lifeBuf, 1);
-    attr(particleProg, 'aSeed', seedBuf, 1);
-    gl.drawArrays(gl.POINTS, 0, count);
+    drawScene(mvp, t);
 
-    // Swap FBOs
-    [trailFBO, trailTex, trailFBO2, trailTex2] = [trailFBO2, trailTex2, trailFBO, trailTex];
-
-    // 3) Blit trailTex to screen
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.disable(gl.BLEND);
-    gl.useProgram(trailProg);
-    gl.uniform1f(decayU, 1.0);
-    gl.uniform2f(resU, canvas.width, canvas.height);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, trailTex);
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-    gl.enableVertexAttribArray(aPos2);
-    gl.vertexAttribPointer(aPos2, 2, gl.FLOAT, false, 0, 0);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.enable(gl.BLEND);
+    const tmp = RT.trailA; RT.trailA = RT.trailB; RT.trailB = tmp;
   } else {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    bindTarget(RT.trailA);
+    gl.disable(gl.BLEND);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(particleProg);
-    gl.uniformMatrix4fv(gl.getUniformLocation(particleProg, 'uMVP'), false, mvp);
-    gl.uniform1f(gl.getUniformLocation(particleProg, 'uTime'), time);
-    gl.uniform2f(gl.getUniformLocation(particleProg, 'uResolution'), canvas.width, canvas.height);
-    attr(particleProg, 'aPos',  posBuf,  3);
-    attr(particleProg, 'aVel',  velBuf,  3);
-    attr(particleProg, 'aAge',  ageBuf,  1);
-    attr(particleProg, 'aLife', lifeBuf, 1);
-    attr(particleProg, 'aSeed', seedBuf, 1);
-    gl.drawArrays(gl.POINTS, 0, count);
+    drawScene(mvp, t);
+  }
+
+  const sceneTex = RT.trailA.tex;
+
+  // ── 2. Bloom: bright pass → separable blur (2 iterations) ─────────────
+  let bloomTex = RT.blurB.tex;
+  if (opt.bloom) {
+    gl.disable(gl.BLEND);
+
+    bindTarget(RT.bright);
+    gl.useProgram(P.bright);
+    gl.uniform1f(P.bright.u.uThreshold, 0.30);
+    useTex(0, sceneTex, P.bright.u.uTex);
+    drawQuad(P.bright);
+
+    let src = RT.bright;
+    for (let i = 0; i < 2; i++) {
+      const spread = 1.0 + i * 1.8;
+      bindTarget(RT.blurA);
+      gl.useProgram(P.blur);
+      gl.uniform2f(P.blur.u.uDir, spread / BW, 0);
+      useTex(0, src.tex, P.blur.u.uTex);
+      drawQuad(P.blur);
+
+      bindTarget(RT.blurB);
+      gl.uniform2f(P.blur.u.uDir, 0, spread / BH);
+      useTex(0, RT.blurA.tex, P.blur.u.uTex);
+      drawQuad(P.blur);
+
+      src = RT.blurB;
+    }
+    bloomTex = RT.blurB.tex;
+  }
+
+  // ── 3. Composite to screen ────────────────────────────────────────────
+  bindTarget(null);
+  gl.disable(gl.BLEND);
+  gl.useProgram(P.comp);
+  useTex(0, sceneTex, P.comp.u.uScene);
+  useTex(1, bloomTex, P.comp.u.uBloom);
+  gl.uniform1f(P.comp.u.uBloomAmt, opt.bloom ? 1.15 + Audio.energy * 0.9 : 0.0);
+  gl.uniform1f(P.comp.u.uAberr,    0.0016 + Audio.beat * 0.010 + Audio.treble * 0.004);
+  gl.uniform1f(P.comp.u.uWarp,     Audio.beat * 0.14 - Audio.bass * 0.03);
+  gl.uniform1f(P.comp.u.uEnergy,   Audio.energy);
+  gl.uniform1f(P.comp.u.uBeat,     Audio.beat);
+  gl.uniform1f(P.comp.u.uVignette, 0.85 - Audio.energy * 0.25);
+  gl.uniform1f(P.comp.u.uTime,     t);
+  drawQuad(P.comp);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MAIN LOOP
+   ══════════════════════════════════════════════════════════════════════════ */
+let t = 0, prev = performance.now() / 1000;
+let fpsAcc = 0, fpsFrames = 0, fpsClock = 0, emitAcc = 0;
+let fpsNow = 60, quality = 1;   // quality throttles emission when we drop frames
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  now /= 1000;
+  const dt = Math.min(now - prev, 1 / 20);   // clamp so tab-switches don't explode
+  prev = now;
+  t += dt;
+
+  Audio.update(t, dt);
+
+  // Beat reactions
+  if (Audio.beatFired) {
+    cam.shake = Math.min(1.6, cam.shake + 0.5 + Audio.bass * 1.4);
+    if (Audio.bass > 0.35 || mode === 'supernova') shockwave(0.5 + Audio.bass);
+  }
+  cam.shake *= Math.pow(0.02, dt);
+
+  // Camera
+  if (autoSpin) cam.theta += (0.06 + Audio.mid * 0.5) * dt;
+  const zoomPull = Audio.beat * 6 - Audio.energy * 5;
+  cam.dist += (cam.targetDist - zoomPull - cam.dist) * Math.min(1, 6 * dt);
+
+  // Emission — rate scales with loudness, capped by headroom
+  emitAcc += dt;
+  const interval = 1 / 60;
+  while (emitAcc >= interval) {
+    emitAcc -= interval;
+    const headroom = MAX - count;
+    if (headroom > 800) {
+      const n = Math.floor((80 + Audio.energy * 330 + Audio.beat * 240) * quality);
+      emit(Math.min(n, headroom - 400), t);
+    }
+  }
+
+  step(t, dt);
+  upload();
+  updateRing(t);
+  render(t);
+
+  // ── Meter reacts every frame; text HUD is throttled ───────────────────
+  for (let i = 0; i < 12; i++)
+    bars[i].style.height = (2 + Audio.bands[i] * 42) + 'px';
+
+  fpsFrames++; fpsAcc += dt;
+  if (now - fpsClock > 0.4) {
+    fpsNow = fpsFrames / fpsAcc;
+    // Adaptive governor: back off emission if we can't hold ~50fps.
+    if      (fpsNow < 45) quality = Math.max(0.25, quality - 0.12);
+    else if (fpsNow > 57) quality = Math.min(1.00, quality + 0.06);
+
+    ui.fps.textContent   = Math.round(fpsNow);
+    ui.count.textContent = count.toLocaleString();
+    ui.mode.textContent  = mode;
+    ui.audio.textContent = Audio.active ? Audio.label : (Audio.label === 'ended' ? 'ended' : 'idle');
+    ui.bpm.textContent   = Audio.bpm || '--';
+    fpsClock = now; fpsFrames = 0; fpsAcc = 0;
   }
 }
 
-// ─── FPS counter ─────────────────────────────────────────────────────────────
-let fps = 0, fpsTime = 0, fpsCount = 0;
-
-// ─── Main Loop ────────────────────────────────────────────────────────────────
-let spawnTimer = 0;
-
-function loop(ts) {
-  requestAnimationFrame(loop);
-
-  const now = ts / 1000;
-  const frameDt = Math.min(now - fpsTime, 0.1);
-  fpsCount++;
-  if (now - fpsTime > 0.5) {
-    fps = Math.round(fpsCount / (now - fpsTime));
-    fpsTime = now; fpsCount = 0;
-    document.getElementById('fps').textContent    = fps;
-    document.getElementById('pcount').textContent = count;
-    document.getElementById('mode').textContent   = currentMode.toUpperCase();
-  }
-
-  time += dt;
-  if (autoSpin) camTheta += 0.003;
-
-  spawnTimer += dt;
-  if (spawnTimer > 0.03) {
-    spawnTimer = 0;
-    if (count < MAX - 400) spawnBatch();
-  }
-
-  updateParticles();
-  uploadBuffers();
-  render();
-}
-
-// ─── Controls ────────────────────────────────────────────────────────────────
-function setMode(m) {
-  currentMode = m;
-  count = 0; // reset
-}
-
-function toggleTrails() { trailsOn = !trailsOn; }
-
-function addBurst() {
-  const old = currentMode;
-  const saved = count;
-  currentMode = 'explosion';
-  for (let i = 0; i < 5; i++) spawnBatch();
-  currentMode = old;
-}
-
-// ─── Boot ────────────────────────────────────────────────────────────────────
-// Warm up with a batch
-for (let i = 0; i < 10; i++) spawnBatch();
-requestAnimationFrame(loop);
+syncButtons();
+for (let i = 0; i < 24; i++) emit(120, 0);   // seed the field
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
