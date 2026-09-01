@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tixarb"
+version = "0.1.0"
+description = "Decision support for buying and reselling event tickets"
+readme = "README.md"
+requires-python = ">=3.10"
+# No runtime dependencies on purpose. This runs on a stock interpreter on a
+# cheap always-on box, which is what an onsale watcher needs to be.
+dependencies = []
+
+[project.scripts]
+tixarb = "tixarb.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"

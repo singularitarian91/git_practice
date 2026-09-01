@@ -57,6 +57,9 @@ UNDERCUT_DAYS = 14.0
 # Float thinness below this counts as saturated: sort position is then the
 # only thing that sells a listing, at any distance from the event.
 SATURATED_FLOAT = 0.35
+# Marketplaces enforce a minimum listing price, and a sub-dollar ask is a
+# data error rather than a strategy. Applied last, after every clamp.
+MIN_ASK = Decimal("1.00")
 
 
 @dataclass(frozen=True)
@@ -149,7 +152,7 @@ def reservation_price(position: Position, event: Event, forecast: MarkupForecast
     # Never ask so far above the visible market that the listing is decoration.
     if quote is not None and quote.median > ZERO:
         ask = min(ask, money(quote.median * Decimal("1.50")))
-    return max(money(ask), money("1.00"))
+    return max(money(ask), MIN_ASK)
 
 
 def advise(position: Position, event: Event, forecast: MarkupForecast,
@@ -215,6 +218,9 @@ def advise(position: Position, event: Event, forecast: MarkupForecast,
     if position.listed_price is not None and position.listed_price != ask:
         reasons.append(f"currently listed at {position.listed_price}")
 
+    # Re-apply the floor: the liquidation and undercut clamps above can each
+    # push below it when the observed market is itself near zero.
+    ask = max(money(ask), MIN_ASK)
     net = economics.net_proceeds(ask, position.qty, sell)
     return PriceAdvice(
         position_id=position.id, days_to_event=days, ask=ask,

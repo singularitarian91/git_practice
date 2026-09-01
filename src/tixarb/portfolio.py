@@ -188,16 +188,20 @@ def check_concentration(store, cfg, at: Optional[dt.datetime] = None) -> list:
                 name = event.name if event else event_id
                 warnings.append(f"{name}: {cost} exceeds the per-event cap of {cap}")
 
-    if total > ZERO:
+    # Only meaningful once the book holds more than one event. With a single
+    # position the artist share is trivially 100%, and the per-event cap
+    # already governs it -- warning there is noise that trains you to ignore
+    # the warning that matters. What this catches is the book that *looks*
+    # diversified across several dates but is really one bet on one act.
+    if total > ZERO and len(by_event) > 1:
         for artist, cost in by_artist.items():
             share = cost / total
-            if share > Decimal("0.40"):
-                dates = len(artist_events[artist])
-                spread = (f"across {dates} dates, which reprice together, "
-                          f"so this is closer to one position than to {dates}"
-                          if dates > 1 else "on a single date")
+            dates = len(artist_events[artist])
+            if share > Decimal("0.40") and dates > 1:
                 warnings.append(
-                    f"{artist} is {share:.0%} of open capital {spread}")
+                    f"{artist} is {share:.0%} of open capital across {dates} "
+                    f"dates, which reprice together -- closer to one position "
+                    f"than to {dates}")
 
     if cfg.bankroll > ZERO and total > cfg.bankroll:
         warnings.append(f"open cost {total} exceeds the stated bankroll {cfg.bankroll}")
