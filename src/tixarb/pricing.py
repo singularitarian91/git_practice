@@ -111,6 +111,8 @@ def reservation_price(position: Position, event: Event, forecast: MarkupForecast
     urgency = _urgency_factor(days)
     face = position.face_each if position.face_each > ZERO else event.face_mid
 
+    thinness = _float_thinness(quote, event)
+
     # Ambitious end: the 75th percentile of the forecast, never below a
     # margin over breakeven. No reason to concede while there is still time.
     p75 = money(face * Decimal(str(forecast.quantile(0.75))))
@@ -121,15 +123,26 @@ def reservation_price(position: Position, event: Event, forecast: MarkupForecast
     # because holding to expiry realizes zero.
     if quote is not None and quote.get_in > ZERO:
         anchor_low = money(quote.get_in * (Decimal("1") - UNDERCUT_PCT))
+        if thinness is not None:
+            # A thin float earns the right to concede less; a saturated one
+            # has to concede more than the schedule alone would suggest.
+            anchor_low = money(anchor_low * (Decimal("0.85") +
+                                             Decimal(str(thinness)) * Decimal("0.30")))
+        # A live market that is already above the forecast is evidence the
+        # forecast is stale, and the forecast is denominated in *your* face
+        # value while the get-in reflects the house. Without this, a cheap
+        # seat bought into a hot market produces an ambitious anchor below
+        # the clearing anchor and the whole curve runs backwards -- asking
+        # less two months out than on show day.
+        market_anchor = money(
+            quote.get_in * (Decimal("1") + Decimal(str(thinness or 0.0)) / 2))
+        anchor_high = max(anchor_high, market_anchor)
     else:
         anchor_low = money(breakeven * Decimal("0.80"))
 
-    thinness = _float_thinness(quote, event)
-    if thinness is not None:
-        # A thin float earns the right to concede less. A saturated one has
-        # to concede more than the schedule alone would suggest.
-        anchor_low = money(anchor_low * (Decimal("0.85") +
-                                         Decimal(str(thinness)) * Decimal("0.30")))
+    # The curve must never rise as the event approaches. Time only ever
+    # reduces what you can ask for a perishable good.
+    anchor_low = min(anchor_low, anchor_high)
 
     ask = anchor_high + (anchor_low - anchor_high) * Decimal(str(urgency))
 
