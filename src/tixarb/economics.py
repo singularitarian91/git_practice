@@ -350,19 +350,25 @@ def evaluate(
     p_sell: float,
     buy: BuyFees,
     sell: SellFees,
-    salvage_ratio: float = 0.55,
+    salvage_price=None,
     hold_days: float = 90.0,
     annual_capital_cost: float = 0.08,
     cost_each: Optional[Decimal] = None,
 ) -> TradeEval:
     """Score one candidate trade end to end.
 
-    ``salvage_ratio`` is the fraction of the *target* price you expect to
-    recover when the position does not clear at target -- the day-before
-    dump. It is the most consequential and least examined input in retail
-    resale: assuming you can always exit near cost is what turns a string of
-    small wins into one large loss. 0.5-0.6 is a realistic default for a
-    show that underperforms; use lower for a soft market.
+    ``salvage_price`` is the absolute per-ticket price you expect to get when
+    the position does *not* clear at target -- the show-day dump. It must be
+    anchored to the market, never to ``target_price``: deriving salvage as a
+    fraction of your own ask means raising the ask also raises the assumed
+    floor, which makes the downside branch look better the greedier you get
+    and sends any EV optimizer straight into the tail. Defaults to 85% of
+    face, which is roughly where a soft show lands once the seller side is
+    racing the clock.
+
+    This is the most consequential and least examined input in retail
+    resale. Assuming you can always exit near cost is what turns a string of
+    small wins into one large loss.
 
     ``cost_each`` overrides the modelled acquisition cost -- pass the real
     number from a receipt when you have one.
@@ -374,7 +380,8 @@ def evaluate(
 
     target = money(target_price)
     target_net = net_proceeds(target, qty, sell)
-    salvage = money(target * Decimal(str(salvage_ratio)))
+    salvage = money(salvage_price) if salvage_price is not None \
+        else money(money(face_each) * Decimal("0.85"))
     salvage_net = net_proceeds(salvage, qty, sell)
 
     win = money(target_net - cost)
