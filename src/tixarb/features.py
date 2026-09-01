@@ -70,17 +70,19 @@ def _abstain(name: str, weight: float, phase: str, why: str) -> Signal:
 def artist_demand(event: Event, weight: float = 1.0) -> Signal:
     """Raw pull of the headliner, from streaming reach and popularity index."""
     artist = event.headliner
-    if artist is None or (artist.monthly_listeners <= 0 and artist.popularity <= 0):
+    if artist is None or (artist.draw_proxy <= 0 and artist.popularity <= 0):
         return _abstain("artist_demand", weight, PRE_ONSALE, "no artist metrics")
 
     parts, why = [], []
-    if artist.monthly_listeners > 0:
+    draw = artist.draw_proxy
+    if draw > 0:
         # 50k listeners -> 0, 50M -> 1, log-scaled: demand spans four orders
         # of magnitude and a linear scale would collapse everything below
         # stadium acts into a single bucket.
-        listeners = normalize(math.log10(artist.monthly_listeners), 4.7, 7.7)
-        parts.append(listeners)
-        why.append(f"{artist.monthly_listeners:,} monthly listeners")
+        parts.append(normalize(math.log10(draw), 4.7, 7.7))
+        label = "monthly listeners" if artist.monthly_listeners > 0 \
+            else "audience proxy from followers"
+        why.append(f"{draw:,} {label}")
     if artist.popularity > 0:
         parts.append(artist.popularity / 100.0)
         why.append(f"popularity {artist.popularity}/100")
@@ -122,14 +124,14 @@ def venue_scarcity(event: Event, weight: float = 1.0) -> Signal:
     """
     artist = event.headliner
     capacity = event.venue.capacity if event.venue else 0
-    if artist is None or artist.monthly_listeners <= 0:
-        return _abstain("venue_scarcity", weight, PRE_ONSALE, "no listener data")
+    if artist is None or artist.draw_proxy <= 0:
+        return _abstain("venue_scarcity", weight, PRE_ONSALE, "no audience data")
     if capacity <= 0:
         return _abstain("venue_scarcity", weight, PRE_ONSALE, "unknown venue capacity")
 
     # Sublinear draw proxy: national streaming reach converts to local ticket
     # demand at a steeply diminishing rate.
-    draw = math.sqrt(artist.monthly_listeners)
+    draw = math.sqrt(artist.draw_proxy)
     ratio = draw / capacity
     value = normalize(math.log10(ratio), -1.0, 1.0)
     return Signal("venue_scarcity", value, weight, PRE_ONSALE,

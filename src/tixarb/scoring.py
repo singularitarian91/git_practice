@@ -159,23 +159,63 @@ class Recommendation:
         )
 
 
-def salvage_multiple(fc: MarkupForecast, dump_haircut: float = 0.85) -> float:
+# How much of today's get-in price survives to show day, as a function of
+# how thin the listed float is. A thin float means the remaining sellers
+# hold pricing power and late prices firm; a saturated one means they
+# undercut each other into the floor in the final week. The gap between
+# these two regimes is the single largest driver of realized downside.
+DECAY_THICK_FLOAT = 0.45
+DECAY_THIN_FLOAT = 0.90
+
+
+def salvage_multiple(fc: MarkupForecast, face_each=None,
+                     quote: Optional[Quote] = None,
+                     dump_haircut: float = 0.85) -> float:
     """Multiple of face to assume in the scenario where the thesis failed.
 
-    Deliberately *not* the forecast's own p10. The salvage branch is by
-    construction the world in which this forecast was wrong, so reading the
-    downside off the same distribution is circular -- and a bullish forecast
-    produces a bullish p10, which is precisely backwards. Capping at 1.0x
-    face before the haircut says: if the thesis breaks, assume the ticket is
-    worth face at best, and you are a forced seller on show day.
+    Two regimes, because the quality of the evidence differs enormously.
+
+    *Pre-onsale, no market data.* The floor is deliberately **not** the
+    forecast's own p10. The salvage branch is by construction the world in
+    which this forecast was wrong, so reading the downside off the same
+    distribution is circular -- and a bullish forecast produces a bullish
+    p10, which is exactly backwards. Capping at 1.0x face before the haircut
+    says: if the thesis breaks, assume the ticket is worth face at best and
+    you are a forced seller on show day.
+
+    *Post-onsale, with a quote.* The observed get-in price is evidence, not
+    forecast, and refusing to use it makes the model absurdly pessimistic
+    about events the market has already repriced -- it would pass on a show
+    trading at 2.2x with a thin float on the grounds that it *might* be
+    worth 0.85x. So the floor becomes today's get-in decayed toward show
+    day, with the decay set by float thinness. Still bounded below by the
+    pre-onsale floor, so market data can only raise the assumed salvage,
+    never talk it below what the pessimistic case already allowed.
     """
-    return min(fc.p10, 1.0) * dump_haircut
+    base = min(fc.p10, 1.0) * dump_haircut
+    if quote is None or quote.get_in <= 0 or not face_each:
+        return base
+    face = float(face_each)
+    if face <= 0:
+        return base
+    observed = float(quote.get_in) / face
+
+    thinness = next((s.value for s in fc.signals
+                     if s.name == "float_thinness" and s.available), None)
+    if thinness is None:
+        # Price observed but no capacity to judge float against: assume the
+        # unfavourable regime rather than crediting a firm market.
+        decay = DECAY_THICK_FLOAT
+    else:
+        decay = DECAY_THICK_FLOAT + (DECAY_THIN_FLOAT - DECAY_THICK_FLOAT) * thinness
+    return max(base, observed * decay)
 
 
 def optimal_target(fc: MarkupForecast, face_each, qty: int,
                    buy: economics.BuyFees, sell: economics.SellFees,
                    salvage_price=None, hold_days: float = 90.0,
                    cost_each: Optional[Decimal] = None,
+                   quote: Optional[Quote] = None,
                    steps: int = 60) -> tuple:
     """Find the ask that maximizes expected value.
 
@@ -185,11 +225,19 @@ def optimal_target(fc: MarkupForecast, face_each, qty: int,
     and taking the argmax of EV is cheap and beats picking a round multiple
     by feel.
 
+    The sweep only has an interior maximum because the salvage price is held
+    fixed while ``p_clear`` decays with the ask. Anchor salvage to the ask
+    instead and the optimizer walks off into the tail, chasing an unbounded
+    upside against a downside that rises to meet it.
+
     Returns ``(best_multiple, best_eval)``.
     """
     face = money(face_each)
     if face <= ZERO:
         raise ValueError("face must be positive")
+    if salvage_price is None:
+        salvage_price = money(
+            face * Decimal(str(salvage_multiple(fc, face, quote))))
     cost = cost_each if cost_each is not None else \
         economics.landed_cost(face, qty, buy).cost_each
     be_mult = float(economics.breakeven_list_price(cost, qty, sell) / face)
@@ -224,7 +272,7 @@ def recommend(event: Event, face_each, qty: int,
     hold_days = max(1.0, event.days_until(at))
     mult, trade = optimal_target(
         fc, face_each, qty, buy, sell, salvage_price=salvage_price,
-        hold_days=hold_days, cost_each=cost_each,
+        hold_days=hold_days, cost_each=cost_each, quote=quote,
     )
 
     if fc.confidence < min_confidence:

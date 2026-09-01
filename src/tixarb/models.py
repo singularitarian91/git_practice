@@ -98,6 +98,22 @@ class Artist:
             return None
         return (self.followers - self.followers_90d_ago) / self.followers_90d_ago
 
+    @property
+    def draw_proxy(self) -> int:
+        """Best available estimate of national audience size.
+
+        Prefers monthly listeners when known. Spotify's Web API does not
+        expose that figure, so the fallback scales follower count -- see
+        FOLLOWERS_TO_LISTENERS in the Spotify adapter for the ratio and its
+        caveats. Returns 0 when neither is known, so features abstain rather
+        than score a fabricated audience.
+        """
+        if self.monthly_listeners > 0:
+            return self.monthly_listeners
+        if self.followers > 0:
+            return int(self.followers * 12)
+        return 0
+
 
 @dataclass(frozen=True)
 class SaleWindow:
