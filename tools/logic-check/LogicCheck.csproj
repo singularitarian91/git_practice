@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Smoke test for the pure-logic parts of Hearthmoor, runnable without the Unity Editor.
+    Compiles the listed runtime files + the EditMode tests against tiny stand-ins for
+    UnityEngine and NUnit (see Stubs/), then runs every [Test]. Same C# level as Unity 6 (C# 9).
+    Unity's own Test Runner (Window ▸ General ▸ Test Runner) remains the source of truth.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>Hearthmoor.LogicCheck</RootNamespace>
+    <NoWarn>CS0649;CS0414;CS1591;CS0108</NoWarn>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Runner.cs" />
+    <Compile Include="Stubs/**/*.cs" />
+
+    <!-- Runtime files with no real Unity dependency (or only what the stubs cover). -->
+    <Compile Include="../../Assets/_Hearthmoor/Code/Runtime/Core/Frames.cs" />
+    <Compile Include="../../Assets/_Hearthmoor/Code/Runtime/Core/GameClock.cs" />
+    <Compile Include="../../Assets/_Hearthmoor/Code/Runtime/Core/CombatClock.cs" />
+    <Compile Include="../../Assets/_Hearthmoor/Code/Runtime/Core/HitstopTimer.cs" />
+    <Compile Include="../../Assets/_Hearthmoor/Code/Runtime/Core/HmLayers.cs" />
+    <Compile Include="../../Assets/_Hearthmoor/Code/Runtime/Input/InputBuffer.cs" />
+
+    <!-- Every EditMode test. If a new test needs a Unity type the stubs lack, extend Stubs/UnityStubs.cs. -->
+    <Compile Include="../../Assets/_Hearthmoor/Code/Tests/EditMode/**/*.cs" />
+  </ItemGroup>
+
+</Project>

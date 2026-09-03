@@ -1,0 +1,32 @@
+{
+  "name": "Hearthmoor.Runtime",
+  "rootNamespace": "Hearthmoor",
+  "references": [
+    "Unity.InputSystem",
+    "Unity.Cinemachine",
+    "Unity.RenderPipelines.Universal.Runtime"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "HM_HAS_INPUTSYSTEM",
+    "HM_HAS_CINEMACHINE"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.7.0",
+      "define": "HM_HAS_INPUTSYSTEM"
+    },
+    {
+      "name": "com.unity.cinemachine",
+      "expression": "3.0.0",
+      "define": "HM_HAS_CINEMACHINE"
+    }
+  ],
+  "noEngineReferences": false
+}

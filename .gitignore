@@ -1,0 +1,60 @@
+# ---- Unity generated (never commit) ----
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Asset meta files must be kept — only ignore a .meta when its asset is ignored too
+!/[Aa]ssets/**/*.meta
+
+# Addressables / streaming build output
+/[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
+/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# ---- tools/logic-check build output ----
+/tools/**/bin/
+/tools/**/obj/
+
+# ---- IDE / solution files (Unity regenerates these) ----
+ExportedObj/
+.consulo/
+*.csproj
+!/tools/**/*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+.vs/
+.idea/
+.vscode/
+*.swp
+
+# ---- Crash / build artefacts ----
+sysinfo.txt
+crashlytics-build.properties
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# ---- OS ----
+.DS_Store
+Thumbs.db

@@ -1,7 +1,8 @@
 # Hearthmoor — Milestone 1 Architecture Proposal
 
-**Status: PROPOSAL — waiting for go-ahead.** Nothing in the Unity project is built yet.
-Written 2026-09-03. This doc is the standing reference; it gets updated at each milestone.
+**Status: APPROVED 2026-09-03 — building Milestone 1, step 1.** Decisions taken: this repo is the
+Unity project; Unity 6.1/6.2+; attacks are free and dodging costs a little stamina; Zelda-style
+soft lock-on. This doc is the standing reference; it gets updated at each milestone.
 
 ---
 
@@ -52,7 +53,8 @@ Hearthmoor/                     ← Unity project root = git repo root
 │  │  │  │  ├─ View/            ← the art/logic bridge (placeholder view now, animator view later)
 │  │  │  │  └─ UI/              ← debug HUD, health/stamina bars
 │  │  │  ├─ Editor/             ← editor-only tools (Hearthmoor.Editor): asset generators, gizmos, inspectors
-│  │  │  └─ Tests/              ← automated checks of the combat maths (Hearthmoor.Tests)
+│  │  │  ├─ Setup/              ← tiny dependency-free bootstrap (Hearthmoor.Setup): the package installer menu
+│  │  │  └─ Tests/              ← automated checks of the combat maths (Hearthmoor.Tests.EditMode)
 │  │  ├─ Data/                  ← ScriptableObject assets = the game's "spreadsheets"
 │  │  │  ├─ Moves/              ← one asset per attack (Sword_Light1, Sword_Launcher, Rusher_Bite …)
 │  │  │  ├─ MoveSets/           ← which button + direction → which move (Sword, Rusher, Shieldbearer)
@@ -91,7 +93,8 @@ Hearthmoor/                     ← Unity project root = git repo root
   them from mixing with ours.
 - **Code is split by *system*, not by *type*** (no `Scripts/Managers`, `Scripts/Controllers`).
   When something's wrong with dodging, everything about dodging is in one place.
-- **Only three assemblies** (Runtime, Editor, Tests). Assembly definitions make Unity recompile
+- **Only three assemblies** (Runtime, Editor, Tests) plus a tiny fourth, `Setup`, that has no dependencies so its
+  package-installer menu exists even in a fresh project. Assembly definitions make Unity recompile
   only what changed — a big iteration-speed win — but too many of them create confusing
   "can't see that type" errors. Three is the sweet spot for a project this size.
 - **Data lives beside code, not inside prefabs.** Every attack, enemy and feel profile is a
@@ -107,9 +110,10 @@ Hearthmoor/                     ← Unity project root = git repo root
 - **Editor speed:** Enter Play Mode Options with *Reload Domain* off — turns the 5–10 s wait when
   pressing Play into ~0.5 s. Costs one coding discipline (no static state that assumes a fresh
   start), which I'll follow.
-- **Physics layers** defined once as constants: `Player`, `Enemy`, `PlayerHitbox`, `EnemyHitbox`,
-  `Hurtbox`, `Ground`, `Climbable`, `Water`, `Interactable`, `Projectile`. The collision matrix is
-  set so hitboxes only ever "see" hurtboxes.
+- **Physics layers** defined once as constants (`HmLayers.cs`): `Ground`, `Climbable`, `Player`,
+  `Enemy`, `PlayerHurtbox`, `EnemyHurtbox`, `Projectile`, `Prop`, `Interactable` (plus Unity's own
+  `Default` and `Water`). Hitboxes are queries, not colliders, so the collision matrix only has to
+  make sure hurtboxes collide with nothing.
 - **Timing:** physics at 60 Hz; game logic runs per-frame with all combat timings *authored in
   frames at 60* (explained in Decision C).
 
@@ -433,17 +437,16 @@ Each step ends with something you can press Play on.
 
 ---
 
-## 10. Open questions before I start
+## 10. Open questions — answered
 
-1. **Where does the Unity project live?** Recommended: this repo *is* the Unity project (repo root
-   = project root). It currently holds a couple of unrelated practice files (`README.txt`,
-   `visualizer.html`) — OK to remove?
-2. **Unity version?** Assumed Unity 6 LTS (6000.x).
-3. **Do attacks cost stamina?** BOTW: no (only special moves). Valheim: everything does. For
-   "Smash feel" I recommend **no** — attacks free, dodge costs a little, climbing / gliding /
-   sprinting cost stamina. Combat stays fast; exploration stays tense.
-4. **Lock-on style?** Zelda soft-lock (camera frames the target, you still move freely) vs. Souls
-   hard-lock (you strafe around them). Recommend Zelda-style — it suits Smash-like mobility.
+1. **Where does the Unity project live?** — *Decided: this repo is the Unity project* (repo root =
+   project root). The old practice files (`README.txt`, `visualizer.html`) were moved to `archive/`
+   so they don't sit in the Unity project root; delete that folder whenever you like.
+2. **Unity version?** — *Decided: Unity 6.1 / 6.2 or newer (6000.x).*
+3. **Do attacks cost stamina?** — *Decided: no.* Attacks free, dodge costs a little, climbing /
+   gliding / sprinting cost stamina. Combat stays fast; exploration stays tense.
+4. **Lock-on style?** — *Decided: Zelda-style soft lock* (camera frames the target, you still move
+   freely).
 
 ---
 
