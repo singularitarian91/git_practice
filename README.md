@@ -20,24 +20,27 @@ Connect by USB or Bluetooth, press any button on the title screen. Chrome and Ed
 |---|---|
 | Left stick | Move (walk/run by stick magnitude) |
 | Right stick | Orbit camera |
-| □ | Light attack (6-hit string) |
-| △ | Charge attack C1–C6, depending on how many lights landed first |
-| ✕ | Dash / evade (i-frames). Hold to sprint |
+| □ | Light attack (6-hit string; fast unarmed jabs while the blade is thrown) |
+| △ | Charge attack C1–C6, depending on how many lights landed first. Recalls the blade if it's out |
+| ✕ | Roll: invincible for the first two thirds, vulnerable recovery after. Hold to sprint |
+| L2 | Guard. Tap as an enemy's white flash lands to **deflect**; hold to block. Red attacks break guard, so roll them |
+| R2 | Blade throw / recall. Reaper stance sticks it in the target and bleeds it; Wire stance lashes and pulls a line of enemies |
+| L1 | Blade Dash toward the lock-on target (unlocked after the first officer) |
+| R1 / R3 | Lock-on / cycle target |
 | ○ | Overdrive (Musou) when the gauge is full |
-| R1 / L1 | Lock-on / cycle target |
-| L2 | Guard. A perfectly timed guard reflects bullets |
-| R2 | Blade Dash toward the lock-on target |
-| D-pad ↑ | Stim (heal one segment, 3 per run) |
+| D-pad ↓ | EMP bomb: arcing grenade, big blast, stuns robots, hammers boss posture |
+| D-pad ↑ | Stim (heal one segment) |
 | D-pad ← → | Switch stance: Ronin / Reaper / Wire |
-| D-pad ↓ | Taunt (staggers nearby grunts, builds Musou) |
 | Options | Pause (input test, remap wizard, volume, restart) |
 | Share | Debug overlay and tuning panel |
-| L3 / R3 | Sprint lock / reset camera |
+| L3 | Sprint lock |
 | Touchpad | Toggle minimap size |
+
+**Combat rhythm.** Every enemy swing shows a cue over the attacker: cyan `!` means deflectable, red `!!` means perilous. The attacker flashes white on the deflect frame. A deflect costs you nothing, cracks the attacker's posture, and keeps your combo alive. Break their posture and they kneel with an amber marker; the next hit is a deathblow (instant on grunts, a large chunk on officers, 15% of the current segment on a boss). Enemies are open to bonus "punish" damage right after they swing. Rolling through an attack at the right moment triggers a slow-motion slip.
 
 If a browser reports a non-standard layout (some Bluetooth setups on Linux/Firefox), a remap wizard runs before the game starts and the mapping is saved in the browser.
 
-Keyboard: `WASD` move, `J` light, `K` charge, `Shift` dash, `L`/`Space` Overdrive, `Q` lock, `E` cycle, `Ctrl` guard, `F` blade dash, `1` stim, `Tab` stance, `T` taunt, `Esc` pause, `` ` `` debug, `M` mute. Mouse drag orbits the camera.
+Keyboard: `WASD` move, `J` light, `K` charge, `Shift` roll, `Ctrl` deflect/guard, `G` throw/recall, `B` bomb, `L`/`Space` Overdrive, `Q` lock, `E` cycle, `F` blade dash, `1` stim, `Tab` stance, `T` taunt, `Esc` pause, `` ` `` debug, `M` mute. Mouse drag orbits the camera.
 
 ### Story
 
