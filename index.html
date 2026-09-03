@@ -842,20 +842,35 @@ window.addEventListener('resize', () => { camera.aspect = innerWidth / innerHeig
 const CAM = {
   yaw: 0, pitch: 0.5, dist: CONFIG.camera.dist, target: V3(), trauma: 0, idleT: 0, lockT: 0, cine: null, fov: 55, pullback: 0,
   update(dt, player, lockTarget) {
-    if (this.cine) { this.cine.t += dt; this.cine.fn(this.cine.t, this); if (this.cine.t >= this.cine.dur) { this.cine.done && this.cine.done(); this.cine = null; } this.applyShake(dt); return; }
+    if (this.cine) { this.cine.t += dt; this.cine.fn(this.cine.t, this); if (this.cine.t >= this.cine.dur) { this.adoptPose(player); this.cine.done && this.cine.done(); this.cine = null; } this.applyShake(dt); return; }
+    const boss = BOSS.current && BOSS.current.alive && !BOSS.current.dead ? BOSS.current : null;
     const look = INPUT.look; const orbit = Math.abs(look.x) > 0.02 || Math.abs(look.y) > 0.02;
     if (orbit) { this.yaw -= look.x * CONFIG.camera.orbitSpeed * dt * (INPUT.lastDevice === 'pad' ? 1 : 2.5); this.pitch = clamp(this.pitch + look.y * 1.6 * dt, 0.2, 1.1); this.idleT = 0; } else this.idleT += dt;
     if (INPUT.pressed.camreset) { this.yaw = player.yaw + Math.PI; }
-    if (lockTarget) { const want = Math.atan2(lockTarget.pos.x - player.pos.x, lockTarget.pos.z - player.pos.z) + Math.PI; this.yaw = angLerp(this.yaw, want, 1 - Math.exp(-3 * dt)); }
+    const frame = lockTarget || boss; // during a boss fight the camera always keeps the boss in frame, lock-on or not
+    if (frame) { const want = Math.atan2(frame.pos.x - player.pos.x, frame.pos.z - player.pos.z) + Math.PI; if (lockTarget || this.idleT > 0.5) this.yaw = angLerp(this.yaw, want, 1 - Math.exp(-(lockTarget ? 3 : 1.8) * dt)); }
     else if (this.idleT > 1.2 && INPUT.move.y < -0.35) { this.yaw = angLerp(this.yaw, player.yaw + Math.PI, 1 - Math.exp(-1.1 * dt)); } // recenter only while pushing forward; backing toward the camera must never swing it
-    const near = ENEMIES.countNear(player.pos, 9); const wantDist = CONFIG.camera.dist + Math.min(6, near * 0.12) + (lockTarget ? 2 : 0) + this.pullback;
-    this.dist = damp(this.dist, wantDist, 3, dt);
-    const tgt = _v.copy(player.pos); tgt.y += 1.4; if (lockTarget) tgt.lerp(_v2.copy(lockTarget.pos).setY(lockTarget.pos.y + 1.4), 0.35);
+    const near = ENEMIES.countNear(player.pos, 9); let wantDist = CONFIG.camera.dist + Math.min(6, near * 0.12) + (lockTarget ? 2 : 0) + this.pullback;
+    let occl = 0;
+    if (boss) {
+      const bd = Math.hypot(boss.pos.x - player.pos.x, boss.pos.z - player.pos.z); wantDist = clamp(CONFIG.camera.dist + 2.5 + bd * 0.32 + boss.radius * 0.8, 13, 26);
+      // boss standing between the camera and the player: lift the camera over it
+      const cx = camera.position.x - player.pos.x, cz = camera.position.z - player.pos.z; const L2 = cx * cx + cz * cz || 1; const bx = boss.pos.x - player.pos.x, bz = boss.pos.z - player.pos.z; const proj = (bx * cx + bz * cz) / L2; const perp = Math.abs(bx * cz - bz * cx) / Math.sqrt(L2);
+      if (proj > 0.05 && proj < 1.05 && perp < boss.radius + 1.6) occl = 1;
+    }
+    this.occl = damp(this.occl || 0, occl, 4, dt); this.dist = damp(this.dist, wantDist, 3, dt);
+    const tgt = _v.copy(player.pos); tgt.y += 1.4;
+    if (lockTarget) tgt.lerp(_v2.copy(lockTarget.pos).setY(lockTarget.pos.y + Math.min(3, lockTarget.hitHeight || 1.4)), 0.35);
+    else if (boss) tgt.lerp(_v2.copy(boss.pos).setY(Math.min(3.5, boss.hitHeight * 0.8)), 0.3);
     this.target.lerp(tgt, 1 - Math.exp(-CONFIG.camera.lag * dt));
-    const p = this.pitch; const off = _v2.set(Math.sin(this.yaw) * Math.cos(p), Math.sin(p), Math.cos(this.yaw) * Math.cos(p)).multiplyScalar(this.dist);
+    const p = clamp(this.pitch + (boss ? 0.12 : 0) + this.occl * 0.55, 0.2, 1.3); const off = _v2.set(Math.sin(this.yaw) * Math.cos(p), Math.sin(p), Math.cos(this.yaw) * Math.cos(p)).multiplyScalar(this.dist);
     camera.position.copy(this.target).add(off); if (camera.position.y < 1.2) camera.position.y = 1.2;
     camera.lookAt(this.target); camera.fov = damp(camera.fov, this.fov, 6, dt); camera.updateProjectionMatrix();
     this.applyShake(dt);
+  },
+  adoptPose(player) { // continue smoothly from wherever a cinematic left the camera
+    const t = _v.copy(player.pos); t.y += 1.4; this.target.copy(t); const dx = camera.position.x - t.x, dz = camera.position.z - t.z, dy = camera.position.y - t.y; const h = Math.hypot(dx, dz) || 0.001;
+    this.yaw = Math.atan2(dx, dz); this.pitch = clamp(Math.atan2(dy, h), 0.2, 1.1); this.dist = clamp(Math.hypot(h, dy), 8, 26); camera.fov = 55; camera.updateProjectionMatrix(); this.occl = 0;
   },
   applyShake(dt) {
     this.trauma = Math.max(0, this.trauma - dt * 1.8); const s = this.trauma * this.trauma;
@@ -2012,7 +2027,7 @@ const GAME = {
     const z = ZONES[this.zone]; const pos = V3(0, 0, (z.z0 + z.z1) / 2 - 6); const b = BOSS.spawn(key, pos); this.zoneState = 'bossintro'; G.cine = true; ENEMIES.clearAll();
     document.body.classList.add('cine'); dofPass.enabled = true; glitch.mode = GlitchMode.SPORADIC; AUDIO.setMood(key === 'choir' ? 'final' : 'boss'); AUDIO.sfx('shout'); GAMEPAD.rumble(0.3, 0.9, 2500);
     PLAYER.lock = null; PLAYER.attack = null; VFX.ring(pos, COL.mag, 12, 1);
-    CAM.cinematic(2.8, (t, cam) => { const u = t / 2.8; const a = -0.8 + u * 2.2; const r = 16 - u * 4; camera.position.set(b.pos.x + Math.sin(a) * r, 3 + u * 5, b.pos.z + Math.cos(a) * r); camera.lookAt(b.pos.x, 3, b.pos.z); camera.fov = 45 + u * 10; camera.updateProjectionMatrix(); if (t > 0.5 && !b._card) { b._card = true; HUD.namecard(b.name, b.title, b.accent); } }, () => { G.cine = false; this.zoneState = 'boss'; document.body.classList.remove('cine'); dofPass.enabled = false; glitch.mode = GlitchMode.DISABLED; HUD.boss(b); HUD.objective('ELIMINATE ' + b.name); CAM.yaw = PLAYER.yaw + Math.PI; VFX.flash(0.3); HUD.commsQ.length = 0; HUD.commsT = 0; HUD.comms(key + 'Intro'); });
+    CAM.cinematic(2.8, (t, cam) => { const u = t / 2.8; const a = -0.8 + u * 2.2; const r = 16 - u * 4; camera.position.set(b.pos.x + Math.sin(a) * r, 3 + u * 5, b.pos.z + Math.cos(a) * r); camera.lookAt(b.pos.x, 3, b.pos.z); camera.fov = 45 + u * 10; camera.updateProjectionMatrix(); if (t > 0.5 && !b._card) { b._card = true; HUD.namecard(b.name, b.title, b.accent); } }, () => { G.cine = false; this.zoneState = 'boss'; document.body.classList.remove('cine'); dofPass.enabled = false; glitch.mode = GlitchMode.DISABLED; HUD.boss(b); HUD.objective('ELIMINATE ' + b.name); PLAYER.lock = b; VFX.flash(0.3); HUD.commsQ.length = 0; HUD.commsT = 0; HUD.comms(key + 'Intro'); });
   },
   onBossDefeated(b) {
     HUD.boss(null); WORLD.bossLight.intensity = 0; scene.fog.color.set(0x140a26); WORLD.rain.material.uniforms.uSpeed.value = CONFIG.rain.speed; this.coolant = false; WORLD.coolant.visible = false; this.pull = null; GAMEPAD.rumble(0.6, 0.6, 400);
