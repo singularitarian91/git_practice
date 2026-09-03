@@ -39,9 +39,21 @@ If a browser reports a non-standard layout (some Bluetooth setups on Linux/Firef
 
 Keyboard: `WASD` move, `J` light, `K` charge, `Shift` dash, `L`/`Space` Overdrive, `Q` lock, `E` cycle, `Ctrl` guard, `F` blade dash, `1` stim, `Tab` stance, `T` taunt, `Esc` pause, `` ` `` debug, `M` mute. Mouse drag orbits the camera.
 
-### Structure
+### Story
 
-Four sectors along one street: Streets (waves + officer), Plaza (KIRIN-9), Overpass (LADY OBSIDIAN), Data Cathedral (THE CHOIR). Each boss has a three-segment health bar; emptying a segment triggers a phase transition with a new moveset and arena change.
+Kōgen District, 2099. Meridian Corp's civic AI, THE CHOIR, has begun broadcasting a hymn through every implant in the district; anyone who listens stops being themselves. You play SABLE, an ex-Meridian blade whose partner Ilse Varga went into the Cathedral to stop it and came out singing. WREN, a netrunner, burned your link before the hymn reached it and rides comms while you cut through the district. Story is delivered through intro and epilogue cards, in-game comms triggered by what you do, and boss exchanges (KIRIN-9 is the mech that ended the Ward Nine riots; LADY OBSIDIAN is Ilse).
+
+### Structure and progression
+
+Four sectors along one street: Streets (waves, then an officer), Meridian Plaza (KIRIN-9), the Overpass (destroy three Choir relays, two officers, LADY OBSIDIAN), the Data Cathedral (THE CHOIR). Each boss has a three-segment health bar; emptying a segment triggers a phase transition with a new moveset and arena change.
+
+You start with the light string, charges C1–C3, dash, guard, Overdrive, and one stance. Abilities unlock as the story does:
+
+- First officer down: **Blade Dash** (homing strike on the lock-on target).
+- KIRIN-9 down: **Reaper stance** and charge finishers **C4–C5**.
+- LADY OBSIDIAN down: **Wire stance** and **C6**.
+
+Kills feed a **SYNC** level (10 levels) that raises damage and Overdrive gain. After each sector an uplink offers a choice of one of three **augments** (chain-reaction kills, a sixth health segment, a cutting dash trail, wave projectiles on the string finisher, faster Overdrive, and more), so each run builds differently. Stims start at one and grow by one per sector.
 
 ### Credits
 

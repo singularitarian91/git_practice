@@ -137,6 +137,28 @@ input[type=range]{width:100%;accent-color:var(--mag)}
 #debug{position:fixed;left:24px;top:140px;font-size:10px;letter-spacing:.1em;color:var(--amber);background:rgba(0,0,0,.6);padding:8px 10px;border:1px solid rgba(255,180,0,.4);display:none;z-index:15;white-space:pre;line-height:1.6}
 #debug.on{display:block}
 .lil-gui{--background-color:rgba(7,7,12,.9)!important;--widget-color:rgba(25,240,255,.15)!important;--focus-color:rgba(255,43,214,.3)!important;--text-color:#dfe8ff!important;--font-family:var(--mono)!important;--font-size:10px!important;z-index:16!important}
+/* comms + cards + augments + sync */
+#comms{position:absolute;left:24px;bottom:222px;width:400px;opacity:0;transition:opacity .25s;pointer-events:none}
+#comms.on{opacity:1}
+#comms .who{font-size:10px;letter-spacing:.35em;color:var(--cacc,#19f0ff);margin-bottom:4px;display:flex;align-items:center;gap:8px}
+#comms .who i{display:inline-block;width:8px;height:8px;background:var(--cacc,#19f0ff);box-shadow:0 0 8px var(--cacc,#19f0ff);animation:blink 1s steps(2) infinite}
+#comms .txt{font-size:12px;line-height:1.55;color:#fff;border-left:2px solid var(--cacc,#19f0ff);padding:6px 10px;background:rgba(7,7,12,.7);letter-spacing:.04em;min-height:34px}
+#sync{margin-top:6px;display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:.25em;color:var(--amber)}
+#sync i{flex:1;height:4px;background:rgba(255,255,255,.1);position:relative}
+#sync i b{position:absolute;left:0;top:0;bottom:0;background:var(--amber);box-shadow:0 0 8px var(--amber);width:0}
+#cards .card{max-width:760px;padding:0 30px;text-align:center}
+#cards h2{font-size:14px;letter-spacing:.6em;color:var(--mag);margin:0 0 22px;text-shadow:0 0 14px var(--mag)}
+#cards p{font-size:clamp(15px,2vw,22px);line-height:1.7;margin:0 0 14px;color:#e8eeff;letter-spacing:.03em}
+#cards p.q{color:var(--cyan)}
+#cards .card{animation:cardin .7s ease-out}
+@keyframes cardin{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+#cards .small{margin-top:40px}
+#augments .panel{min-width:min(760px,90vw)}
+#augments .menu{flex-direction:row;gap:14px}
+#augments .item{flex:1;text-align:left;padding:16px 16px 16px 26px;min-height:120px}
+#augments .item b{display:block;font-size:13px;letter-spacing:.2em;margin-bottom:8px;color:#fff}
+#augments .item small{font-size:10px;line-height:1.6;letter-spacing:.08em;opacity:.75}
+#augments .item.sel b{color:var(--cyan)}
 #credits{position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:9px;letter-spacing:.15em;opacity:.5;line-height:1.8;padding:0 20px}
 kbd{font:inherit}
 </style>
@@ -170,6 +192,7 @@ kbd{font:inherit}
     <div class="tag">integrity</div>
     <div id="hp"></div>
     <div id="musou"><i></i></div>
+    <div id="sync">SYNC 01<i><b></b></i></div>
     <div id="stims">STIMS ▮▮▮</div>
     <div id="stance">STANCE · RONIN</div>
   </div>
@@ -194,6 +217,7 @@ kbd{font:inherit}
       <div class="cell"><div class="ghost"></div><div class="fill"></div></div>
     </div>
   </div>
+  <div id="comms"><div class="who"><i></i><span id="commsWho">WREN</span></div><div class="txt" id="commsTxt"></div></div>
   <div id="minimap"><canvas id="mm" width="300" height="300"></canvas></div>
   <div id="prompts"></div>
   <div id="stamp"></div>
@@ -218,6 +242,19 @@ kbd{font:inherit}
   </div>
 </div>
 
+<div id="cards" class="screen" hidden>
+  <div class="card" id="cardBody"></div>
+  <div class="small"><span id="cardPrompt">CONTINUE [○]</span> · <span id="cardCount"></span></div>
+</div>
+
+<div id="augments" class="screen" hidden>
+  <div class="panel"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+    <div class="tag">uplink node · choose one augment</div>
+    <div class="menu" id="augmenu"></div>
+    <div class="small" id="augnote"></div>
+  </div>
+</div>
+
 <div id="remapscr" class="screen" hidden>
   <div class="panel" id="remap"><h2>CONTROLLER REMAP</h2><div class="tag">press the button shown · hold to skip</div><div class="ask" id="remapask">✕</div><div class="small" id="remapinfo"></div></div>
 </div>
@@ -229,8 +266,8 @@ kbd{font:inherit}
 </div>
 
 <div id="results" class="screen" hidden>
-  <div class="tag">mission complete</div>
-  <div class="logo" style="font-size:clamp(30px,6vw,80px)">DISTRICT LIBERATED</div>
+  <div class="tag">kōgen district · silence restored</div>
+  <div class="logo" style="font-size:clamp(30px,6vw,80px)">THE HYMN STOPS</div>
   <div style="display:flex;gap:60px;align-items:center;margin-top:20px">
     <table><tr><td>K.O.</td><td id="rKills">0</td></tr><tr><td>MAX COMBO</td><td id="rCombo">0</td></tr><tr><td>TIME</td><td id="rTime">0</td></tr><tr><td>DAMAGE TAKEN</td><td id="rDmg">0</td></tr><tr><td>DIFFICULTY</td><td id="rDiff">RONIN</td></tr></table>
     <div id="rank">S</div>
@@ -289,6 +326,61 @@ const DIFF = [
   { name: 'ROOKIE', hp: 0.7, tokens: 3, bossSpeed: 0.8, dmg: 0.7 },
   { name: 'RONIN',  hp: 1.0, tokens: 4, bossSpeed: 1.0, dmg: 1.0 },
   { name: 'SHOGUN', hp: 1.5, tokens: 6, bossSpeed: 1.25, dmg: 1.4 },
+];
+
+/* =====================================================================
+   STORY — premise, comms lines, unlock beats
+   ===================================================================== */
+const SECTOR_TITLES = [['THE STREETS', 'Kōgen lower ward · curfew in effect'], ['MERIDIAN PLAZA', "the Warden's post"], ['THE OVERPASS', 'relay line to the Cathedral'], ['THE DATA CATHEDRAL', 'where the hymn is sung']];
+const STORY = {
+  intro: [
+    ['KŌGEN DISTRICT · 2099', ['Meridian Corp built THE CHOIR to run the district: traffic, power, the courts.', 'Three weeks ago it began broadcasting a hymn through every implant in Kōgen.', 'Those who listened stopped being themselves.']],
+    ['SABLE', ['You were a Meridian blade. Your partner, ILSE VARGA, walked into the Cathedral to pull the plug.', 'She came out singing.']],
+    ['WREN · NETRUNNER', ['"I burned your link before the hymn reached it. You are the only person in the district who can\'t hear it."', '"So you\'re going in the front door, and I\'ll be in your ear. Cut through. Reach the Cathedral. Make it stop."']],
+  ],
+  epilogue: [
+    ['SILENCE', ['The hymn stops mid-note. Across Kōgen a hundred thousand people stand very still, and then begin to cry.', 'They remember everything they did.']],
+    ['ILSE', ['Her last message is still queued in your implant, sent from inside the Cathedral before the singing began.', '"Whatever I become in there, cut it down. Promise me."']],
+    ['WREN', ['"Meridian is already spinning it. Rogue AI, isolated incident, thoughts and prayers."', '"Get some sleep, Sable. Tomorrow we go after the people who built it."']],
+  ],
+};
+const COMMS = {
+  start: [['WREN', 'Comms check. Gate crews are Meridian security drones and harmonized locals. The Choir calls them choristers. Cut through and reach the plaza gate.']],
+  wave2: [['WREN', "They're not themselves, Sable. Make it quick."]],
+  wave4: [['WREN', 'Mercs on the line. Real people, real guns. Guard on the burst and the perfect timing throws it right back.']],
+  officer: [['WREN', "Officer on the field. Meridian hardens their implants; you'll have to earn that one."]],
+  officerDown: [['WREN', "Pulling firmware off the officer's rig... got it. Grapple-wire drivers. You have a BLADE DASH now. Lock on and let it pull you in."]],
+  augment: [['WREN', "Uplink node ahead. I can push one augment package into your implant. Pick whatever suits how you fight."]],
+  plaza: [['WREN', "Meridian Plaza. KIRIN-9 is posted here. It's the mech that ended the Ward Nine riots. Don't stand in front of the cannon."]],
+  kirinIntro: [['KIRIN-9', 'CITIZEN. YOU ARE NOT IN HARMONY. STAND STILL.'], ['SABLE', 'You put down Ward Nine. Six hundred people.'], ['KIRIN-9', 'SIX HUNDRED AND FOUR.']],
+  kirinPhase: [['WREN', "Its reactor is cooking! Hit it from the front while the chest is open, and stay out of the coolant."]],
+  kirinDead: [['WREN', "Servo core intact. Pushing its drivers into your blade arm... that's REAPER stance, and two new charge finishers. Heavier. Slower. Worth it."]],
+  overpass: [['WREN', "The overpass. Three relays here boost the hymn into the Cathedral. Movement on the thermal, too. Someone fast."]],
+  relays: [['WREN', 'Cut the relays. While they stand, every drone in the district has guidance.']],
+  relaysDone: [['WREN', "Relays dark. It knows you're coming now."]],
+  obsidianIntro: [['LADY OBSIDIAN', 'Sable. You still drag your left foot on the entry.'], ['SABLE', 'Ilse. Come out of it. Please.'], ['LADY OBSIDIAN', 'I can hear everyone. Every single one of them. Why would I ever come out?']],
+  obsidianPhase: [['WREN', "The real one runs hotter, watch the glow. And DASH through the wires, don't jump them."]],
+  obsidianDead: [['SABLE', "I'm sorry."], ['WREN', "...Her monofilament is still spooled. Take it. That's WIRE stance and the last finisher. She'd want you to finish this."]],
+  cathedral: [['WREN', 'The Cathedral. Every voice in Kōgen is routed through that core. Shield nodes first, then the core. Go.']],
+  choirIntro: [['THE CHOIR', 'WE ARE ONE HUNDRED THOUSAND VOICES, AND ONE OF THEM IS YOURS. YOU SIMPLY CANNOT HEAR IT YET.'], ['SABLE', 'Then listen closely to this part.']],
+  choirPhase: [['WREN', "Nodes down, the core is open! It's pulling everything it has. Hold on!"]],
+  lowHp: [['WREN', "Sable, your integrity is critical. Stim, now."]],
+  sync: [['WREN', 'Sync level up. Your implant is learning the blade faster than Meridian ever taught it.']],
+};
+const XP_LEVELS = [30, 70, 120, 180, 250, 330, 420, 520, 630, 750];
+const AUGMENTS = [
+  { id: 'overclock', name: 'OVERCLOCK BLADE', desc: '+25% blade damage.' },
+  { id: 'hemostat', name: 'HEMOSTATIC LOOP', desc: 'Every 40 K.O. restores one integrity segment.' },
+  { id: 'buffer', name: 'KINETIC BUFFER', desc: 'Guard absorbs 95% and the perfect-guard window doubles.' },
+  { id: 'chain', name: 'CHAIN REACTOR', desc: 'Kills detonate, damaging everything nearby.' },
+  { id: 'afterburner', name: 'AFTERBURNER', desc: 'Dash recharges twice as fast and cuts what it passes through.' },
+  { id: 'breaker', name: 'CHOIR BREAKER', desc: '+50% damage to officers and bosses.' },
+  { id: 'capacitor', name: 'SURGE CAPACITOR', desc: 'Overdrive gauge charges 60% faster.' },
+  { id: 'synth', name: 'STIM SYNTHESIS', desc: '+2 stims now and after every sector.' },
+  { id: 'segment', name: 'SIXTH SEGMENT', desc: '+1 max integrity segment.' },
+  { id: 'storm', name: 'BLADE STORM', desc: 'The last two hits of the light string fire a cutting wave.' },
+  { id: 'filament', name: 'VAMPIRIC FILAMENT', desc: 'Blade Dash heals on every hit.' },
+  { id: 'tempo', name: 'TEMPO DRIVE', desc: 'Attack speed +15%.' },
 ];
 
 /* ============================ RNG ============================ */
@@ -1033,7 +1125,7 @@ const BULLETS = {
     for (let k = this.list.length - 1; k >= 0; k--) {
       const b = this.list[k]; b.life -= dt; b.p.addScaledVector(b.d, b.speed * dt); let dead = b.life <= 0;
       if (!dead && b.owner === 'enemy') { const dx = b.p.x - player.pos.x, dz = b.p.z - player.pos.z; if (dx * dx + dz * dz < 0.55 && b.p.y < 2.2) { if (player.guarding()) { if (player.perfectGuardT > 0) { b.owner = 'player'; b.d.negate(); b.speed *= 1.4; b.dmg = 2; AUDIO.sfx('guard'); VFX.spark(b.p, COL.white, 6); VFX.number(player.pos, 'REFLECT', '#19f0ff'); } else { dead = true; AUDIO.sfx('guard'); VFX.spark(b.p, COL.cyan, 3); COMBAT.damagePlayer(b.dmg * 0.2, 'bullet'); } } else { dead = true; COMBAT.damagePlayer(b.dmg, 'bullet'); VFX.spark(b.p, COL.amber, 4); } } }
-      else if (!dead && b.owner === 'player') { const e = ENEMIES.nearest(b.p, 1.2); if (e) { COMBAT.damageEnemy(e, b.dmg, { heavy: true, dir: b.d, source: 'reflect' }); dead = true; } }
+      else if (!dead && b.owner === 'player') { const e = ENEMIES.nearest(b.p, b.dmg >= 1.5 ? 1.6 : 1.2); if (e) { COMBAT.damageEnemy(e, b.dmg, { heavy: true, dir: b.d, source: 'reflect' }); if (b.dmg < 1.5) dead = true; else { b.dmg *= 0.7; if (b.dmg < 0.5) dead = true; } } for (const d of DRONES.list) { if (d.alive && d.p.distanceToSquared(b.p) < 1.2) DRONES.kill(d); } }
       if (dead) { this.list.splice(k, 1); continue; }
       _m.lookAt(_v.copy(b.p).add(b.d), b.p, _v2.set(0, 1, 0)); _q.setFromRotationMatrix(_m); _m.compose(b.p, _q, _v3.set(1, 1, 1)); M.setMatrixAt(i++, _m);
     }
@@ -1085,13 +1177,15 @@ const COMBAT = {
     for (const e of ENEMIES.alive) { if (e.dead || !test(e.pos.x, e.pos.z, e.radius)) continue; if (opts.hitSet && opts.hitSet.has(e)) continue; opts.hitSet && opts.hitSet.add(e); this.damageEnemy(e, opts.dmg, { ...opts, dir: _v.set(e.pos.x - origin.x, 0, e.pos.z - origin.z).normalize() }); n++; }
     for (const b of BOSS.active()) { for (const t of b.targets()) { if (t.dead || !test(t.pos.x, t.pos.z, t.radius)) continue; if (opts.hitSet && opts.hitSet.has(t)) continue; opts.hitSet && opts.hitSet.add(t); this.damageEnemy(t, opts.dmg, { ...opts, dir: _v.set(t.pos.x - origin.x, 0, t.pos.z - origin.z).normalize() }); n++; } }
     for (const d of DRONES.list) { if (!d.alive || !test(d.p.x, d.p.z, 0.5)) continue; DRONES.kill(d); G.combo++; G.comboT = CONFIG.combat.comboDecay; n++; }
+    for (const r of RELAYS.list) { if (r.dead || !test(r.pos.x, r.pos.z, r.radius)) continue; if (opts.hitSet && opts.hitSet.has(r)) continue; opts.hitSet && opts.hitSet.add(r); this.damageEnemy(r, opts.dmg, { ...opts }); n++; }
     return n;
   },
   damageEnemy(e, dmg, opts = {}) {
     if (e.dead || e.invulnT > 0) { if (e.invulnT > 0 && e.isBoss) VFX.number(e.pos, 'SHIELDED', '#8899aa'); return; }
     let crit = rng() < CONFIG.combat.critChance; if (e.weakpointMul && opts.dir) { const facing = e.facingDot(opts.dir); if (facing < -0.3) { dmg *= e.weakpointMul; crit = true; VFX.number(e.pos, 'WEAK POINT', '#ffb400'); } }
     if (crit) dmg *= 2;
-    const stance = PLAYER.stanceDef; dmg *= opts.source === 'reflect' ? 1 : stance.dmg;
+    const stance = PLAYER.stanceDef; dmg *= opts.source === 'reflect' ? 1 : stance.dmg; dmg *= PLAYER.dmgMul(); if (PLAYER.augs.has('breaker') && (e.isBoss || e.officer || e.isPart)) dmg *= 1.5;
+    if (opts.source === 'bladedash' && PLAYER.augs.has('filament')) PLAYER.heal(0.08, true);
     e.hp -= dmg; e.hitFlash = 0.12;
     const hitPos = _v2.copy(e.pos); hitPos.y += e.hitHeight; hitPos.x += rnd(-0.3, 0.3); hitPos.z += rnd(-0.3, 0.3);
     const sparkCol = crit ? COL.amber : e.kind === 'robot' ? COL.cyan : COL.mag;
@@ -1100,7 +1194,7 @@ const COMBAT = {
     VFX.number(e.pos, crit ? 'CRIT ' + (dmg * 10).toFixed(0) : (dmg * 10).toFixed(0), crit ? '#ffb400' : e.kind === 'robot' ? '#19f0ff' : '#ff2bd6', crit || !!opts.big);
     AUDIO.sfx(e.kind === 'robot' ? 'metal' : 'thud'); if (crit) AUDIO.sfx('crit');
     G.combo++; G.comboT = CONFIG.combat.comboDecay; G.maxCombo = Math.max(G.maxCombo, G.combo);
-    PLAYER.musou = Math.min(1, PLAYER.musou + (opts.heavy ? 0.018 : 0.009) * (e.isBoss ? 0.6 : 1));
+    PLAYER.musou = Math.min(1, PLAYER.musou + (opts.heavy ? 0.018 : 0.009) * (e.isBoss ? 0.6 : 1) * PLAYER.musouMul());
     const stop = e.isBoss ? 0 : opts.heavy ? CONFIG.combat.hitstopHeavy : CONFIG.combat.hitstopLight; G.hitstop = Math.max(G.hitstop, stop);
     CAM.shake(opts.heavy ? 0.28 : 0.14); GAMEPAD.rumble(opts.heavy ? 0.6 : 0.05, opts.heavy ? 0.3 : 0.3, opts.heavy ? 90 : 40);
     if (opts.dir && !e.isBoss) { const kbm = (opts.kb || 3) * (e.officer ? 0.25 : 1); e.kbVel.x += opts.dir.x * kbm; e.kbVel.z += opts.dir.z * kbm; if (opts.launch && !e.officer) { e.vy = opts.launch; e.launched = true; } }
@@ -1110,11 +1204,13 @@ const COMBAT = {
   kill(e) {
     if (e.dead) return; e.dead = true;
     if (e.isBoss || e.isPart) { e.onDeath(); return; }
-    G.kills++; HUD.kill();
+    G.kills++; HUD.kill(); PLAYER.gainXp(e.officer ? 25 : 1);
+    if (PLAYER.augs.has('hemostat') && G.kills % 40 === 0) { PLAYER.heal(1); VFX.number(PLAYER.pos, 'HEMOSTAT', '#19f0ff'); }
+    if (PLAYER.augs.has('chain') && !e.chained) { const cp = e.pos.clone(); VFX.ring(cp, COL.amber, 3.2, 0.3); setTimeout(() => { if (GAME.state !== 'play') return; for (const o of ENEMIES.alive) { if (o.dead) continue; const dx = o.pos.x - cp.x, dz = o.pos.z - cp.z; if (dx * dx + dz * dz < 10) { o.chained = true; this.damageEnemy(o, 0.9, { heavy: false, kb: 4, dir: _v.set(dx, 0, dz).normalize(), source: 'chain' }); o.chained = false; } } }, 60); }
     const p = _v2.copy(e.pos); p.y += 0.8;
     VFX.debrisBurst(p, e.accent, e.officer ? 40 : 10); if (e.kind === 'organic') VFX.hexBurst(p, COL.mag, 16); else VFX.spark(p, COL.cyan, 12, 1.5, 5);
     AUDIO.sfx('kill', { gap: 0.08 });
-    if (e.officer) { G.hitstop = Math.max(G.hitstop, CONFIG.combat.hitstopOfficer); VFX.flash(0.35); CAM.shake(0.6); GAMEPAD.rumble(0.9, 0.5, 220); PLAYER.heal(1); PLAYER.musou = Math.min(1, PLAYER.musou + 0.35); HUD.stamp('OFFICER DOWN', e.officerName); VFX.ring(e.pos, COL.amber, 8, 0.6); HUD.officer(null); }
+    if (e.officer) { G.hitstop = Math.max(G.hitstop, CONFIG.combat.hitstopOfficer); VFX.flash(0.35); CAM.shake(0.6); GAMEPAD.rumble(0.9, 0.5, 220); PLAYER.heal(1); PLAYER.musou = Math.min(1, PLAYER.musou + 0.35); HUD.stamp('OFFICER DOWN', e.officerName); VFX.ring(e.pos, COL.amber, 8, 0.6); HUD.officer(null); if (!PLAYER.unlocks.bladedash) { setTimeout(() => { PLAYER.unlock('bladedash', 'BLADE DASH', glyph('bladedash') + ' · homing strike on the lock-on target'); HUD.comms('officerDown'); }, 1400); } }
     else { GAMEPAD.rumble(0.4, 0.4, 60); }
     if (G.kills === 100 || G.kills === 500 || G.kills === 1000 || G.kills === 2000) { const names = { 100: 'BLOODED', 500: 'RONIN', 1000: 'ONE-MAN ARMY', 2000: 'LEGEND' }; HUD.stamp(G.kills + ' K.O.', names[G.kills]); AUDIO.sfx('milestone'); GAMEPAD.rumble(1, 1, 400); if (G.kills === 1000) GAME.slowmo(0.25, 1.4); }
     e.die();
@@ -1122,11 +1218,12 @@ const COMBAT = {
   damagePlayer(dmg, src = 'melee', fromPos = null) {
     const P = PLAYER; if (P.dead || P.invuln()) return false;
     dmg *= DIFF[G.diff].dmg;
-    if (P.guarding()) { if (P.perfectGuardT > 0) { AUDIO.sfx('guard'); VFX.spark(P.pos.clone().setY(1.2), COL.white, 10); VFX.number(P.pos, 'PERFECT', '#19f0ff'); P.musou = Math.min(1, P.musou + 0.06); return false; } dmg *= 1 - CONFIG.player.guardReduce; AUDIO.sfx('guard'); VFX.spark(P.pos.clone().setY(1.2), COL.cyan, 4); }
+    if (P.guarding()) { if (P.perfectGuardT > 0) { AUDIO.sfx('guard'); VFX.spark(P.pos.clone().setY(1.2), COL.white, 10); VFX.number(P.pos, 'PERFECT', '#19f0ff'); P.musou = Math.min(1, P.musou + 0.06); return false; } dmg *= 1 - (P.augs.has('buffer') ? 0.95 : CONFIG.player.guardReduce); AUDIO.sfx('guard'); VFX.spark(P.pos.clone().setY(1.2), COL.cyan, 4); }
     P.hp -= dmg; G.dmgTaken += dmg; P.musou = Math.min(1, P.musou + dmg * 0.08);
     VFX.hurt(); CAM.shake(0.35 + dmg * 0.2); GAMEPAD.rumble(0.8, 0.2, 150); AUDIO.sfx('hurt', { gap: 0.1 }); aberrationBoost = Math.max(aberrationBoost, 0.6);
     if (!P.guarding() && src !== 'bullet' && src !== 'drone' && src !== 'hazard') { P.hitT = 0.3; P.rig.play('hit', { once: true }); if (fromPos) { _v.copy(P.pos).sub(fromPos).setY(0).normalize(); P.vel.addScaledVector(_v, 6); } }
     G.combo = 0;
+    if (P.hp > 0 && P.hp < 1.3 && !P.lowHpWarned) { P.lowHpWarned = true; HUD.comms('lowHp'); }
     if (P.hp <= 0) { P.hp = 0; GAME.die(); }
     return true;
   },
@@ -1140,7 +1237,15 @@ class PlayerClass {
     this.pos = V3(0, 0, 4); this.vel = V3(); this.yaw = Math.PI; this.hp = CONFIG.player.hpSegments; this.musou = 0; this.stims = CONFIG.player.stims; this.stance = 'ronin'; this.state = 'idle'; this.stateT = 0;
     this.comboIdx = 0; this.stringT = 0; this.dashT = 0; this.dashCd = 0; this.dashDir = V3(); this.iframes = 0; this.perfectGuardT = 0; this.guardHeld = false; this.musouT = 0; this.musouTick = 0; this.bladeDashT = 0; this.hitT = 0; this.dead = false; this.lock = null; this.sprintToggle = false; this.attack = null; this.attackHits = null; this.hitSet = null; this.landed = 0;
     this.rig = null; this.trailT = 0; this.stimT = 0; this.tauntT = 0;
+    this.unlocks = { bladedash: false, c4: false, c5: false, c6: false, reaper: false, wire: false }; this.augs = new Set(); this.xp = 0; this.level = 1; this.maxHp = CONFIG.player.hpSegments; this.maxStims = 1; this.lowHpWarned = false;
   }
+  maxCharge() { return this.unlocks.c6 ? 5 : this.unlocks.c5 ? 4 : this.unlocks.c4 ? 3 : 2; }
+  stances() { const k = ['ronin']; if (this.unlocks.reaper) k.push('reaper'); if (this.unlocks.wire) k.push('wire'); return k; }
+  dmgMul() { return (1 + 0.04 * (this.level - 1)) * (this.augs.has('overclock') ? 1.25 : 1); }
+  musouMul() { return (1 + 0.05 * (this.level - 1)) * (this.augs.has('capacitor') ? 1.6 : 1); }
+  gainXp(n) { if (this.level >= 10) return; this.xp += n; while (this.level < 10 && this.xp >= XP_LEVELS[this.level - 1]) { this.level++; HUD.stamp('SYNC LEVEL ' + this.level, '+damage · +overdrive gain'); AUDIO.sfx('milestone'); VFX.ring(this.pos, COL.amber, 4, 0.5); if (this.level === 3) HUD.comms('sync'); } HUD.sync(); }
+  unlock(key, label, sub) { if (this.unlocks[key]) return; this.unlocks[key] = true; HUD.stamp('NEW ABILITY · ' + label, sub || ''); AUDIO.sfx('milestone'); GAMEPAD.rumble(0.6, 0.9, 400); VFX.flash(0.25); HUD.prompts(); HUD.stance(); }
+  addAugment(a) { this.augs.add(a.id); if (a.id === 'synth') { this.maxStims += 2; this.stims += 2; } if (a.id === 'segment') { this.maxHp += 1; this.hp += 1; HUD.init(); } HUD.stims(); HUD.stamp(a.name, 'augment installed'); AUDIO.sfx('stim'); }
   get stanceDef() { return STANCES[this.stance]; }
   build() {
     this.rig = new Rig('rogue', { height: 1.85, mat: { color: 0x2a2a36, emissive: COL.cyan, emissiveIntensity: 0.15, metalness: 0.5, roughness: 0.4 }, accent: COL.cyan });
@@ -1161,13 +1266,13 @@ class PlayerClass {
     for (let i = 0; i < 8; i++) this.ribbon.push({ p: V3(0, 1.2 - i * 0.12, 0.3 + i * 0.1), v: V3() });
     this.reset();
   }
-  reset() { this.pos.set(0, 0, 4); this.vel.set(0, 0, 0); this.yaw = Math.PI; this.hp = CONFIG.player.hpSegments; this.musou = 0; this.stims = CONFIG.player.stims; this.state = 'idle'; this.dead = false; this.lock = null; this.attack = null; this.musouT = 0; this.rig.play('idle'); this.rig.root.visible = true; this.rig.model.rotation.x = 0; }
+  reset() { this.pos.set(0, 0, 4); this.vel.set(0, 0, 0); this.yaw = Math.PI; this.maxHp = CONFIG.player.hpSegments; this.hp = this.maxHp; this.musou = 0; this.maxStims = 1; this.stims = 1; this.stance = 'ronin'; this.state = 'idle'; this.dead = false; this.lock = null; this.attack = null; this.musouT = 0; this.bladeDashT = 0; this.dashT = 0; this.iframes = 0; this.unlocks = { bladedash: false, c4: false, c5: false, c6: false, reaper: false, wire: false }; this.augs = new Set(); this.xp = 0; this.level = 1; this.lowHpWarned = false; this.rig.play('idle'); this.rig.root.visible = true; this.rig.model.rotation.x = 0; }
   invuln() { return this.dashT > 0 || this.musouT > 0 || this.iframes > 0 || this.bladeDashT > 0; }
   guarding() { return this.guardHeld && !this.attack && this.dashT <= 0 && this.musouT <= 0; }
-  heal(seg) { this.hp = Math.min(CONFIG.player.hpSegments, this.hp + seg); VFX.ring(this.pos, COL.cyan, 3, 0.5); }
+  heal(seg, quiet = false) { this.hp = Math.min(this.maxHp, this.hp + seg); if (this.hp > 1.3) this.lowHpWarned = false; if (!quiet) VFX.ring(this.pos, COL.cyan, 3, 0.5); }
   forward() { return _v3.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)); }
   startAttack(def, isCharge) {
-    const st = this.stanceDef; this.attack = { def, t: 0, dur: def.dur / st.speed, arc: def.arc * st.arc, range: def.range * st.range, hits: def.hits ? def.hits.slice() : [0.42], charge: isCharge, dashed: false }; this.hitSet = new Set();
+    const st = this.stanceDef; this.attack = { def, t: 0, dur: def.dur / st.speed * (this.augs.has('tempo') ? 0.87 : 1), arc: def.arc * st.arc, range: def.range * st.range, hits: def.hits ? def.hits.slice() : [0.42], charge: isCharge, dashed: false }; this.hitSet = new Set();
     this.rig.play(def.anim, { once: true, timeScale: Math.max(0.6, (this.rig.has(def.anim) ? this.rig.actions[def.anim].getClip().duration : 0.5) / this.attack.dur), fade: 0.05 });
     AUDIO.sfx('whoosh'); if (isCharge) { VFX.number(this.pos, def.name, '#ffffff'); if (def.big) { CAM.shake(0.3); } }
     if (this.lock && !this.lock.dead) { this.yaw = Math.atan2(this.lock.pos.x - this.pos.x, this.lock.pos.z - this.pos.z); }
@@ -1180,16 +1285,16 @@ class PlayerClass {
     const P = CONFIG.player; this.stateT += dt; this.stringT -= dt; this.dashCd -= dt; this.iframes -= dt; this.perfectGuardT -= dt; this.hitT -= dt; this.stimT -= dt; this.tauntT -= dt;
     if (this.stringT <= 0) { this.comboIdx = 0; this.landed = 0; }
     this.guardHeld = INPUT.guard > 0.4;
-    if (INPUT.pressed.guardPress || (this.guardHeld && !this.wasGuard)) { this.perfectGuardT = P.perfectGuard; }
+    if (INPUT.pressed.guardPress || (this.guardHeld && !this.wasGuard)) { this.perfectGuardT = P.perfectGuard * (this.augs.has('buffer') ? 2 : 1); }
     this.wasGuard = this.guardHeld;
     // --- lock-on
     if (INPUT.pressed.lock) { this.lock = this.lock ? null : ENEMIES.bestLockTarget(this.pos, null); AUDIO.sfx('ui', { note: this.lock ? 'E6' : 'A5' }); }
     if (INPUT.pressed.cycle) { this.lock = ENEMIES.bestLockTarget(this.pos, this.lock); AUDIO.sfx('ui'); }
     if (this.lock && (this.lock.dead || this.lock.pos.distanceTo(this.pos) > 45)) this.lock = null;
     // --- stance / stims / taunt
-    if (INPUT.pressed.stance || INPUT.pressed.stanceR) { const k = Object.keys(STANCES); this.stance = k[(k.indexOf(this.stance) + 1) % k.length]; HUD.stance(); AUDIO.sfx('ui'); }
-    if (INPUT.pressed.stanceL) { const k = Object.keys(STANCES); this.stance = k[(k.indexOf(this.stance) + k.length - 1) % k.length]; HUD.stance(); AUDIO.sfx('ui'); }
-    if (INPUT.pressed.stim && this.stims > 0 && this.hp < P.hpSegments && this.stimT <= 0) { this.stims--; this.stimT = 1; this.heal(1); AUDIO.sfx('stim'); HUD.stims(); VFX.number(this.pos, 'STIM', '#19f0ff'); }
+    if ((INPUT.pressed.stance || INPUT.pressed.stanceR) && this.stances().length > 1) { const k = this.stances(); this.stance = k[(k.indexOf(this.stance) + 1) % k.length]; HUD.stance(); AUDIO.sfx('ui'); VFX.number(this.pos, this.stanceDef.name, '#ffffff'); }
+    if (INPUT.pressed.stanceL && this.stances().length > 1) { const k = this.stances(); this.stance = k[(k.indexOf(this.stance) + k.length - 1) % k.length]; HUD.stance(); AUDIO.sfx('ui'); VFX.number(this.pos, this.stanceDef.name, '#ffffff'); }
+    if (INPUT.pressed.stim && this.stims > 0 && this.hp < this.maxHp && this.stimT <= 0) { this.stims--; this.stimT = 1; this.heal(1); AUDIO.sfx('stim'); HUD.stims(); VFX.number(this.pos, 'STIM', '#19f0ff'); }
     if (INPUT.pressed.taunt && !this.attack && this.tauntT <= 0 && this.musouT <= 0) { this.tauntT = 1.2; this.musou = Math.min(1, this.musou + 0.05); this.rig.play('taunt', { once: true }); ENEMIES.staggerNear(this.pos, 5, 0.6); VFX.ring(this.pos, COL.white, 5, 0.4); AUDIO.sfx('shout'); }
     if (INPUT.pressed.sprintToggle) { this.sprintToggle = !this.sprintToggle; toast(this.sprintToggle ? 'SPRINT LOCKED' : 'SPRINT OFF'); }
     // --- musou
@@ -1205,11 +1310,11 @@ class PlayerClass {
     // --- blade dash
     if (this.bladeDashT > 0) {
       this.bladeDashT -= dt; this.pos.addScaledVector(this.dashDir, dt * P.bladeDashDist / 0.22); this.vel.set(0, 0, 0);
-      COMBAT.sweep(this.pos, this.yaw, 360, 2.4, { dmg: 3, kb: 7, heavy: true, hitSet: this.hitSet }); VFX.ghost(this.pos, this.yaw, COL.mag); this.pushTrail(0, 1);
+      COMBAT.sweep(this.pos, this.yaw, 360, 2.4, { dmg: 3, kb: 7, heavy: true, hitSet: this.hitSet, source: 'bladedash' }); VFX.ghost(this.pos, this.yaw, COL.mag); this.pushTrail(0, 1);
       if (this.bladeDashT <= 0) { this.rig.play('idle'); }
       this.integrate(dt); this.rig.update(dt); this.postUpdate(dt); return;
     }
-    if (INPUT.consume('bladedash') && !this.attack && this.dashT <= 0) {
+    if (INPUT.consume('bladedash') && this.unlocks.bladedash && !this.attack && this.dashT <= 0) {
       const tgt = this.lock && !this.lock.dead ? this.lock : ENEMIES.bestLockTarget(this.pos, null, 14);
       if (tgt) { this.dashDir.set(tgt.pos.x - this.pos.x, 0, tgt.pos.z - this.pos.z); const d = this.dashDir.length(); this.dashDir.normalize(); this.yaw = Math.atan2(this.dashDir.x, this.dashDir.z); this.bladeDashT = 0.22 * clamp(d / P.bladeDashDist, 0.3, 1) * clamp(0.5 + INPUT.bladeDash, 0.5, 1.2); }
       else { this.dashDir.copy(this.forward()); this.bladeDashT = 0.22; }
@@ -1218,11 +1323,12 @@ class PlayerClass {
     // --- dash
     if (this.dashT > 0) {
       this.dashT -= dt; this.vel.copy(this.dashDir).multiplyScalar(P.dashSpeed); if (G.frame % 3 === 0) VFX.ghost(this.pos, this.yaw, this.stanceDef.color);
+      if (this.augs.has('afterburner') && G.frame % 2 === 0) { COMBAT.sweep(this.pos, this.yaw, 360, 1.7, { dmg: 0.7, kb: 3, hitSet: this.hitSet, source: 'dash' }); VFX.spark(this.pos.clone().setY(0.6), COL.amber, 2, 0.5, 1); }
       if (this.dashT <= 0) { this.rig.play(INPUT.move.lengthSq() > 0.05 ? 'run' : 'idle'); }
       this.integrate(dt); this.rig.update(dt); this.postUpdate(dt); return;
     }
     if (INPUT.consume('dash') && this.dashCd <= 0) {
-      this.dashT = P.dashTime; this.dashCd = P.dashCd; this.attack = null; const md = this.moveDir(); if (INPUT.move.lengthSq() > 0.05) { this.dashDir.copy(md).normalize(); this.yaw = Math.atan2(md.x, md.z); } else this.dashDir.copy(this.forward()).negate().negate();
+      this.dashT = P.dashTime; this.dashCd = P.dashCd * (this.augs.has('afterburner') ? 0.5 : 1); this.attack = null; this.hitSet = new Set(); const md = this.moveDir(); if (INPUT.move.lengthSq() > 0.05) { this.dashDir.copy(md).normalize(); this.yaw = Math.atan2(md.x, md.z); } else this.dashDir.copy(this.forward()).negate().negate();
       this.rig.play('dodge', { once: true, timeScale: 1.8 }); AUDIO.sfx('dash'); GAMEPAD.rumble(0.1, 0.4, 60); aberrationBoost = Math.max(aberrationBoost, 0.5); INPUT.clearBuffer();
       this.integrate(dt); this.rig.update(dt); this.postUpdate(dt); return;
     }
@@ -1233,6 +1339,7 @@ class PlayerClass {
       while (a.hits.length && u >= a.hits[0]) {
         a.hits.shift(); const n = COMBAT.sweep(this.pos, this.yaw, a.arc, a.range, { dmg: a.def.dmg, kb: a.def.kb, launch: a.def.launch, heavy: a.charge, big: a.def.big, hitSet: a.def.hits ? new Set() : this.hitSet });
         if (n) { this.landed++; if (a.charge) { CAM.shake(0.2); } }
+        if (!a.charge && this.augs.has('storm') && this.comboIdx >= 5) { const o = this.pos.clone().setY(1.1); const f = this.forward().clone(); for (const off of [-0.25, 0, 0.25]) { const d = f.clone().applyAxisAngle(_v2.set(0, 1, 0), off); BULLETS.fire(o.clone().addScaledVector(d, 1.2), d, 'player', 20, 1.6); } AUDIO.sfx('whoosh'); }
         if (a.def.ring) { VFX.ring(this.pos, this.stanceDef.color, a.range, 0.45); CAM.shake(0.4); GAMEPAD.rumble(0.8, 0.4, 150); AUDIO.sfx('shatter'); }
         if (a.def.big) { VFX.flash(0.3); GAME.slowmo(0.4, 0.3); }
       }
@@ -1241,13 +1348,13 @@ class PlayerClass {
       // allow the next input to queue in the last 45% of the swing
       if (u > 0.55) {
         if (INPUT.consume('light') && !a.charge && this.comboIdx < LIGHTS.length) { this.stringT = 0.8; const def = LIGHTS[this.comboIdx]; this.comboIdx++; this.startAttack(def, false); return this.finish(dt); }
-        if (INPUT.consume('heavy') && !a.charge) { const ci = clamp(this.comboIdx, 0, 5); this.startAttack(CHARGES[ci], true); this.comboIdx = 0; this.stringT = 0; return this.finish(dt); }
+        if (INPUT.consume('heavy') && !a.charge) { const ci = clamp(this.comboIdx, 0, this.maxCharge()); this.startAttack(CHARGES[ci], true); this.comboIdx = 0; this.stringT = 0; return this.finish(dt); }
       }
       if (u >= 1) { this.attack = null; this.rig.play(INPUT.move.lengthSq() > 0.05 ? 'run' : 'idle'); if (!a.charge) this.stringT = 0.8; }
       this.vel.multiplyScalar(0.82); this.integrate(dt); this.rig.update(dt); this.postUpdate(dt); return;
     }
     if (INPUT.consume('light')) { if (this.comboIdx >= LIGHTS.length) this.comboIdx = 0; const def = LIGHTS[this.comboIdx]; this.comboIdx++; this.stringT = 0.8; this.startAttack(def, false); return this.finish(dt); }
-    if (INPUT.consume('heavy')) { const ci = clamp(this.comboIdx, 0, 5); this.startAttack(CHARGES[ci], true); this.comboIdx = 0; this.stringT = 0; return this.finish(dt); }
+    if (INPUT.consume('heavy')) { const ci = clamp(this.comboIdx, 0, this.maxCharge()); this.startAttack(CHARGES[ci], true); this.comboIdx = 0; this.stringT = 0; return this.finish(dt); }
     // --- movement
     const md = this.moveDir(); const mag = Math.min(1, INPUT.move.length());
     const sprint = (INPUT.sprint || this.sprintToggle) && mag > 0.5 && !this.guardHeld;
@@ -1303,7 +1410,7 @@ class Enemy {
   spawn(pos) {
     this.pos.copy(pos); this.vel.set(0, 0, 0); this.kbVel.set(0, 0, 0); this.maxhp = this.def.hp * DIFF[G.diff].hp * (this.officer ? 1 : 1); this.hp = this.maxhp; this.dead = false; this.alive = true; this.state = 'spawn'; this.stateT = 0; this.attackCd = rnd(0.5, 1.5); this.token = false; this.launched = false; this.vy = 0; this.hitFlash = 0; this.orbit = rnd(-1, 1) < 0 ? -1 : 1; this.ring = rnd(CONFIG.enemies.surroundMin, CONFIG.enemies.surroundMax); this.deathT = 0; this.sig = null; this.invulnT = 0; this.tokenTry = 0;
     this.rig.root.visible = true; this.rig.root.position.copy(pos); this.rig.model.rotation.x = this.def.tilt || 0; this.rig.setOpacity(1); this.rig.play('idle'); this.rig.setEmissive(this.accent, this.def.mat.emissiveIntensity);
-    if (this.officer) { this.officerName = pick(['SGT. VESPER', 'CAPT. RHODES', 'DR. HALCYON', 'MAJ. KESTREL', 'LT. ONYX']) + ' — ' + pick(['ARASAKA-STYLE SECURITY', 'CORPO ENFORCER', 'AUGMENTED INQUISITOR', 'BLACK-ICE WARDEN']); this.sigCd = 4; }
+    if (this.officer) { this.officerName = pick(['SGT. VESPER', 'CAPT. RHODES', 'DR. HALCYON', 'MAJ. KESTREL', 'LT. ONYX']) + ' — ' + pick(['MERIDIAN SECURITY', 'CHOIR ENFORCER', 'HARMONIZED INQUISITOR', 'BLACK-ICE WARDEN']); this.sigCd = 4; }
     VFX.ring(pos, this.accent, 2, 0.4); VFX.spark(pos.clone().setY(1), this.accent, 6, 0.5, 2);
   }
   facingDot(dir) { return Math.sin(this.yaw) * dir.x + Math.cos(this.yaw) * dir.z; }
@@ -1451,6 +1558,29 @@ const ENEMIES = {
 };
 const _c = new THREE.Color();
 
+/* ============================ RELAYS (Overpass objective) ============================ */
+const RELAYS = {
+  list: [],
+  spawn(n, zone) {
+    this.clear(); const z = ZONES[zone];
+    for (let i = 0; i < n; i++) {
+      const g = new THREE.Group(); const x = (i - (n - 1) / 2) * (z.hw * 0.9), zz = z.z1 + 18 + i * 14;
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1.1, 7, 12), new THREE.MeshStandardMaterial({ color: 0x10101a, metalness: 0.9, roughness: 0.25, emissive: COL.mag, emissiveIntensity: 0.3 })); pillar.position.y = 3.5; pillar.castShadow = true;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.1, 8, 32), new THREE.MeshStandardMaterial({ color: 0, emissive: COL.mag, emissiveIntensity: 4 })); ring.position.y = 6.2; ring.rotation.x = Math.PI / 2;
+      const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 1), new THREE.MeshStandardMaterial({ color: 0, emissive: COL.mag, emissiveIntensity: 3, flatShading: true })); orb.position.y = 7.6;
+      const light = new THREE.PointLight(COL.mag, 30, 20, 1.5); light.position.y = 6;
+      g.add(pillar, ring, orb, light); g.position.set(x, 0, zz); scene.add(g);
+      const r = { isPart: true, mesh: g, ring, orb, pos: V3(x, 0, zz), radius: 1.2, hitHeight: 2.2, kind: 'robot', accent: COL.mag, hp: 16 * DIFF[G.diff].hp, dead: false, invulnT: 0, kbVel: V3(), hitFlash: 0, t: rnd(3), stagger() { }, facingDot() { return 0; }, onHit() { r.hitFlash = 0.1; orb.material.emissiveIntensity = 8; }, onDeath: () => { r.dead = true; scene.remove(g); VFX.debrisBurst(r.pos.clone().setY(4), COL.mag, 40); VFX.spark(r.pos.clone().setY(6), COL.white, 30, 3, 6); VFX.ring(r.pos, COL.mag, 10, 0.7); AUDIO.sfx('shatter'); CAM.shake(0.6); GAMEPAD.rumble(0.9, 0.5, 250); G.hitstop = Math.max(G.hitstop, 0.12); PLAYER.gainXp(15); const left = this.list.filter(x => !x.dead).length; HUD.stamp('RELAY DOWN', (n - left) + ' / ' + n); HUD.objective('DESTROY THE RELAYS — ' + (n - left) + '/' + n); PLAYER.musou = Math.min(1, PLAYER.musou + 0.15); } };
+      this.list.push(r);
+    }
+  },
+  update(dt, P) {
+    for (const r of this.list) { if (r.dead) continue; r.t += dt; r.ring.rotation.z += dt * 2; r.orb.rotation.y += dt; r.orb.position.y = 7.6 + Math.sin(r.t * 2) * 0.3; if (r.hitFlash > 0) { r.hitFlash -= dt; if (r.hitFlash <= 0) r.orb.material.emissiveIntensity = 3; } if (r.t > 4.5) { r.t = 0; DRONES.spawn(r.pos.clone().setY(7), 3); VFX.ring(r.pos, COL.mag, 5, 0.5, 0.3); AUDIO.sfx('telegraph'); } }
+  },
+  alive() { return this.list.filter(r => !r.dead).length; },
+  clear() { for (const r of this.list) if (!r.dead) scene.remove(r.mesh); this.list.length = 0; },
+};
+
 /* =====================================================================
    BOSSES — three-segment health bars, phase transitions
    ===================================================================== */
@@ -1472,7 +1602,7 @@ class Boss {
     HUD.bossShatter(this.phase - 1); HUD.bossPhase(this); VFX.ring(this.pos, this.accent, 14, 0.8); VFX.debrisBurst(this.pos.clone().setY(2), this.accent, 40);
     WORLD.bossLight.color.set(this.phase === 2 ? COL.amber : COL.red); scene.fog.color.set(this.phase === 2 ? 0x2a1010 : 0x200a26); WORLD.rain.material.uniforms.uSpeed.value = CONFIG.rain.speed * (1.4 + this.phase * 0.3);
     if (this.phase === 2 && this.cfg.kind !== 'ai') AUDIO.setMood('final');
-    this.onPhase(this.phase); ENEMIES.staggerNear(this.pos, 10, 1);
+    this.onPhase(this.phase); ENEMIES.staggerNear(this.pos, 10, 1); if (this.phase === 2) HUD.comms(this.key + 'Phase');
   }
   finalDeath() {
     this.dead = true; this.state = 'dying'; this.deathT = 0; this.stateT = 0; GAME.slowmo(0.2, 1.8); VFX.flash(1); AUDIO.sfx('shatter'); AUDIO.sfx('milestone'); CAM.shake(1); GAMEPAD.rumble(1, 1, 900);
@@ -1647,12 +1777,17 @@ const BOSS = {
 function toast(msg, ms = 2200) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('on'), ms); }
 const HUD = {
   officerTarget: null, lastHp: -1, lastMusou: -1, lastCombo: -1, lastKills: -1, lastCC: 0, mm: $('mm').getContext('2d'),
-  init() { const hp = $('hp'); hp.innerHTML = ''; for (let i = 0; i < CONFIG.player.hpSegments; i++) hp.appendChild(document.createElement('i')); this.stance(); this.stims(); this.prompts(); },
+  init() { const hp = $('hp'); hp.innerHTML = ''; for (let i = 0; i < PLAYER.maxHp; i++) hp.appendChild(document.createElement('i')); this.lastHp = -1; this.stance(); this.stims(); this.prompts(); this.sync(); },
+  sync() { $('sync').firstChild.textContent = 'SYNC ' + String(PLAYER.level).padStart(2, '0'); const lo = PLAYER.level > 1 ? XP_LEVELS[PLAYER.level - 2] : 0, hi = XP_LEVELS[Math.min(9, PLAYER.level - 1)]; $('sync').querySelector('b').style.width = (PLAYER.level >= 10 ? 100 : clamp((PLAYER.xp - lo) / (hi - lo), 0, 1) * 100) + '%'; },
+  commsQ: [], commsT: 0,
+  comms(key) { const lines = COMMS[key]; if (!lines) return; for (const l of lines) this.commsQ.push(l); },
+  commsUpdate(real) { this.commsT -= real; if (this.commsT > 0) return; if (!this.commsQ.length) { if (this.commsShown) { $('comms').classList.remove('on'); this.commsShown = false; } return; } const [who, text] = this.commsQ.shift(); this.commsShown = true; const col = who === 'WREN' ? '#19f0ff' : who === 'SABLE' ? '#ffffff' : who === 'THE CHOIR' ? '#ff2bd6' : '#ffb400'; $('comms').style.setProperty('--cacc', col); $('commsWho').textContent = who; const el = $('commsTxt'); el.textContent = ''; let i = 0; clearInterval(el._t); el._t = setInterval(() => { i += 2; el.textContent = text.slice(0, i); if (i >= text.length) clearInterval(el._t); }, 18); $('comms').classList.add('on'); AUDIO.sfx('ui', { note: who === 'WREN' ? 'E6' : 'A5' }); this.commsT = 2.2 + text.length * 0.045; },
+  sector(i) { const [n, sub] = SECTOR_TITLES[i]; this.stamp('SECTOR ' + (i + 1) + ' · ' + n, sub); },
   show(on) { $('hud').classList.toggle('on', on); },
   kill() { const k = $('kills'); k.textContent = G.kills; k.classList.remove('pop'); void k.offsetWidth; k.classList.add('pop'); },
-  stance() { $('stance').textContent = 'STANCE · ' + PLAYER.stanceDef.name + ' ' + glyph('stance'); },
-  stims() { $('stims').textContent = 'STIMS ' + '▮'.repeat(PLAYER.stims) + '▯'.repeat(CONFIG.player.stims - PLAYER.stims) + '  ' + glyph('stim'); },
-  prompts() { const P = [['light', 'LIGHT'], ['heavy', 'CHARGE'], ['dash', 'DASH'], ['guard', 'GUARD'], ['bladedash', 'BLADE DASH'], ['lock', 'LOCK'], ['musou', 'OVERDRIVE'], ['taunt', 'TAUNT'], ['pause', 'PAUSE']]; $('prompts').innerHTML = P.map(([a, l]) => `<div>${l}<b>${glyph(a)}</b></div>`).join(''); this.promptDev = INPUT.lastDevice; },
+  stance() { $('stance').textContent = 'STANCE · ' + PLAYER.stanceDef.name + (PLAYER.stances().length > 1 ? ' ' + glyph('stance') : ''); },
+  stims() { $('stims').textContent = 'STIMS ' + '▮'.repeat(PLAYER.stims) + '▯'.repeat(Math.max(0, PLAYER.maxStims - PLAYER.stims)) + '  ' + glyph('stim'); },
+  prompts() { const P = [['light', 'LIGHT'], ['heavy', 'CHARGE C1–C' + (PLAYER.maxCharge() + 1)], ['dash', 'DASH'], ['guard', 'GUARD'], ...(PLAYER.unlocks.bladedash ? [['bladedash', 'BLADE DASH']] : []), ['lock', 'LOCK'], ['musou', 'OVERDRIVE'], ...(PLAYER.stances().length > 1 ? [['stance', 'STANCE']] : []), ['taunt', 'TAUNT'], ['pause', 'PAUSE']]; $('prompts').innerHTML = P.map(([a, l]) => `<div>${l}<b>${glyph(a)}</b></div>`).join(''); this.promptDev = INPUT.lastDevice; },
   stamp(text, sub = '') { const s = $('stamp'); s.innerHTML = text + (sub ? `<small>${sub}</small>` : ''); s.classList.remove('on'); void s.offsetWidth; s.classList.add('on'); },
   namecard(name, title, color) { document.documentElement.style.setProperty('--bacc', '#' + new THREE.Color(color).getHexString()); $('nch1').textContent = name; $('ncp').textContent = title; const n = $('namecard'); n.classList.remove('on'); void n.offsetWidth; n.classList.add('on'); },
   objective(text) { const el = $('objtxt'); if (el.dataset.full === text) return; el.dataset.full = text; el.textContent = ''; let i = 0; clearInterval(el._t); el._t = setInterval(() => { i++; el.textContent = text.slice(0, i); if (i >= text.length) clearInterval(el._t); }, 22); },
@@ -1707,20 +1842,30 @@ const HUD = {
 const ZONE_PLAN = [
   { waves: [{ trooper: 14 }, { trooper: 14, ganger: 10 }, { ganger: 18, hound: 6 }, { trooper: 18, hound: 8, merc: 3 }, { trooper: 20, ganger: 14, merc: 5, drones: 20 }], officers: 1, boss: null },
   { waves: [{ trooper: 22, hound: 8 }, { ganger: 20, merc: 6, drones: 24 }], officers: 0, boss: 'kirin' },
-  { waves: [{ merc: 8, hound: 12 }, { trooper: 18, merc: 8 }, { hound: 14, ganger: 16, drones: 20 }, { merc: 10, trooper: 18, hound: 8 }], officers: 2, boss: 'obsidian' },
+  { waves: [{ merc: 8, hound: 12 }, { relays: 3 }, { hound: 14, ganger: 16, drones: 20 }, { merc: 10, trooper: 18, hound: 8 }], officers: 2, boss: 'obsidian' },
   { waves: [{ drones: 40, trooper: 10 }, { drones: 50, ganger: 20 }, { drones: 40, merc: 8, hound: 10 }], officers: 0, boss: 'choir' },
 ];
 const GAME = {
   state: 'loading', zone: 0, zoneState: 'idle', wave: 0, coolant: false, pull: null, slowT: 0, slowScale: 1, menuIdx: 0, pauseIdx: 0, deathT: 0, best: null, waveWait: 0,
   slowmo(scale, dur) { this.slowScale = scale; this.slowT = dur; G.timeScale = scale; },
-  setState(s) { this.state = s; G.state = s; for (const id of ['title', 'pause', 'death', 'results', 'remapscr']) $(id).hidden = true; if (s === 'title') $('title').hidden = false; if (s === 'pause') $('pause').hidden = false; if (s === 'dead') $('death').hidden = false; if (s === 'results') $('results').hidden = false; if (s === 'remap') $('remapscr').hidden = false; HUD.show(s === 'play' || s === 'pause' || s === 'dead' || s === 'remap'); },
+  setState(s) { this.state = s; G.state = s; for (const id of ['title', 'pause', 'death', 'results', 'remapscr', 'cards', 'augments']) $(id).hidden = true; if (s === 'title') $('title').hidden = false; if (s === 'pause') $('pause').hidden = false; if (s === 'dead') $('death').hidden = false; if (s === 'results') $('results').hidden = false; if (s === 'remap') $('remapscr').hidden = false; if (s === 'cards') $('cards').hidden = false; if (s === 'augment') $('augments').hidden = false; HUD.show(s === 'play' || s === 'pause' || s === 'dead' || s === 'remap' || s === 'augment'); },
+  // ---- story cards ----
+  showCards(cards, then) { this.cards = cards; this.cardIdx = 0; this.cardT = 0; this._cardsThen = then; this.setState('cards'); this.renderCard(); },
+  renderCard() { const [title, lines] = this.cards[this.cardIdx]; $('cardBody').innerHTML = `<h2>${title}</h2>` + lines.map(l => `<p class="${l.startsWith('"') ? 'q' : ''}">${l}</p>`).join(''); $('cardCount').textContent = (this.cardIdx + 1) + ' / ' + this.cards.length; $('cardPrompt').textContent = 'CONTINUE [' + glyph('confirm') + '] · SKIP [' + glyph('pause') + ']'; const c = $('cardBody'); c.style.animation = 'none'; void c.offsetWidth; c.style.animation = ''; AUDIO.sfx('ui', { note: 'C5' }); },
+  nextCard() { this.cardIdx++; this.cardT = 0; if (this.cardIdx >= this.cards.length) this.skipCards(); else this.renderCard(); },
+  skipCards() { const f = this._cardsThen; this._cardsThen = null; if (f) f(); },
+  // ---- augment choice ----
+  offerAugments() { const pool = AUGMENTS.filter(a => !PLAYER.augs.has(a.id)); const pick3 = []; while (pick3.length < 3 && pool.length) pick3.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]); this.augOffer = pick3; this.augIdx = 0; $('augmenu').innerHTML = pick3.map(a => `<div class="item"><b>${a.name}</b><small>${a.desc}</small></div>`).join(''); [...$('augmenu').children].forEach((it, i) => it.addEventListener('click', () => { this.augIdx = i; INPUT.press('confirm'); })); $('augnote').textContent = 'SYNC ' + PLAYER.level + ' · ' + PLAYER.augs.size + ' augments installed · confirm with ' + glyph('confirm'); this.setState('augment'); AUDIO.pause(true); HUD.comms('augment'); },
+  chooseAugment() { const a = this.augOffer[this.augIdx]; if (!a) return; PLAYER.addAugment(a); this.setState('play'); AUDIO.pause(false); },
   start(diff) {
     G.diff = diff; G.kills = 0; G.combo = 0; G.maxCombo = 0; G.dmgTaken = 0; G.runTime = 0; G.time = 0; G.hitstop = 0; G.timeScale = 1; this.slowT = 0; this.coolant = false; this.pull = null; WORLD.coolant.visible = false;
     rng = mulberry32(CONFIG.seed); ENEMIES.clearAll(); BOSS.clear(); for (const b of BOSS.list) { } BOSS.list.length = 0; for (const g of WORLD.gates) { g.open = false; g.t = 0; g.group.position.y = 0; g.wall.material.emissive.set(COL.red); g.light.color.set(COL.red); g.light.intensity = 20; }
     PLAYER.reset(); CAM.yaw = PLAYER.yaw + Math.PI; CAM.target.copy(PLAYER.pos); this.zone = 0; this.zoneState = 'idle'; this.wave = 0; HUD.init(); HUD.kill(); HUD.boss(null); HUD.officer(null); $('kills').textContent = '0';
     scene.fog.color.set(0x140a26); WORLD.rain.material.uniforms.uSpeed.value = CONFIG.rain.speed; glitch.mode = GlitchMode.DISABLED; document.body.classList.remove('cine'); dofPass.enabled = false;
-    this.setState('play'); AUDIO.setMood('combat'); HUD.objective('CLEAR THE STREETS'); HUD.stamp('NEON DYNASTY', DIFF[diff].name + ' · SEED ' + CONFIG.seed); toast('SECTOR 1 — THE STREETS');
+    HUD.commsQ.length = 0; HUD.commsT = 0; RELAYS.clear(); HUD.sync();
+    this.showCards(STORY.intro, () => this.beginPlay());
   },
+  beginPlay() { this.setState('play'); AUDIO.setMood('combat'); HUD.objective('CLEAR THE STREETS'); HUD.sector(0); HUD.comms('start'); },
   restart() { this.start(G.diff); },
   die() {
     PLAYER.dead = true; PLAYER.rig.play('death', { once: true, clamp: true }); AUDIO.sfx('shatter'); VFX.flash(0.6); this.slowmo(0.25, 2); GAMEPAD.rumble(1, 1, 800); this.deathT = 0; this.setState('dead'); $('death').hidden = true; $('deathprompt').textContent = 'REBOOT? [' + glyph('confirm') + ']';
@@ -1739,38 +1884,44 @@ const GAME = {
   startWave() {
     const plan = ZONE_PLAN[this.zone]; const w = plan.waves[this.wave]; if (!w) return;
     for (const type in w) { if (type === 'drones') { const z = ZONES[this.zone]; for (let i = 0; i < w[type]; i += 5) DRONES.spawn(V3(rnd(-z.hw + 4, z.hw - 4), 4, rnd(z.z1 + 6, z.z0 - 6)), 5); } else ENEMIES.queue(type, w[type], this.zone); }
+    if (w.relays) { RELAYS.spawn(w.relays, this.zone); this.zoneState = 'relays'; HUD.objective('DESTROY THE RELAYS — 0/' + w.relays); HUD.comms('relays'); AUDIO.setMood('combat'); return; }
     this.zoneState = 'wave'; HUD.objective(`CLEAR ${ZONES[this.zone].name} — WAVE ${this.wave + 1}/${plan.waves.length}`); if (this.wave > 0) toast('WAVE ' + (this.wave + 1)); AUDIO.setMood('combat'); this.waveWait = 0.5;
+    if (this.zone === 0 && this.wave === 1) HUD.comms('wave2'); if (this.zone === 0 && this.wave === 3) HUD.comms('wave4');
   },
   startOfficers() {
     const plan = ZONE_PLAN[this.zone]; const z = ZONES[this.zone]; this.zoneState = 'officer'; let first = null;
     for (let i = 0; i < plan.officers; i++) { const e = ENEMIES.spawn('officer', V3(rnd(-z.hw + 6, z.hw - 6), 0, z.z1 + 8 + i * 4)); if (e) { if (!first) first = e; ENEMIES.queue('trooper', 6, this.zone); } }
-    if (first) { HUD.namecard(first.officerName.split(' — ')[0], first.officerName.split(' — ')[1] || 'OFFICER', COL.amber); HUD.objective('ELIMINATE ' + first.officerName.split(' — ')[0]); AUDIO.sfx('shout'); CAM.shake(0.3); }
+    if (first) { HUD.namecard(first.officerName.split(' — ')[0], first.officerName.split(' — ')[1] || 'OFFICER', COL.amber); HUD.objective('ELIMINATE ' + first.officerName.split(' — ')[0]); AUDIO.sfx('shout'); CAM.shake(0.3); HUD.comms('officer'); }
     else this.zoneState = 'clearpending';
   },
   startBoss(key) {
     const z = ZONES[this.zone]; const pos = V3(0, 0, (z.z0 + z.z1) / 2 - 6); const b = BOSS.spawn(key, pos); this.zoneState = 'bossintro'; G.cine = true; ENEMIES.clearAll();
     document.body.classList.add('cine'); dofPass.enabled = true; glitch.mode = GlitchMode.SPORADIC; AUDIO.setMood(key === 'choir' ? 'final' : 'boss'); AUDIO.sfx('shout'); GAMEPAD.rumble(0.3, 0.9, 2500);
     PLAYER.lock = null; PLAYER.attack = null; VFX.ring(pos, COL.mag, 12, 1);
-    CAM.cinematic(2.8, (t, cam) => { const u = t / 2.8; const a = -0.8 + u * 2.2; const r = 16 - u * 4; camera.position.set(b.pos.x + Math.sin(a) * r, 3 + u * 5, b.pos.z + Math.cos(a) * r); camera.lookAt(b.pos.x, 3, b.pos.z); camera.fov = 45 + u * 10; camera.updateProjectionMatrix(); if (t > 0.5 && !b._card) { b._card = true; HUD.namecard(b.name, b.title, b.accent); } }, () => { G.cine = false; this.zoneState = 'boss'; document.body.classList.remove('cine'); dofPass.enabled = false; glitch.mode = GlitchMode.DISABLED; HUD.boss(b); HUD.objective('ELIMINATE ' + b.name); CAM.yaw = PLAYER.yaw + Math.PI; VFX.flash(0.3); });
+    CAM.cinematic(2.8, (t, cam) => { const u = t / 2.8; const a = -0.8 + u * 2.2; const r = 16 - u * 4; camera.position.set(b.pos.x + Math.sin(a) * r, 3 + u * 5, b.pos.z + Math.cos(a) * r); camera.lookAt(b.pos.x, 3, b.pos.z); camera.fov = 45 + u * 10; camera.updateProjectionMatrix(); if (t > 0.5 && !b._card) { b._card = true; HUD.namecard(b.name, b.title, b.accent); } }, () => { G.cine = false; this.zoneState = 'boss'; document.body.classList.remove('cine'); dofPass.enabled = false; glitch.mode = GlitchMode.DISABLED; HUD.boss(b); HUD.objective('ELIMINATE ' + b.name); CAM.yaw = PLAYER.yaw + Math.PI; VFX.flash(0.3); HUD.commsQ.length = 0; HUD.commsT = 0; HUD.comms(key + 'Intro'); });
   },
   onBossDefeated(b) {
     HUD.boss(null); WORLD.bossLight.intensity = 0; scene.fog.color.set(0x140a26); WORLD.rain.material.uniforms.uSpeed.value = CONFIG.rain.speed; this.coolant = false; WORLD.coolant.visible = false; this.pull = null; GAMEPAD.rumble(0.6, 0.6, 400);
-    if (this.zone === ZONES.length - 1) { setTimeout(() => this.victory(), 2200); this.zoneState = 'done'; return; }
+    PLAYER.gainXp(100); HUD.commsQ.length = 0; HUD.commsT = 0;
+    if (this.zone === ZONES.length - 1) { setTimeout(() => this.showCards(STORY.epilogue, () => this.victory()), 2600); this.zoneState = 'done'; return; }
+    if (b.key === 'kirin') setTimeout(() => { HUD.comms('kirinDead'); PLAYER.unlock('reaper', 'REAPER STANCE', 'wider, heavier arcs · ' + glyph('stance')); PLAYER.unlocks.c4 = true; setTimeout(() => PLAYER.unlock('c5', 'CHARGE FINISHERS C4 + C5', 'shockwave and cut-through'), 1800); }, 1200);
+    if (b.key === 'obsidian') setTimeout(() => { HUD.comms('obsidianDead'); PLAYER.unlock('wire', 'WIRE STANCE', 'fast, tight, relentless · ' + glyph('stance')); setTimeout(() => PLAYER.unlock('c6', 'CHARGE FINISHER C6', 'annihilate'), 1800); }, 1200);
     this.clearZone();
   },
-  clearZone() { this.zoneState = 'clear'; WORLD.openGate(this.zone); HUD.objective('PROCEED TO THE ' + ZONES[this.zone + 1].name); PLAYER.heal(0.5); AUDIO.setMood('calm'); },
+  clearZone() { this.zoneState = 'clear'; WORLD.openGate(this.zone); HUD.objective('PROCEED TO THE ' + ZONES[this.zone + 1].name); PLAYER.heal(0.5); PLAYER.maxStims += 1 + (PLAYER.augs.has('synth') ? 2 : 0); PLAYER.stims = PLAYER.maxStims; HUD.stims(); AUDIO.setMood('calm'); const delay = this.zone === 0 ? 2600 : 5200; setTimeout(() => { if (this.state === 'play') this.offerAugments(); }, delay); },
   update(dt) {
     if (this.slowT > 0) { this.slowT -= dt / Math.max(0.05, this.slowScale); if (this.slowT <= 0) { G.timeScale = 1; } }
     if (this.state !== 'play' || G.cine) return;
     G.time += dt; G.runTime += dt; if (G.comboT > 0) { G.comboT -= dt; if (G.comboT <= 0) G.combo = 0; }
     aberrationBoost = Math.max(0, aberrationBoost - dt * 2);
     const zi = WORLD.zoneAt(PLAYER.pos.z);
-    if (zi > this.zone && this.zoneState === 'clear') { this.zone = zi; this.zoneState = 'idle'; this.wave = 0; toast('SECTOR ' + (zi + 1) + ' — ' + ZONES[zi].name); }
+    if (zi > this.zone && this.zoneState === 'clear') { this.zone = zi; this.zoneState = 'idle'; this.wave = 0; HUD.sector(zi); HUD.comms(['start', 'plaza', 'overpass', 'cathedral'][zi]); }
     const plan = ZONE_PLAN[this.zone];
     switch (this.zoneState) {
       case 'idle': if (WORLD.zoneAt(PLAYER.pos.z) === this.zone && PLAYER.pos.z < ZONES[this.zone].z0 - 4) this.startWave(); break;
       case 'wave': this.waveWait -= dt; if (this.waveWait <= 0 && !ENEMIES.spawnQueue.length && ENEMIES.livingCount() === 0 && DRONES.list.length === 0) { this.wave++; if (this.wave < plan.waves.length) this.startWave(); else if (plan.officers) this.startOfficers(); else if (plan.boss) this.startBoss(plan.boss); else this.clearZone(); } break;
       case 'officer': if (!ENEMIES.spawnQueue.length && ENEMIES.livingCount() === 0 && DRONES.list.length === 0) { if (plan.boss) this.startBoss(plan.boss); else this.clearZone(); } break;
+      case 'relays': if (RELAYS.alive() === 0) { HUD.comms('relaysDone'); RELAYS.clear(); this.wave++; this.waveWait = 1.5; this.zoneState = 'wave'; if (this.wave < plan.waves.length) this.startWave(); } break;
       case 'clearpending': this.clearZone(); break;
       case 'boss': { const b = BOSS.current; if (b && !b.dead && b.alive && ENEMIES.livingCount() < 8 && G.frame % 240 === 0 && this.zone !== 3) { ENEMIES.queue(this.zone === 1 ? 'trooper' : 'ganger', 4, this.zone); } break; }
     }
@@ -1797,6 +1948,8 @@ function updateMenus(real) {
     if (INPUT.pressed.confirm || INPUT.pressed.light) { AUDIO.start(); AUDIO.sfx('ui', { note: 'G6' }); if (GAMEPAD.needsRemap) { GAMEPAD.startRemap(); GAME.setState('remap'); GAME._afterRemap = () => GAME.start(GAME.menuIdx); } else GAME.start(GAME.menuIdx); }
     return;
   }
+  if (S === 'cards') { GAME.cardT += real; if (INPUT.pressed.pause) { GAME.skipCards(); return; } if (GAME.cardT > 0.35 && (INPUT.pressed.confirm || INPUT.pressed.light || INPUT.pressed.dash)) GAME.nextCard(); return; }
+  if (S === 'augment') { const items = [...$('augmenu').children]; if (INPUT.pressed.stanceL || INPUT.pressed.menuUp) { GAME.augIdx = (GAME.augIdx + 2) % 3; AUDIO.sfx('ui'); } if (INPUT.pressed.stanceR || INPUT.pressed.menuDown) { GAME.augIdx = (GAME.augIdx + 1) % 3; AUDIO.sfx('ui'); } items.forEach((it, i) => it.classList.toggle('sel', i === GAME.augIdx)); if (INPUT.pressed.confirm || INPUT.pressed.light) GAME.chooseAugment(); return; }
   if (S === 'remap') { GAMEPAD.updateRemap(real); if (!GAMEPAD.remapping) { const f = GAME._afterRemap; GAME._afterRemap = null; if (f) f(); else GAME.setState('pause'); } return; }
   if (S === 'pause') {
     menuNav($('pausemenu'), 'pauseIdx', pauseItems);
@@ -1842,7 +1995,7 @@ function debugText() {
   const info = renderer.info; return `FPS ${fpsShow}\nENEMIES ${ENEMIES.livingCount()} / alive objs ${ENEMIES.alive.length} / queue ${ENEMIES.spawnQueue.length}\nDRONES ${DRONES.list.length}  BULLETS ${BULLETS.list.length}\nSKINNED UPDATED ${G.skinnedUpdated}  TOKENS ${ENEMIES.tokens}/${ENEMIES.budget()}\nDRAW CALLS ${info.render.calls}  TRIS ${(info.render.triangles / 1000).toFixed(0)}k\nSPARKS ${VFX.sparks.length} DEBRIS ${VFX.debris.length}\nZONE ${GAME.zone} ${GAME.zoneState} wave ${GAME.wave}\nSTATE ${GAME.state} ts ${G.timeScale.toFixed(2)} hitstop ${G.hitstop.toFixed(2)}\nPAD ${GAMEPAD.connected ? GAMEPAD.id.slice(0, 30) : 'none'} dev ${INPUT.lastDevice}\nFALLBACKS ${FALLBACKS.join(',') || 'none'}\nPLAYER ${PLAYER.pos.x.toFixed(1)},${PLAYER.pos.z.toFixed(1)} hp ${PLAYER.hp.toFixed(2)} musou ${PLAYER.musou.toFixed(2)} ${PLAYER.state}`;
 }
 function step(dt) {
-  PLAYER.update(dt); ENEMIES.update(dt, PLAYER); BOSS.update(dt, PLAYER); BULLETS.update(dt, PLAYER); DRONES.update(dt, PLAYER); VFX.update(dt); GAME.update(dt);
+  PLAYER.update(dt); ENEMIES.update(dt, PLAYER); BOSS.update(dt, PLAYER); RELAYS.update(dt, PLAYER); BULLETS.update(dt, PLAYER); DRONES.update(dt, PLAYER); VFX.update(dt); GAME.update(dt);
 }
 let last = performance.now(), acc = 0;
 function frame(now) {
@@ -1864,7 +2017,7 @@ function frame(now) {
   } else if (GAME.state === 'dead') { acc += real * G.timeScale; while (acc >= CONFIG.fixedDt) { PLAYER.rig.update(CONFIG.fixedDt); ENEMIES.update(CONFIG.fixedDt, PLAYER); BOSS.update(CONFIG.fixedDt, PLAYER); VFX.update(CONFIG.fixedDt); BULLETS.update(CONFIG.fixedDt, PLAYER); DRONES.update(CONFIG.fixedDt, PLAYER); GAME.update(CONFIG.fixedDt); acc -= CONFIG.fixedDt; } }
   updateMenus(real);
   if (GAME.state !== 'loading' && GAME.state !== 'title') {
-    CAM.update(real * (GAME.state === 'pause' ? 0 : 1), PLAYER, PLAYER.lock); WORLD.update(real * (GAME.state === 'pause' ? 0 : G.timeScale), PLAYER); HUD.update();
+    CAM.update(real * (GAME.state === 'pause' ? 0 : 1), PLAYER, PLAYER.lock); WORLD.update(real * (GAME.state === 'pause' ? 0 : G.timeScale), PLAYER); HUD.update(); if (GAME.state === 'play') HUD.commsUpdate(real);
     const ab = CONFIG.post.aberration * (1 + aberrationBoost * 6 + CAM.trauma * 3); aberration.offset.set(ab, ab);
   } else { // title: slow orbit around the start position
     CAM.yaw += real * 0.15; camera.position.set(Math.sin(CAM.yaw) * 14, 5, Math.cos(CAM.yaw) * 14 + 2); camera.lookAt(0, 2, -6); WORLD.update(real, PLAYER); VFX.update(real);
@@ -1888,7 +2041,7 @@ async function boot() {
   // a handful of idle enemies wander the title backdrop
   requestAnimationFrame(frame);
 }
-window.ND = { G, GAME, PLAYER, ENEMIES, BOSS, WORLD, VFX, CONFIG, ASSETS, FALLBACKS, INPUT, GAMEPAD, AUDIO, DRONES, BULLETS, CAM, HUD, scene, camera, renderer, THREE, composer };
+window.ND = { G, GAME, PLAYER, ENEMIES, BOSS, WORLD, VFX, CONFIG, ASSETS, FALLBACKS, INPUT, GAMEPAD, AUDIO, DRONES, BULLETS, CAM, HUD, RELAYS, AUGMENTS, STORY, COMMS, scene, camera, renderer, THREE, composer };
 boot().catch(err => { console.error(err); $('loadpct').textContent = 'BOOT FAILURE — ' + err.message; });
 </script>
 </body>
