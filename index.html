@@ -516,7 +516,7 @@ class Rig {
       this.model = inst; this.root.add(inst);
       // normalize height to ~1.8 units
       const box = new THREE.Box3().setFromObject(inst); const h = Math.max(0.001, box.max.y - box.min.y);
-      const s = (opts.height || 1.8) / h * this.scale; inst.scale.setScalar(s); inst.position.y = -box.min.y * s; inst.rotation.y = FACING[assetName] ? Math.PI : 0; this.assetName = assetName; RIGS.add(this);
+      const s = (opts.height || 1.8) / h * this.scale; inst.scale.setScalar(s); inst.position.y = -box.min.y * s; this.baseY = inst.position.y; inst.rotation.y = FACING[assetName] ? Math.PI : 0; this.assetName = assetName; RIGS.add(this);
       this.mats = reskin(inst, opts.mat || {});
       this.mixer = new THREE.AnimationMixer(inst);
       const res = resolveClips(a.clips);
@@ -546,6 +546,7 @@ class Rig {
   play(k, { loop = true, fade = 0.12, timeScale = 1, once = false, clamp = false } = {}) {
     this.state = k; this.t = 0;
     if (this.procedural) return 0.6;
+    if (k === 'death' && !this.actions.death) { this.topple = 0; if (this.current) { this.current.fadeOut(0.15); this.current = null; } return 0.6; }
     const act = this.actions[k] || this.actions.idle; if (!act) return 0.5;
     if (this.current === act && loop && !once) { act.timeScale = timeScale; return act.getClip().duration / timeScale; }
     act.reset(); act.enabled = true; act.timeScale = timeScale;
@@ -554,12 +555,14 @@ class Rig {
     act.play(); this.current = act;
     return act.getClip().duration / timeScale;
   }
+  resetPose() { this.topple = null; if (!this.procedural) { this.model.position.y = this.baseY || 0; } this.model.rotation.x = 0; this.setDead(false); }
+  setDead(flag) { for (const m of this.mats) { if (flag) { if (!m.userData.base) m.userData.base = { c: m.color.clone(), e: m.emissive.clone(), i: m.emissiveIntensity }; m.color.copy(m.userData.base.c).multiplyScalar(0.3); m.emissive.set(0x1a0a0a); m.emissiveIntensity = 0.6; } else if (m.userData.base) { m.color.copy(m.userData.base.c); m.emissive.copy(m.userData.base.e); m.emissiveIntensity = m.userData.base.i; } } }
   setEmissive(color, intensity) { for (const m of this.mats) { if (this.procedural && m === this.mats[0]) continue; m.emissive.set(color); m.emissiveIntensity = intensity; } }
   setEmissiveBody(color, intensity) { const m = this.mats[0]; m.emissive.set(color); m.emissiveIntensity = intensity; }
   setOpacity(v) { for (const m of this.mats) { m.transparent = v < 1; m.opacity = v; } }
   update(dt, speed = 0) {
     this.t += dt;
-    if (this.mixer) { this.mixer.update(dt); return; }
+    if (this.mixer) { this.mixer.update(dt); if (this.topple !== null && this.topple !== undefined) { this.topple += dt; const u = Math.min(1, this.topple / 0.45); this.model.rotation.x = -u * Math.PI / 2 * 0.92; this.model.position.y = (this.baseY || 0) + u * 0.25; } return; }
     // procedural animation for fallback figure
     const u = this.figH, s = this.state, t = this.t;
     let sw = 0, arm = 0, bob = 0;
@@ -1500,13 +1503,13 @@ class Enemy {
     this.rig = new Rig(assetName, { height: this.def.height, mat: this.def.mat, accent: this.def.accent }); this.rig.root.visible = false; scene.add(this.rig.root);
     if (this.def.tilt) this.rig.model.rotation.x = this.def.tilt;
     this.cue = VFX.makeCue(); this.cue.position.y = this.def.height + 0.7; this.cue.layers.set(CROWD_LAYER); this.rig.root.add(this.cue);
-    if (this.def.eyebar && !this.rig.procedural) { const eye = new THREE.Mesh(figGeo('eyebar', () => new THREE.BoxGeometry(0.42, 0.07, 0.1)), new THREE.MeshStandardMaterial({ color: 0, emissive: this.def.accent, emissiveIntensity: 5 })); eye.position.set(0, this.def.height * 0.86, 0.28 * this.def.height / 1.8); this.rig.root.add(eye); }
+    if (this.def.eyebar && !this.rig.procedural) { const eye = new THREE.Mesh(figGeo('eyebar', () => new THREE.BoxGeometry(0.42, 0.07, 0.1)), new THREE.MeshStandardMaterial({ color: 0, emissive: this.def.accent, emissiveIntensity: 5 })); eye.position.set(0, this.def.height * 0.86, 0.28 * this.def.height / 1.8); this.rig.root.add(eye); this.eye = eye; }
     if (this.officer) { this.rig.root.traverse(o => { if (o.isMesh) o.castShadow = true; }); } else toCrowdLayer(this.rig.root);
     this.dead = true; this.alive = false; this.invulnT = 0; this.animAcc = 0; this.rank = 0;
   }
   spawn(pos) {
     this.pos.copy(pos); this.vel.set(0, 0, 0); this.kbVel.set(0, 0, 0); this.maxhp = this.def.hp * DIFF[G.diff].hp * (this.officer ? 1 : 1); this.hp = this.maxhp; this.dead = false; this.alive = true; this.state = 'spawn'; this.stateT = 0; this.attackCd = rnd(0.5, 1.5); this.token = false; this.launched = false; this.vy = 0; this.hitFlash = 0; this.orbit = rnd(-1, 1) < 0 ? -1 : 1; this.ring = rnd(CONFIG.enemies.surroundMin, CONFIG.enemies.surroundMax); this.deathT = 0; this.sig = null; this.invulnT = 0; this.tokenTry = 0; this.posture = 0; this.postureMax = this.officer ? 4 : 2; this.recovering = false; this.punished = false; this.flashed = false; this.cueFlash = 0; this.perilous = false; this.windup = 0.6; VFX.setCue(this.cue, null);
-    this.rig.root.visible = true; this.rig.root.position.copy(pos); this.rig.model.rotation.x = this.def.tilt || 0; this.rig.setOpacity(1); this.rig.play('idle'); this.rig.setEmissive(this.accent, this.def.mat.emissiveIntensity);
+    this.rig.root.visible = true; this.rig.root.position.copy(pos); this.rig.resetPose(); this.rig.model.rotation.x = this.def.tilt || 0; this.rig.setOpacity(1); if (this.eye) this.eye.visible = true; this.pos.y = 0; this.rig.play('idle'); this.rig.setEmissive(this.accent, this.def.mat.emissiveIntensity);
     if (this.officer) { this.officerName = pick(['SGT. VESPER', 'CAPT. RHODES', 'DR. HALCYON', 'MAJ. KESTREL', 'LT. ONYX']) + ' — ' + pick(['MERIDIAN SECURITY', 'CHOIR ENFORCER', 'HARMONIZED INQUISITOR', 'BLACK-ICE WARDEN']); this.sigCd = 4; }
     VFX.ring(pos, this.accent, 2, 0.4); VFX.spark(pos.clone().setY(1), this.accent, 6, 0.5, 2);
   }
@@ -1514,18 +1517,18 @@ class Enemy {
   deflected() { if (this.dead) return; this.posture++; this.recovering = true; this.punished = false; VFX.number(this.pos, 'POSTURE ' + Math.min(this.posture, this.postureMax) + '/' + this.postureMax, '#8fd8ff'); if (this.posture >= this.postureMax) this.breakPosture(); else { this.stagger(1.1); this.recovering = true; } }
   breakPosture() { if (this.dead) return; this.releaseToken(); this.state = 'broken'; this.stateT = 0; this.brokenT = this.officer ? 3 : 2.5; this.sig = null; this.vel.set(0, 0, 0); this.rig.play('hit', { once: true, clamp: true, timeScale: 0.6 }); VFX.setCue(this.cue, 'broken'); VFX.ring(this.pos, COL.amber, 3, 0.4); VFX.number(this.pos, 'POSTURE BROKEN', '#ffb400', true); AUDIO.sfx('shatter'); GAMEPAD.rumble(0.6, 0.6, 150); }
   stagger(t) { if (this.dead || this.state === 'broken') return; if (this.token) { this.token = false; ENEMIES.tokens--; } if (this.launched) return; VFX.setCue(this.cue, null); this.state = 'stagger'; this.stateT = 0; this.staggerT = t; this.rig.play('hit', { once: true, timeScale: 1.4 }); this.sig = null; }
-  die() { this.dead = true; if (this.token) { this.token = false; ENEMIES.tokens--; } this.state = 'dead'; this.stateT = 0; this.deathT = 0; this.rig.play('death', { once: true, clamp: true, timeScale: 1.6 }); if (this.officer && HUD.officerTarget === this) HUD.officer(null); if (PLAYER.lock === this) PLAYER.lock = null; }
+  die() { this.dead = true; if (this.token) { this.token = false; ENEMIES.tokens--; } this.state = 'dead'; this.stateT = 0; this.deathT = 0; this.hitFlash = 0; this.cueFlash = 0; VFX.setCue(this.cue, null); if (this.eye) this.eye.visible = false; this.rig.play('death', { once: true, clamp: true, timeScale: 1.6 }); this.rig.setDead(true); if (this.officer && HUD.officerTarget === this) HUD.officer(null); if (PLAYER.lock === this) PLAYER.lock = null; }
   update(dt, P) {
-    if (this.hitFlash > 0) { this.hitFlash -= dt; if (this.hitFlash <= 0) this.rig.setEmissive(this.accent, this.def.mat.emissiveIntensity); else this.rig.setEmissive(COL.white, 3); }
+    if (this.hitFlash > 0 && !this.dead) { this.hitFlash -= dt; if (this.hitFlash <= 0) this.rig.setEmissive(this.accent, this.def.mat.emissiveIntensity); else this.rig.setEmissive(COL.white, 3); }
     if (this.cueFlash > 0) { this.cueFlash -= dt; this.rig.setEmissive(this.perilous ? COL.red : 0xbfffff, 5); if (this.cueFlash <= 0) this.rig.setEmissive(this.accent, this.def.mat.emissiveIntensity); }
     this.invulnT -= dt;
     const dx = P.pos.x - this.pos.x, dz = P.pos.z - this.pos.z; const dist = Math.hypot(dx, dz); const toP = _v.set(dx / (dist || 1), 0, dz / (dist || 1));
     if (this.state === 'dead') {
       this.deathT += dt; this.kbVel.multiplyScalar(0.9); this.pos.addScaledVector(this.kbVel, dt);
       if (this.launched) { this.vy -= 28 * dt; this.pos.y += this.vy * dt; if (this.pos.y <= 0) { this.pos.y = 0; this.launched = false; VFX.spark(this.pos, this.accent, 4); } this.rig.model.rotation.x += dt * 8; }
-      if (this.deathT > 0.75) { this.rig.setOpacity(1 - (this.deathT - 0.75) / 0.3); }
-      if (this.deathT > 1.05) { this.alive = false; this.rig.root.visible = false; VFX.debrisBurst(this.pos, this.accent, 6); return; }
-      this.rig.root.position.copy(this.pos); return;
+      if (this.deathT > 0.75) { this.rig.setOpacity(1 - (this.deathT - 0.75) / 0.35); this.rig.root.position.y = -(this.deathT - 0.75) * 1.2; }
+      if (this.deathT > 1.1) { this.alive = false; this.rig.root.visible = false; VFX.debrisBurst(this.pos, this.accent, 6); return; }
+      const sink = this.rig.root.position.y; this.rig.root.position.copy(this.pos); if (this.deathT > 0.75) this.rig.root.position.y = sink; return;
     }
     // knockback / launch physics
     if (this.launched) { this.vy -= 28 * dt; this.pos.y += this.vy * dt; this.rig.model.rotation.x += dt * 9; if (this.pos.y <= 0) { this.pos.y = 0; this.launched = false; this.rig.model.rotation.x = this.def.tilt || 0; this.stagger(0.5); VFX.spark(this.pos, this.accent, 6, 1, 1); VFX.ring(this.pos, this.accent, 1.5, 0.25); } this.pos.addScaledVector(this.kbVel, dt); this.kbVel.multiplyScalar(1 - dt * 2); this.finish(P, dist); return; }
@@ -1724,7 +1727,7 @@ class Boss {
     const dx = P.pos.x - this.pos.x, dz = P.pos.z - this.pos.z; const dist = Math.hypot(dx, dz); const toP = _v.set(dx / (dist || 1), 0, dz / (dist || 1)); const wantYaw = Math.atan2(dx, dz);
     if (this.hitFlash > 0) { this.hitFlash -= dt; if (this.hitFlash <= 0 && this.rig) this.rig.setEmissive(this.accent, 1.2); }
     this.invulnT -= dt;
-    if (this.state === 'dying') { this.deathT += dt; this.vel.set(0, 0, 0); if (G.frame % 4 === 0) { VFX.debrisBurst(this.pos.clone().add(_v2.set(rnd(-2, 2), rnd(0, 4), rnd(-2, 2))), pick([COL.cyan, COL.mag, COL.amber]), 6); VFX.spark(this.pos.clone().setY(rnd(1, 4)), COL.white, 8, 2, 4); } if (this.rig) { this.rig.update(dt); this.rig.root.rotation.x = Math.min(0.9, this.deathT * 0.4); this.rig.setOpacity(Math.max(0, 1 - this.deathT / 2.6)); } if (this.deathT > 2.8) { this.alive = false; if (this.rig) this.rig.root.visible = false; this.group.visible = false; GAME.onBossDefeated(this); } this.sync(); return; }
+    if (this.state === 'dying') { this.deathT += dt; this.vel.set(0, 0, 0); if (G.frame % 4 === 0) { VFX.debrisBurst(this.pos.clone().add(_v2.set(rnd(-2, 2), rnd(0, 4), rnd(-2, 2))), pick([COL.cyan, COL.mag, COL.amber]), 6); VFX.spark(this.pos.clone().setY(rnd(1, 4)), COL.white, 8, 2, 4); } if (this.rig) { this.rig.update(dt); this.rig.root.rotation.x = Math.min(0.9, this.deathT * 0.4); this.rig.setOpacity(Math.max(0, 1 - this.deathT / 2.6)); if (this.deathT > 0.6 && !this._deadCol) { this._deadCol = true; this.rig.setDead(true); } } if (this.deathT > 2.8) { this.alive = false; if (this.rig) this.rig.root.visible = false; this.group.visible = false; GAME.onBossDefeated(this); } this.sync(); return; }
     this.fightT += dt; if (!this.enraged && this.fightT > CONFIG.boss.enrageTime) { this.enraged = true; this.dmgMul = CONFIG.boss.enrageMult; HUD.stamp('ENRAGED', this.name + ' OVERCLOCKS'); this.accent = COL.red; }
     if (this.state === 'broken') { this.stateT += dt; this.vel.multiplyScalar(0.8); if (this.rig) { this.rig.update(dt); this.rig.setEmissive(COL.amber, 1.4 + Math.sin(G.time * 14) * 0.8); } if (this.stateT > this.brokenT) { this.state = 'idle'; this.stateT = 0; this.posture = 0; this.attackCd = 1; VFX.setCue(this.cue, null); if (this.rig) this.rig.setEmissive(this.accent, 1.2); VFX.number(this.pos, 'RECOVERED', '#8899aa'); } this.sync(); return; }
     if (this.state === 'transition') { this.stateT += dt; this.vel.multiplyScalar(0.8); if (this.rig) { this.rig.update(dt); if (this.rig.state !== 'taunt') this.rig.play('taunt', { once: true }); } if (this.stateT >= this.transitionT) { this.state = 'idle'; this.attackCd = 1; if (this.rig) this.rig.setEmissive(this.accent, 1.2); } this.sync(); return; }
