@@ -847,7 +847,7 @@ const CAM = {
     if (orbit) { this.yaw -= look.x * CONFIG.camera.orbitSpeed * dt * (INPUT.lastDevice === 'pad' ? 1 : 2.5); this.pitch = clamp(this.pitch + look.y * 1.6 * dt, 0.2, 1.1); this.idleT = 0; } else this.idleT += dt;
     if (INPUT.pressed.camreset) { this.yaw = player.yaw + Math.PI; }
     if (lockTarget) { const want = Math.atan2(lockTarget.pos.x - player.pos.x, lockTarget.pos.z - player.pos.z) + Math.PI; this.yaw = angLerp(this.yaw, want, 1 - Math.exp(-3 * dt)); }
-    else if (this.idleT > 1.2 && INPUT.move.lengthSq() > 0.05) { this.yaw = angLerp(this.yaw, player.yaw + Math.PI, 1 - Math.exp(-1.6 * dt)); }
+    else if (this.idleT > 1.2 && INPUT.move.y < -0.35) { this.yaw = angLerp(this.yaw, player.yaw + Math.PI, 1 - Math.exp(-1.1 * dt)); } // recenter only while pushing forward; backing toward the camera must never swing it
     const near = ENEMIES.countNear(player.pos, 9); const wantDist = CONFIG.camera.dist + Math.min(6, near * 0.12) + (lockTarget ? 2 : 0) + this.pullback;
     this.dist = damp(this.dist, wantDist, 3, dt);
     const tgt = _v.copy(player.pos); tgt.y += 1.4; if (lockTarget) tgt.lerp(_v2.copy(lockTarget.pos).setY(lockTarget.pos.y + 1.4), 0.35);
