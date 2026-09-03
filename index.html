@@ -1888,7 +1888,7 @@ async function boot() {
   // a handful of idle enemies wander the title backdrop
   requestAnimationFrame(frame);
 }
-window.ND = { G, GAME, PLAYER, ENEMIES, BOSS, WORLD, VFX, CONFIG, ASSETS, FALLBACKS, INPUT, GAMEPAD, AUDIO, scene, camera, renderer, THREE, composer };
+window.ND = { G, GAME, PLAYER, ENEMIES, BOSS, WORLD, VFX, CONFIG, ASSETS, FALLBACKS, INPUT, GAMEPAD, AUDIO, DRONES, BULLETS, CAM, HUD, scene, camera, renderer, THREE, composer };
 boot().catch(err => { console.error(err); $('loadpct').textContent = 'BOOT FAILURE — ' + err.message; });
 </script>
 </body>
