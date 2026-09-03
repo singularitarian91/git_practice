@@ -1855,8 +1855,8 @@ const GAME = {
   nextCard() { this.cardIdx++; this.cardT = 0; if (this.cardIdx >= this.cards.length) this.skipCards(); else this.renderCard(); },
   skipCards() { const f = this._cardsThen; this._cardsThen = null; if (f) f(); },
   // ---- augment choice ----
-  offerAugments() { const pool = AUGMENTS.filter(a => !PLAYER.augs.has(a.id)); const pick3 = []; while (pick3.length < 3 && pool.length) pick3.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]); this.augOffer = pick3; this.augIdx = 0; $('augmenu').innerHTML = pick3.map(a => `<div class="item"><b>${a.name}</b><small>${a.desc}</small></div>`).join(''); [...$('augmenu').children].forEach((it, i) => it.addEventListener('click', () => { this.augIdx = i; INPUT.press('confirm'); })); $('augnote').textContent = 'SYNC ' + PLAYER.level + ' · ' + PLAYER.augs.size + ' augments installed · confirm with ' + glyph('confirm'); this.setState('augment'); AUDIO.pause(true); HUD.comms('augment'); },
-  chooseAugment() { const a = this.augOffer[this.augIdx]; if (!a) return; PLAYER.addAugment(a); this.setState('play'); AUDIO.pause(false); },
+  offerAugments() { const pool = AUGMENTS.filter(a => !PLAYER.augs.has(a.id)); if (!pool.length) return; const pick3 = []; while (pick3.length < 3 && pool.length) pick3.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]); this.augOffer = pick3; this.augIdx = 0; $('augmenu').innerHTML = pick3.map(a => `<div class="item"><b>${a.name}</b><small>${a.desc}</small></div>`).join(''); [...$('augmenu').children].forEach((it, i) => it.addEventListener('click', () => { this.augIdx = i; INPUT.press('confirm'); })); $('augnote').textContent = 'SYNC ' + PLAYER.level + ' · ' + PLAYER.augs.size + ' augments installed · confirm with ' + glyph('confirm'); this.setState('augment'); AUDIO.pause(true); HUD.comms('augment'); },
+  chooseAugment() { const a = this.augOffer[this.augIdx]; if (a) PLAYER.addAugment(a); this.setState('play'); AUDIO.pause(false); },
   start(diff) {
     G.diff = diff; G.kills = 0; G.combo = 0; G.maxCombo = 0; G.dmgTaken = 0; G.runTime = 0; G.time = 0; G.hitstop = 0; G.timeScale = 1; this.slowT = 0; this.coolant = false; this.pull = null; WORLD.coolant.visible = false;
     rng = mulberry32(CONFIG.seed); ENEMIES.clearAll(); BOSS.clear(); for (const b of BOSS.list) { } BOSS.list.length = 0; for (const g of WORLD.gates) { g.open = false; g.t = 0; g.group.position.y = 0; g.wall.material.emissive.set(COL.red); g.light.color.set(COL.red); g.light.intensity = 20; }
@@ -1883,8 +1883,8 @@ const GAME = {
   // ---- zone / wave flow ----
   startWave() {
     const plan = ZONE_PLAN[this.zone]; const w = plan.waves[this.wave]; if (!w) return;
-    for (const type in w) { if (type === 'drones') { const z = ZONES[this.zone]; for (let i = 0; i < w[type]; i += 5) DRONES.spawn(V3(rnd(-z.hw + 4, z.hw - 4), 4, rnd(z.z1 + 6, z.z0 - 6)), 5); } else ENEMIES.queue(type, w[type], this.zone); }
     if (w.relays) { RELAYS.spawn(w.relays, this.zone); this.zoneState = 'relays'; HUD.objective('DESTROY THE RELAYS — 0/' + w.relays); HUD.comms('relays'); AUDIO.setMood('combat'); return; }
+    for (const type in w) { if (type === 'drones') { const z = ZONES[this.zone]; for (let i = 0; i < w[type]; i += 5) DRONES.spawn(V3(rnd(-z.hw + 4, z.hw - 4), 4, rnd(z.z1 + 6, z.z0 - 6)), 5); } else ENEMIES.queue(type, w[type], this.zone); }
     this.zoneState = 'wave'; HUD.objective(`CLEAR ${ZONES[this.zone].name} — WAVE ${this.wave + 1}/${plan.waves.length}`); if (this.wave > 0) toast('WAVE ' + (this.wave + 1)); AUDIO.setMood('combat'); this.waveWait = 0.5;
     if (this.zone === 0 && this.wave === 1) HUD.comms('wave2'); if (this.zone === 0 && this.wave === 3) HUD.comms('wave4');
   },
