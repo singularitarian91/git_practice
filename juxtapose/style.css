@@ -516,3 +516,21 @@ input[type=checkbox] { width: 16px; height: 16px; }
 #crash .crash-actions { display: flex; gap: 10px; justify-content: flex-end; }
 #crash button { font: italic 16px 'Cormorant Garamond', Georgia, serif; color: #efe4cf; background: rgba(239,228,207,0.08); border: 1px solid rgba(239,228,207,0.2); border-radius: 4px; padding: 5px 12px; cursor: pointer; }
 #crash button:focus-visible { outline: 2px solid #d9a441; outline-offset: 2px; }
+
+/* waypoint to a caught memory (violet), or a freed one waiting to be taken (gold) */
+#waypoint.memory .wp-mark path { fill: rgba(150,110,255,0.16); stroke: #b69cff; }
+#waypoint.memory .wp-mark .wp-core { fill: #b69cff; }
+#waypoint.memory .wp-dist { color: #d6c8ff; }
+#waypoint.memory .wp-arrow path { stroke: #b69cff; }
+#waypoint.memory.freed .wp-mark path { fill: rgba(255,210,122,0.18); stroke: #ffd27a; }
+#waypoint.memory.freed .wp-mark .wp-core { fill: #ffd27a; }
+
+/* Clarity: kept between nights */
+.cl-row { display: flex; align-items: center; gap: 7px; margin-top: 4px; height: 12px; }
+.cl-label { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(239,228,207,0.6); }
+.cl-rank { font-size: 11px; font-style: italic; color: #ffe2a0; white-space: nowrap; }
+.cl-bar { flex: 1; height: 3px; min-width: 40px; background: rgba(0,0,0,0.45); border-radius: 2px; overflow: hidden; }
+.cl-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #c98a2c, #ffe2a0); transition: width 0.6s ease-out; }
+.cl-row.gain .cl-bar i { animation: clGain 0.8s ease-out; }
+@keyframes clGain { 0% { box-shadow: 0 0 0 rgba(255,226,160,0); } 30% { box-shadow: 0 0 8px rgba(255,226,160,0.9); } 100% { box-shadow: 0 0 0 rgba(255,226,160,0); } }
+@media (prefers-reduced-motion: reduce) { .cl-row.gain .cl-bar i { animation: none; } .cl-bar i { transition: none; } }

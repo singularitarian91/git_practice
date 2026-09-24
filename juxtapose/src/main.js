@@ -21,8 +21,9 @@ import { FigureAnimator } from './animator.js';
 import { Portals } from './portals.js';
 import { Narrator } from './narrator.js';
 import { CombatHUD } from './combat.js';
-import { defaultMods, SCRAPS } from './meta.js';
+import { defaultMods, SCRAPS, WHIMS } from './meta.js';
 import { PhotoMode } from './photo.js';
+import { RANKS, CLARITY, rankOf, applyRanks } from './knots.js';
 
 const $ = (s) => document.querySelector(s);
 // With "Night-Light tips and asides" off, only these lines still play
@@ -270,6 +271,7 @@ class Game {
   onEntityDeath(e, opts = {}) {
     // removed from the set in the loop; here, only the kill marker
     if (e.kind === 'enemy' && this.state === 'playing' && opts.type !== 'forgotten' && opts.type !== 'void') this.ui.hitMarker('kill');
+    if (e.kind === 'enemy' && this.state === 'playing' && opts.type !== 'void') this.gainClarity(opts.type === 'deathblow' || e.deathblown ? CLARITY.deathblow : CLARITY.kill, e.center());
   }
   onPlayerDeath() {
     if (this.sandbox) {
@@ -285,9 +287,49 @@ class Game {
 
   newRun() {
     this.run = { mods: defaultMods(), keepsakes: new Set(this.meta.equipped()), whims: [] };
+    applyRanks(this.run.mods, this.meta.data.clarity || 0); // what the Figment has become, it stays
+  }
+
+  // Clarity: kept between nights; each rank reached is a permanent perk
+  gainClarity(n, at) {
+    if (this.sandbox || !n) return;
+    const before = this.meta.data.clarity || 0, after = before + n;
+    this.meta.data.clarity = after;
+    this.stats.clarity = (this.stats.clarity || 0) + n;
+    const r0 = rankOf(before), r1 = rankOf(after);
+    for (let r = r0 + 1; r <= r1; r++) {
+      const R = RANKS[r];
+      R.apply(this.run.mods);
+      if (R.apply && this.player && this.run.mods.hpBonus) { const add = this.run.mods.hpBonus - (this.player.hpBonusApplied || 0); this.player.maxHp += add; this.player.heal(add); this.player.hpBonusApplied = this.run.mods.hpBonus; }
+      this.ui.card('CLARITY', R.name, R.perk);
+      this.audio.stinger('memory');
+      if (this.player) this.vfx.propertyBurst(this.player.pos.clone().setY(this.player.pos.y + 1.2), 'floating', 1.4);
+    }
+    if (at && n >= 8) this.vfx.trail(at.clone().setY(at.y + 1.4), '#ffd27a', 0.3, 0.6);
+    this.ui.clarity(after);
+    this.meta.save();
+  }
+
+  // a memory taken back: a whim to choose, and the door once enough are free
+  onKnotFreed(knot) {
+    this.stats.memoriesFreed = (this.stats.memoriesFreed || 0) + 1;
+    setTimeout(() => {
+      if (this.state !== 'playing' || this.player?.dead || WHIMS.length <= this.run.whims.length) return;
+      this.input.exitLock();
+      this.state = 'whims';
+      this.ui.setHud(false);
+      this.ui.showWhims((w) => {
+        if (w) { w.apply(this.run.mods); this.run.whims.push(w.id); this.ui.toast(`Whim: ${w.name}`, 'good'); }
+        this.ui.hideScreens();
+        this.ui.setHud(true);
+        this.state = 'playing';
+        this.input.requestLock();
+      });
+    }, 900);
   }
 
   onBossDefeated() {
+    this.gainClarity(CLARITY.boss, this.boss?.center?.());
     this.ui.toast('The eye closes.', 'good');
     this.narrator.say('bossDown', { priority: true });
     this.meta.data.bossKills = (this.meta.data.bossKills || 0) + 1;
@@ -335,6 +377,8 @@ class Game {
 
   makePlayer(spawn, yaw, carry) {
     const p = this.player = new Player(this, spawn);
+    const bonus = this.run?.mods.hpBonus || 0;
+    p.maxHp += bonus; p.hp += bonus; p.hpBonusApplied = bonus;
     p.teleport(spawn, yaw);
     this.physics.beforeStep = (h) => { if (this.player) this.player.fixedUpdate(h); };
     if (carry) {
@@ -442,7 +486,8 @@ class Game {
       this.entities.add(this.boss);
       this.ui.echo(this.recentCombos.slice(-3));
       setTimeout(() => this.audio.stinger('bossIntro'), 1500);
-    } else lvl.startWaves();
+    } else if (lvl.knotSpots?.length) lvl.startKnots();
+    else lvl.startWaves();
     $('#layer-name').textContent = LAYERS[index].name;
     const roman = ['I', 'II', 'III', 'IV'][index];
     this.ui.card(`LAYER ${roman}`, LAYERS[index].name, LAYERS[index].subtitle);
@@ -497,7 +542,7 @@ class Game {
     this.ui.fade(1, 2.2);
     const top = Object.entries(this.stats.propUse).sort((a, b) => b[1] - a[1])[0];
     const stats = { depth: this.depth, strangeness: this.lucidity.total, kills: this.stats.kills, destroyed: this.stats.destroyed, explosions: this.stats.explosions,
-      topProp: top ? top[0] : null, cause, victory: cause === 'victory' };
+      topProp: top ? top[0] : null, cause, victory: cause === 'victory', clarity: this.stats.clarity || 0, memoriesFreed: this.stats.memoriesFreed || 0 };
     setTimeout(() => this.showBedroom(stats), 2600);
   }
 

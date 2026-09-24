@@ -65,7 +65,7 @@ export const WHIM_CATS = {
 };
 
 export function defaultMods() {
-  return { melee: 1, meleeRange: 1, meleeSpeed: 1, posture: 1, maxCharges: 0, lucidGain: 1, reverieMax: 99, fireRate: 1,
+  return { melee: 1, meleeRange: 1, meleeSpeed: 1, posture: 1, maxCharges: 0, hpBonus: 0, lucidGain: 1, reverieMax: 99, fireRate: 1,
     takeBonus: 0, extraJump: 0, dashCD: 1, explosion: 1, gloryHeal: 0, heal: 1, focusTime: 1, deflectWindow: 1 };
 }
 

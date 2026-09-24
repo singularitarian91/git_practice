@@ -9,6 +9,7 @@ import { drawPainting } from './painting.js';
 import { SandField } from './sand.js';
 import { Town } from './town.js';
 import { Sea } from './sea.js';
+import { Knot, KNOTS, KNOTS_NEEDED } from './knots.js';
 
 // ---------------------------------------------------------------- noise
 function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
@@ -656,10 +657,16 @@ export class Level {
     const tower = roof('B_Tower');
     if (tower) spots.push(new THREE.Vector3(tower.x, tower.top + 0.8, tower.z));
     this.scrapSpots = [...spots, this.stairsTop, this.gardenTop].filter(Boolean).slice(0, 3);
-    this.waves = [
-      { n: 3, hp: 55 }, { n: 4, hp: 60 }, { n: 5, hp: 65 },
-    ];
-    this.objectiveName = 'Silence the anxieties';
+    // the anxieties guard memories: a knot in front of each of these buildings
+    this.knotSpots = [];
+    for (const def of KNOTS.desert) {
+      const r = T.rects.find((q) => q.name === def.at);
+      const lz = r ? (r.hd + 3.5) * (def.side || 1) : 0; // in front of its door (+Z in the kit)
+      const x = r ? r.x + Math.sin(r.rotY) * lz : 0, z = r ? r.z + Math.cos(r.rotY) * lz : 0;
+      if (r) this.knotSpots.push({ def, pos: new THREE.Vector3(x, this.groundY(x, z), z), hp: 60 });
+    }
+    this.waves = [];
+    this.objectiveName = 'Free the memories the anxieties are guarding';
   }
 
   // a headland from the kit; until it exists, a rough stack of stone
@@ -746,10 +753,12 @@ export class Level {
     { const a = Math.PI / 4, gy = this.heightAt(Math.cos(a) * 44, Math.sin(a) * 44); this.scrapSpots.push(new THREE.Vector3(Math.cos(a) * 44, gy + 6.2, Math.sin(a) * 44)); }
     if (this.stairsTop) this.scrapSpots.push(this.stairsTop);
     this.scrapSpots.push(new THREE.Vector3(0, 3.6, 0).add(this.groveBranch || new THREE.Vector3(2, 0, 0)));
-    this.waves = [
-      { n: 4, hp: 60, rain: true }, { n: 6, hp: 65, rain: true }, { n: 7, hp: 70, rain: true },
-    ];
-    this.objectiveName = 'Weather the rain of men';
+    this.knotSpots = KNOTS.piazza.map((def) => {
+      const x = Math.cos(def.a) * 25, z = Math.sin(def.a) * 25;
+      return { def, pos: new THREE.Vector3(x, this.groundY(x, z), z), hp: 65, variant: 'golconda' };
+    });
+    this.waves = [];
+    this.objectiveName = 'Free the memories the rain is guarding';
   }
 
   buildBoss(R) {
@@ -855,6 +864,13 @@ export class Level {
 
   // ------------------------------------------------------------ runtime
   startWaves() { this.waveIdx = -1; this.waveDelay = 4; this.nextWave(); }
+  // knots: each memory with its half-asleep guards; enough freed opens the door
+  startKnots() {
+    this.knots = this.knotSpots.map((k) => new Knot(this, k.def, k.pos));
+    this.knots.forEach((k, i) => k.spawnGuards(this.knotSpots[i].hp + this.game.depth * 5, this.knotSpots[i].variant));
+    this.knotsNeeded = Math.min(KNOTS_NEEDED, this.knots.length);
+  }
+  get knotsFreed() { return this.knots ? this.knots.filter((k) => k.state === 'taken').length : 0; }
   nextWave() {
     this.waveIdx++;
     if (this.waveIdx >= this.waves.length) { this.openDoor(); return; }
@@ -1021,7 +1037,13 @@ export class Level {
     const total = this.waves.length;
     if (this.key === 'boss') this.objective = game.boss && !game.boss.dead ? 'Hurt it only while it is unwatched' : '';
     else if (this.key === 'sandbox') this.objective = 'Lucid sandbox · infinite charges · B for the spawn menu';
-    else if (!this.doorOpen) this.objective = `${this.objectiveName} · wave ${Math.max(1, Math.min(total, this.waveIdx + 1))}/${total} · ${this.enemiesAlive()} remain`;
+    else if (this.knots) {
+      for (const k of this.knots) k.update(dt);
+      const f = this.knotsFreed;
+      if (!this.doorOpen && f >= this.knotsNeeded) this.openDoor();
+      this.objective = !this.doorOpen ? `${this.objectiveName} · ${f}/${this.knotsNeeded} freed`
+        : f < this.knots.length ? `The door in the ${this.key === 'desert' ? 'shallows' : 'square'} is open · ${this.knots.length - f} memories still caught` : 'Every memory is free · step through the door';
+    } else if (!this.doorOpen) this.objective = `${this.objectiveName} · wave ${Math.max(1, Math.min(total, this.waveIdx + 1))}/${total} · ${this.enemiesAlive()} remain`;
     else this.objective = 'Find the open door and step through';
     // the door
     const door = this.door;

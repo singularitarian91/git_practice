@@ -5,6 +5,7 @@ import { MEMORIES, KEEPSAKES, WHIMS, WHIM_CATS, SCRAPS } from './meta.js';
 import { drawPainting } from './painting.js';
 import { takeCandidate } from './properties.js';
 import { LINES } from './narrator.js';
+import { RANKS, rankOf, rankProgress } from './knots.js';
 
 const $ = (s) => document.querySelector(s);
 const ROMAN = ['I', 'II', 'III', 'IV'];
@@ -126,6 +127,7 @@ export class UI {
   }
   setHud(on) {
     this.hud.hidden = !on;
+    if (on) this.clarity(this.game.meta?.data.clarity || 0, true);
     if (!on) { this.el.waypoint.hidden = true; for (const t of this.threatPool) t.el.hidden = true; }
   }
   setHudScale(s) {
@@ -569,11 +571,19 @@ export class UI {
   // The open door: a diamond with the distance, pinned to the edge when off screen
   updateWaypoint(cam, W, H) {
     const g = this.game, lvl = g.level, pl = g.player, el = this.el.waypoint;
-    const door = lvl && lvl.doorOpen && lvl.door;
+    // until the door opens, the nearest memory still caught; then the door
+    let door = lvl && lvl.doorOpen && lvl.door, memory = false;
+    if (!door && lvl && lvl.knots && pl) {
+      let best = Infinity;
+      for (const k of lvl.knots) { if (k.state === 'taken') continue; const d = k.pos.distanceToSquared(pl.pos); if (d < best) { best = d; door = k; } }
+      memory = !!door;
+    }
     const dist = door && pl ? Math.hypot(pl.pos.x - door.pos.x, pl.pos.z - door.pos.z) : 0;
     if (!door || !pl || g.state !== 'playing' || dist < 3.5 || this.wheelOpen) { if (!el.hidden) el.hidden = true; return; }
     el.hidden = false;
-    _v.copy(door.pos); _v.y += 3.2;
+    el.classList.toggle('memory', memory);
+    el.classList.toggle('freed', memory && door.state === 'freed');
+    _v.copy(door.pos); _v.y += memory ? 2.6 : 3.2;
     const s = placeOnScreen(cam, _v.clone(), W, H, WAYPOINT_BOX);
     el.classList.toggle('edge', !s.on);
     el.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px) translate(-50%, -50%)`;
@@ -583,6 +593,15 @@ export class UI {
   }
 
   // -------------------------------------------------------------- lore
+  // Clarity: rank name and progress to the next rank
+  clarity(xp, quiet = false) {
+    const r = rankOf(xp), el = document.querySelector('.cl-row');
+    if (!el) return;
+    el.querySelector('.cl-rank').textContent = `${RANKS[r].name}${r ? ' · ' + r : ''}`;
+    el.querySelector('.cl-bar i').style.width = (rankProgress(xp) * 100).toFixed(1) + '%';
+    if (!quiet) { el.classList.remove('gain'); void el.offsetWidth; el.classList.add('gain'); }
+  }
+
   loreCard(scrap) {
     const el = this.el.lore;
     el.querySelector('.lc-text').textContent = scrap.text;
@@ -751,6 +770,6 @@ export class UI {
       wm.querySelector('.wm-text').textContent = memory.text;
       wm.querySelector('.wm-unlock').innerHTML = memory.unlock ? this.chip(memory.unlock, ' now appears in the dream') : '';
     } else wm.hidden = true;
-    $('#wake-stats').textContent = `depth ${stats.depth + 1} · strangeness ${Math.round(stats.strangeness)} · ${stats.kills} anxieties silenced · ${stats.destroyed} things broken · ${stats.explosions} explosions`;
+    $('#wake-stats').textContent = `depth ${stats.depth + 1} · strangeness ${Math.round(stats.strangeness)} · ${stats.kills} anxieties silenced · ${stats.destroyed} things broken · ${stats.explosions} explosions · ${stats.memoriesFreed || 0} memories freed · +${stats.clarity || 0} clarity (${RANKS[rankOf(this.game.meta.data.clarity || 0)].name})`;
   }
 }

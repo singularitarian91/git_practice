@@ -95,6 +95,14 @@ Properties interact through shared channels instead of hand-written pairs, so co
 - **Fuse:** a sleeping bomb is a mine, and burning shortens the fuse.
 - **Explosion payloads:** a bursting, floating pomegranate makes everything in the blast float.
 
+**Memories and Clarity.** The anxieties don't come in waves. They guard *knots*: memories the dream has tangled up, each marked by a violet column of dusk and a waypoint.
+- **In the desert:** the unfinished clock at the workshop, the Saturday pomegranate at the loggia, the Sunday candle at the chapel, the hat on the rack at the station, and the finch at the boathouse.
+- **In the piazza:** four memories of the city he left for.
+- **Guards:** they idle half-asleep around the knot until you come close, or until one of them is hit. The more lucid the dream, the more come to its defence.
+- **Freeing a memory:** silence its guards and walk into it. You get the memory's story back, a whim, and Clarity. Free three and the door opens.
+
+**Clarity** is kept between nights. Every anxiety silenced adds to it, deathblows more, and freed memories and the boss most of all. Each rank is a small permanent perk, from *Stirring* (+10 Figment) to *Self-actualized* (deathblows mend more).
+
 **Lucidity** rises with absurdity: stacking properties, new pairings, or giving things to yourself. Higher Lucidity makes every property stronger, warps the picture (FOV dolly zoom, chromatic smear, swirling sky, tempo drag in the score), and brings more anxieties. At 100 the dreamer wakes and the run ends.
 
 ## The story

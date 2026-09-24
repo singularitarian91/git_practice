@@ -65,6 +65,9 @@ export class Sleepwalker extends Entity {
     this.flinch = 0; this.flash = 0;
     this.strafeDir = Math.random() < 0.5 ? -1 : 1; this.strafeT = rnd(2, 4);
     this.wander = pos.clone();
+    // a guard idles around the memory it keeps until someone comes for it
+    this.guard = opts.guard || null;
+    this.dormant = !!this.guard;
     this.losT = 0; this.canSee = false;
     this.meleeT = 0;
     this.speedMul = opts.speed || 1;
@@ -107,6 +110,7 @@ export class Sleepwalker extends Entity {
       this.game.ui.hitmarker(amount >= 30);
     }
     this.lastDir = opts.dir || null;
+    if (this.dormant && this.guard) this.guard.wake();
     super.damage(amount, opts);
   }
 
@@ -206,6 +210,10 @@ export class Sleepwalker extends Entity {
       if (pl.decoys && pl.decoys.length) this.decoy = pl.decoys[Math.floor(Math.random() * pl.decoys.length)];
       else this.decoy = null;
     }
+    if (this.dormant) {
+      this.canSee = false;
+      if (pl && !pl.dead && dist < 9) this.guard.wake();
+    }
     const target = this.decoy && !this.decoy.dead ? this.decoy.pos : (pl ? pl.pos : pos);
     const toT = target.clone().sub(pos); toT.y = 0;
     const dT = toT.length();
@@ -223,9 +231,10 @@ export class Sleepwalker extends Entity {
         else if (dT < 5) want.copy(toT).negate().addScaledVector(side, 0.5);
         else want.copy(side).addScaledVector(toT, 0.15);
       } else {
-        if (pos.distanceTo(this.wander) < 2 || Math.random() < dt * 0.1) this.wander.set(pos.x + rnd(-10, 10), 0, pos.z + rnd(-10, 10));
+        const home = this.dormant ? this.guard.pos : null, span = home ? 4 : 10;
+        if (pos.distanceTo(this.wander) < 2 || Math.random() < dt * 0.1) { const c = home || pos; this.wander.set(c.x + rnd(-span, span), 0, c.z + rnd(-span, span)); }
         want.copy(this.wander).sub(pos).setY(0);
-        speed *= 0.45;
+        speed *= home ? 0.25 : 0.45;
       }
       if (want.lengthSq() > 0) want.normalize();
       // steer around walls
