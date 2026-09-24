@@ -88,15 +88,15 @@ void main(){
   float r2 = dot(c, c);
   uv += vec2(sin(uv.y * 11.0 + uTime * 1.3), cos(uv.x * 9.0 + uTime * 1.1)) * 0.003 * L;
   uv = 0.5 + c * (1.0 + r2 * 0.22 * L * sin(uTime * 0.6)) ;
-  float ab = (0.0012 + 0.007 * L + uHurt * 0.006 + uSlowmo * 0.004) * (0.3 + r2 * 3.0);
+  float ab = (0.0008 + 0.0035 * L + uHurt * 0.006 + uSlowmo * 0.004) * (0.3 + r2 * 3.0);
   vec2 dir = normalize(c + 1e-5);
   vec3 col;
   col.r = texture2D(tDiffuse, uv + dir * ab).r;
   col.g = texture2D(tDiffuse, uv).g;
   col.b = texture2D(tDiffuse, uv - dir * ab).b;
   float l = dot(col, vec3(0.299, 0.587, 0.114));
-  col = mix(vec3(l), col, uSat + L * 0.4 - uSlowmo * 0.5);
-  col = hueShift(col, L * 0.5 * sin(uTime * 0.21));
+  col = mix(vec3(l), col, uSat + L * 0.25 - uSlowmo * 0.5);
+  col = hueShift(col, L * 0.32 * sin(uTime * 0.21));
   col *= uTint;
   float vig = smoothstep(0.95, 0.25, length(c) * (1.0 + uVignette));
   col *= mix(1.0, vig, 0.6);

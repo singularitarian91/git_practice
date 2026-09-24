@@ -39,7 +39,7 @@ export class Lucidity {
   get k() { return this.value / 100; }
   update(dt) {
     this.idle += dt;
-    if (this.idle > 4) this.value = Math.max(0, this.value - dt * (1.1 + (this.idle - 4) * 0.08));
+    if (this.idle > 3) this.value = Math.max(0, this.value - dt * (1.5 + (this.idle - 3) * 0.15));
     this.display += (this.value - this.display) * Math.min(1, dt * 4);
   }
 }
@@ -261,21 +261,21 @@ const NATURAL_KIND = {
 
 export function lucidityForGive(game, target, prop) {
   const L = game.lucidity;
-  let v = 3;
+  let v = 2;
   const reasons = [];
   const others = target === 'self' ? [...game.player.self.keys()] : target === 'rounds' ? [...game.player.roundProps.keys()] : [...target.props].filter((p) => p !== prop);
-  if (others.length) { v += others.length * 4; reasons.push('stacked'); }
+  if (others.length) { v += others.length * 3; reasons.push('stacked'); }
   for (const o of others) {
     const key = [o, prop].sort().join('+');
-    if (!L.seenPairs.has(key)) { L.seenPairs.add(key); v += 6; reasons.push('new combo'); }
+    if (!L.seenPairs.has(key)) { L.seenPairs.add(key); v += 5; reasons.push('new combo'); }
   }
-  if (target === 'self') { v += 5; reasons.push('on yourself'); }
-  else if (target === 'rounds') { v += 3; }
+  if (target === 'self') { v += 4; reasons.push('on yourself'); }
+  else if (target === 'rounds') { v += 2; }
   else {
     const nat = NATURAL_KIND[target.name] || [];
-    if (!nat.includes(prop)) { v += 3; }
-    if (target.kind === 'wall') v += 1;
-    if (target.kind === 'boss') v += 6;
+    if (!nat.includes(prop)) { v += 1.5; }
+    if (target.kind === 'wall') v += 0.5;
+    if (target.kind === 'boss') v += 4;
   }
   return { v, reason: reasons.length ? reasons[reasons.length - 1] : 'absurdity' };
 }

@@ -347,6 +347,7 @@ class Game {
     inv.addEventListener('change', () => { this.input.invertY = inv.checked; this.meta.setSetting('invert', inv.checked); });
     // canvas click captures the mouse
     this.render.renderer.domElement.addEventListener('mousedown', () => {
+      this.render.renderer.domElement.focus({ preventScroll: true });
       this.audio.start();
       if (this.state === 'playing' && !this.sbOpen) this.input.requestLock();
     });

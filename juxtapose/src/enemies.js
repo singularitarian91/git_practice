@@ -242,7 +242,7 @@ export class Sleepwalker extends Entity {
         const origin = this.drawerWorld();
         const aim = target.clone().setY(target.y + 1.0);
         if (pl && this.decoy == null) aim.addScaledVector(pl.vel.clone().setY(0), dT / 16 * 0.6);
-        const vel = aim.sub(origin).normalize().multiplyScalar(15);
+        const vel = aim.sub(origin).normalize().multiplyScalar(13);
         game.projectiles.enemyOrb(origin, vel, { damage: 8, homing: 0.35, shooter: this, color: '#7ff7ff' });
         game.audio.sfx('enemyShoot', { position: origin });
       }
