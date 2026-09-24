@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Juxtapose</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="./style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/three.module.js",
+  "three/addons/": "./vendor/three/addons/",
+  "rapier": "./vendor/rapier/rapier.es.js"
+} }
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="stage"></div>
+
+  <!-- ============================ HUD ============================ -->
+  <div id="hud" hidden>
+    <div id="hud-top-left">
+      <div id="layer-name" class="display"></div>
+      <div id="objective"></div>
+    </div>
+
+    <div id="lucid">
+      <div class="lucid-row">
+        <svg id="lucid-eye" viewBox="0 0 48 24" width="44" height="22" aria-hidden="true">
+          <path class="lid" d="M2 12 Q24 -4 46 12 Q24 28 2 12Z"/>
+          <circle class="iris" cx="24" cy="12" r="6"/>
+          <circle class="pupil" cx="24" cy="12" r="2.6"/>
+        </svg>
+        <div class="lucid-bar"><div class="lucid-fill"></div><div class="lucid-tick" style="left:75%"></div></div>
+        <div class="lucid-val mono">0</div>
+      </div>
+      <div class="lucid-label">Lucidity</div>
+      <div id="lucid-pops"></div>
+    </div>
+
+    <div id="boss" hidden>
+      <div class="boss-name display">The Unwatched</div>
+      <div class="boss-bar"><div class="boss-fill"></div></div>
+      <div class="boss-state"><span class="boss-eye"></span><span class="boss-text"></span></div>
+      <div class="boss-echo"></div>
+    </div>
+
+    <div id="crosshair">
+      <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
+        <path class="arc take" d="M14 32 A18 18 0 0 1 32 14"/>
+        <path class="arc give" d="M50 32 A18 18 0 0 1 32 50"/>
+        <circle class="dot" cx="32" cy="32" r="1.6"/>
+        <g class="hit"><path d="M22 22 L27 27 M42 22 L37 27 M22 42 L27 37 M42 42 L37 37"/></g>
+      </svg>
+      <div id="hurt-ring"></div>
+    </div>
+    <div id="target" hidden>
+      <div class="t-name"></div>
+      <div class="t-props"></div>
+      <div class="t-hint"></div>
+    </div>
+
+    <div id="hud-bottom-left">
+      <div id="self-chips"></div>
+      <div id="hp">
+        <div class="hp-label">Figment</div>
+        <div class="hp-bar"><div class="hp-fill"></div></div>
+        <div class="hp-val mono">100</div>
+      </div>
+    </div>
+
+    <div id="ribbon"></div>
+
+    <div id="gun">
+      <div id="rounds"></div>
+      <div id="ammo"></div>
+      <div id="vial">
+        <div class="v-icon"></div>
+        <div class="v-text"><div class="v-name"></div><div class="v-count mono"></div></div>
+      </div>
+    </div>
+
+    <div id="toasts"></div>
+    <div id="wheel" hidden><div class="wheel-ring"></div><div class="wheel-center"><div class="wc-name display"></div><div class="wc-desc"></div></div></div>
+  </div>
+
+  <div id="card" hidden><div class="card-num"></div><div class="card-name display"></div><div class="card-sub"></div></div>
+  <div id="fade"></div>
+  <div id="vignette-text" hidden></div>
+
+  <!-- ============================ SCREENS ============================ -->
+  <section id="loading" class="screen">
+    <div class="load-inner">
+      <h1 class="display title-word">Juxtapose</h1>
+      <div class="load-bar"><div class="load-fill"></div></div>
+      <p class="load-msg">Falling asleep...</p>
+    </div>
+  </section>
+
+  <section id="title" class="screen" hidden>
+    <div class="title-inner">
+      <p class="eyebrow">a surrealist shooter inside someone else's dream</p>
+      <h1 class="display title-word">Juxtapose</h1>
+      <p class="tagline">Take a property from one thing. Give it to another. Fight your way down before the dreamer wakes.</p>
+      <nav class="menu">
+        <button id="btn-run" class="primary">Begin the night</button>
+        <button id="btn-sandbox">Lucid sandbox</button>
+        <button id="btn-memories">Memories</button>
+        <button id="btn-controls">How to play</button>
+        <button id="btn-settings">Settings</button>
+      </nav>
+      <p class="fine">Best for keyboard and mouse. Click the dream to capture the mouse, and press Esc to release it.</p>
+    </div>
+  </section>
+
+  <section id="pause" class="screen" hidden>
+    <div class="panel">
+      <h2 class="display">The dream holds its breath</h2>
+      <nav class="menu">
+        <button id="btn-resume" class="primary">Resume</button>
+        <button id="btn-pause-controls">How to play</button>
+        <button id="btn-pause-settings">Settings</button>
+        <button id="btn-quit">Wake up (quit to title)</button>
+      </nav>
+    </div>
+  </section>
+
+  <section id="settings" class="screen" hidden>
+    <div class="panel">
+      <h2 class="display">Settings</h2>
+      <div class="form">
+        <label for="set-quality">Graphics quality</label>
+        <select id="set-quality"><option value="high">High: soft shadows, AO, MSAA</option><option value="medium">Medium</option><option value="low">Low</option></select>
+        <label for="set-sens">Mouse sensitivity</label>
+        <input id="set-sens" type="range" min="0.4" max="2.5" step="0.05" value="1">
+        <label for="set-vol">Master volume</label>
+        <input id="set-vol" type="range" min="0" max="1" step="0.05" value="0.8">
+        <label for="set-music">Music volume</label>
+        <input id="set-music" type="range" min="0" max="1" step="0.05" value="0.7">
+        <label class="check"><input id="set-invert" type="checkbox"> Invert mouse Y</label>
+      </div>
+      <nav class="menu"><button class="back primary">Back</button></nav>
+    </div>
+  </section>
+
+  <section id="controls" class="screen" hidden>
+    <div class="panel wide">
+      <h2 class="display">How to play</h2>
+      <div class="controls-grid">
+        <div>
+          <h3>Move</h3>
+          <dl class="keys">
+            <dt>W A S D</dt><dd>Run (keep running to break into a sprint)</dd>
+            <dt>Space</dt><dd>Jump · again mid-air for a flip · near a wall to kick off</dd>
+            <dt>Shift</dt><dd>Dash (once in the air)</dd>
+            <dt>C / Ctrl</dt><dd>Slide while running · ground-pound in the air</dd>
+            <dt>Mouse</dt><dd>Look; the camera swings behind you</dd>
+          </dl>
+          <h3>Parkour</h3>
+          <p>Jump alongside a wall to <b>wall-run</b>. Jump straight into one to <b>climb</b>. Run at a ledge to <b>mantle</b> or <b>vault</b>. Land on a brass rail to <b>grind</b>. Beds are trampolines. Slide-jump to keep your speed.</p>
+        </div>
+        <div>
+          <h3>The Juxtaposition Gun</h3>
+          <dl class="keys">
+            <dt>Left mouse</dt><dd>Fire dream rounds</dd>
+            <dt>Right mouse</dt><dd><b>Take</b> a property from what you aim at</dd>
+            <dt>E / middle mouse</dt><dd><b>Give</b> the selected property to what you aim at</dd>
+            <dt>Q</dt><dd>Give it to <b>yourself</b></dd>
+            <dt>F</dt><dd>Load it into your <b>rounds</b> (stack up to three)</dd>
+            <dt>Wheel / 1–9 / hold Tab</dt><dd>Choose a property</dd>
+            <dt>R</dt><dd>Reload</dd>
+            <dt>V · H · Esc</dt><dd>Swap shoulder · help · pause</dd>
+          </dl>
+          <h3>Lucidity</h3>
+          <p>Absurd combos, such as stacking properties, new pairings, or giving things to yourself, raise Lucidity. That makes every property stronger and the dream stranger. At 100 the dreamer wakes and your run ends.</p>
+        </div>
+      </div>
+      <div id="prop-table"></div>
+      <nav class="menu"><button class="back primary">Back</button></nav>
+    </div>
+  </section>
+
+  <section id="memories" class="screen" hidden>
+    <div class="panel wide">
+      <h2 class="display">Memories</h2>
+      <p class="fine">Each night that goes deep or strange enough leaves a memory behind. Memories add new properties to the dream.</p>
+      <div id="memory-list"></div>
+      <nav class="menu"><button class="back primary">Back</button></nav>
+    </div>
+  </section>
+
+  <section id="waking" class="screen" hidden>
+    <div class="waking-inner">
+      <p class="eyebrow" id="wake-cause"></p>
+      <div id="wake-lines"></div>
+      <div id="wake-memory" hidden><div class="eyebrow">A memory surfaces</div><div class="wm-title display"></div><div class="wm-text"></div><div class="wm-unlock"></div></div>
+      <div id="wake-stats" class="mono"></div>
+      <nav class="menu"><button id="btn-sleep" class="primary">Fall asleep again</button><button id="btn-wake-title">Title</button></nav>
+    </div>
+  </section>
+
+  <section id="sandbox-panel" hidden>
+    <h3 class="display">Lucid sandbox</h3>
+    <div class="sb-grid" id="sb-spawns"></div>
+    <div class="sb-row"><label class="check"><input id="sb-god" type="checkbox"> Invulnerable</label><label class="check"><input id="sb-freeze" type="checkbox"> Enemies hold fire</label></div>
+    <div class="sb-row"><label for="sb-lucid">Lucidity</label><input id="sb-lucid" type="range" min="0" max="99" step="1" value="0"></div>
+    <div class="sb-row"><button id="sb-clear">Clear enemies &amp; debris</button><button id="sb-reset">Rebuild sandbox</button><button id="sb-close">Close (B)</button></div>
+  </section>
+
+  <div id="touch-note" hidden>Juxtapose needs a keyboard and mouse.</div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
