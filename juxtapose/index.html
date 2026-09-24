@@ -34,7 +34,7 @@
           <circle class="iris" cx="24" cy="12" r="6"/>
           <circle class="pupil" cx="24" cy="12" r="2.6"/>
         </svg>
-        <div class="lucid-bar"><div class="lucid-fill"></div><div class="lucid-tick" style="left:75%"></div></div>
+        <div class="lucid-bar"><div class="lucid-fill"></div><i class="lucid-tick" style="left:25%"></i><i class="lucid-tick" style="left:50%"></i><i class="lucid-tick wake" style="left:75%" title="Past here, she starts to stir"></i></div>
         <div class="lucid-val mono">0</div>
       </div>
       <div class="lucid-label">Lucidity</div>
@@ -48,13 +48,24 @@
       <div class="boss-echo"></div>
     </div>
 
+    <div id="waypoint" hidden><svg class="wp-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2.5l8 9.5-8 9.5-8-9.5z"/><path class="wp-core" d="M12 8l3.4 4-3.4 4-3.4-4z"/></svg><span class="wp-dist mono"></span><svg class="wp-arrow" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 5l5 5 5-5"/></svg></div>
+    <div id="threats" aria-hidden="true"></div>
+
     <div id="crosshair">
       <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
+        <defs>
+          <linearGradient id="dd-grad" gradientUnits="userSpaceOnUse" x1="62" y1="0" x2="158" y2="0"><stop offset="0" stop-color="#ff3b30" stop-opacity="0"/><stop offset=".22" stop-color="#ff3b30"/><stop offset=".5" stop-color="#ff7a5a"/><stop offset=".78" stop-color="#ff3b30"/><stop offset="1" stop-color="#ff3b30" stop-opacity="0"/></linearGradient>
+          <linearGradient id="dd-grad-guard" gradientUnits="userSpaceOnUse" x1="62" y1="0" x2="158" y2="0"><stop offset="0" stop-color="#ffe7b3" stop-opacity="0"/><stop offset=".25" stop-color="#ffe7b3"/><stop offset=".75" stop-color="#ffe7b3"/><stop offset="1" stop-color="#ffe7b3" stop-opacity="0"/></linearGradient>
+        </defs>
         <path class="arc take" d="M14 32 A18 18 0 0 1 32 14"/>
         <path class="arc give" d="M50 32 A18 18 0 0 1 32 50"/>
         <circle class="dot" cx="32" cy="32" r="1.6"/>
-        <g class="hit"><path d="M22 22 L27 27 M42 22 L37 27 M22 42 L27 37 M42 42 L37 37"/></g>
+        <g class="hm hm-hit"><path d="M23 23 L27.5 27.5 M41 23 L36.5 27.5 M23 41 L27.5 36.5 M41 41 L36.5 36.5"/></g>
+        <g class="hm hm-kill"><path d="M18 18 L26 26 M46 18 L38 26 M18 46 L26 38 M46 46 L38 38"/></g>
+        <g class="hm hm-break"><path d="M32 17 L47 32 L32 47 L17 32 Z"/><path d="M32 11v3M32 50v3M11 32h3M50 32h3"/></g>
+        <g class="hm hm-deflect"><circle cx="32" cy="32" r="12"/></g>
       </svg>
+      <div id="dmg-dirs" aria-hidden="true"></div>
       <div id="hurt-ring"></div>
     </div>
     <div id="db-prompt" hidden><kbd>F</kbd> Deathblow</div>
@@ -65,20 +76,32 @@
     </div>
 
     <div id="hud-bottom-left">
+      <div id="narrator" hidden role="status" aria-live="polite">
+        <div class="nl-who"><span class="nl-icon" aria-hidden="true"></span>Night-Light</div>
+        <div class="nl-text"></div>
+      </div>
       <div id="self-chips"></div>
       <div id="hp">
-        <svg id="reverie" viewBox="0 0 40 40" width="40" height="40" aria-label="Reverie">
-          <circle cx="20" cy="20" r="17" class="rv-ring"/>
-          <clipPath id="rv-clip"><circle cx="20" cy="20" r="15"/></clipPath>
-          <rect class="rv-fill" x="0" y="40" width="40" height="40" clip-path="url(#rv-clip)"/>
-          <circle cx="20" cy="20" r="15" class="rv-glass"/>
-          <text x="20" y="24.5" class="rv-num">0</text>
+        <svg id="reverie" viewBox="0 0 44 48" width="44" height="48" role="img" aria-label="Reverie vessel">
+          <title>Reverie. Fills as your blows land. Hold X to focus and mend.</title>
+          <defs>
+            <clipPath id="rv-clip"><circle cx="22" cy="29" r="14.2"/></clipPath>
+            <radialGradient id="rv-glass-g" cx="34%" cy="30%" r="80%"><stop offset="0" stop-color="#fff" stop-opacity=".2"/><stop offset=".5" stop-color="#fff" stop-opacity=".03"/><stop offset="1" stop-color="#ffd9a0" stop-opacity=".12"/></radialGradient>
+            <linearGradient id="rv-liquid-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff4cc"/><stop offset=".35" stop-color="#ffd978"/><stop offset="1" stop-color="#c98a2c"/></linearGradient>
+          </defs>
+          <rect class="rv-neck" x="17" y="8" width="10" height="8" rx="1.5"/>
+          <rect class="rv-lip" x="15.5" y="5" width="13" height="4" rx="1.6"/>
+          <circle class="rv-back" cx="22" cy="29" r="14.2"/>
+          <g clip-path="url(#rv-clip)"><g class="rv-level" transform="translate(0 44)"><path class="rv-fill" d="M-24 0 Q-19 -2.2 -14 0 T-4 0 T6 0 T16 0 T26 0 T36 0 T46 0 T56 0 T66 0 V40 H-24 Z"/></g></g>
+          <path class="rv-marks" d="M8.6 24.4h3.2M8.6 33.6h3.2"/>
+          <circle class="rv-glass" cx="22" cy="29" r="15"/>
+          <path class="rv-shine" d="M12.6 23.5 A11 11 0 0 1 18.2 18"/>
         </svg>
         <div class="hp-main">
-          <div class="hp-label">Figment</div>
-          <div class="hp-bar"><div class="hp-fill"></div><div class="hp-armor"></div></div>
+          <div class="hp-head"><span class="hp-label">Figment</span><span class="hp-val mono">100</span></div>
+          <div class="hp-bar"><div class="hp-heal"></div><div class="hp-trail"></div><div class="hp-fill"></div><div class="hp-armor"></div><i class="hp-q" style="left:25%"></i><i class="hp-q" style="left:50%"></i><i class="hp-q" style="left:75%"></i></div>
+          <div class="rv-row"><span class="rv-label">Reverie</span><span class="rv-pips"></span><span class="rv-hint"><kbd>X</kbd> focus</span></div>
         </div>
-        <div class="hp-val mono">100</div>
       </div>
     </div>
 
@@ -94,9 +117,15 @@
     </div>
 
     <div id="toasts"></div>
-    <div id="narrator" hidden><span class="nl-icon" aria-hidden="true"></span><span class="nl-text"></span></div>
     <div id="lore-card" hidden><div class="eyebrow">A scrap of the painting</div><div class="lc-text"></div><div class="lc-src"></div></div>
-    <div id="wheel" hidden><div class="wheel-ring"></div><div class="wheel-center"><div class="wc-name display"></div><div class="wc-desc"></div></div></div>
+    <div id="wheel" hidden>
+      <div class="wheel-dial">
+        <svg class="wheel-svg" viewBox="0 0 380 380" aria-hidden="true"></svg>
+        <div class="wheel-ring"></div>
+        <div class="wheel-center"><div class="wc-name display"></div><div class="wc-count mono"></div></div>
+      </div>
+      <div class="wheel-card"><div class="wc-desc"></div><dl class="wc-acts"></dl></div>
+    </div>
   </div>
 
   <div id="card" hidden><div class="card-num"></div><div class="card-name display"></div><div class="card-sub"></div></div>
@@ -129,37 +158,61 @@
     </div>
   </section>
 
-  <section id="pause" class="screen" hidden>
-    <div class="panel">
-      <h2 class="display">The dream holds its breath</h2>
-      <nav class="menu">
-        <button id="btn-resume" class="primary">Resume</button>
-        <button id="btn-pause-controls">How to play</button>
-        <button id="btn-pause-settings">Settings</button>
-        <button id="btn-quit">Wake up (quit to title)</button>
-      </nav>
-    </div>
-  </section>
-
-  <section id="settings" class="screen" hidden>
-    <div class="panel">
-      <h2 class="display">Settings</h2>
-      <div class="form">
-        <label for="set-quality">Graphics quality</label>
-        <select id="set-quality"><option value="high">High: soft shadows, AO, MSAA</option><option value="medium">Medium</option><option value="low">Low</option></select>
-        <label for="set-sens">Mouse sensitivity</label>
-        <input id="set-sens" type="range" min="0.4" max="2.5" step="0.05" value="1">
-        <label for="set-vol">Master volume</label>
-        <input id="set-vol" type="range" min="0" max="1" step="0.05" value="0.8">
-        <label for="set-music">Music volume</label>
-        <input id="set-music" type="range" min="0" max="1" step="0.05" value="0.7">
-        <label class="check"><input id="set-invert" type="checkbox"> Invert mouse Y</label>
+  <section id="pause" class="screen modal" hidden>
+    <div class="panel pause-panel">
+      <div class="pause-main">
+        <p class="eyebrow" id="ps-where"></p>
+        <h2 class="display">The dream holds its breath</h2>
+        <nav class="menu">
+          <button id="btn-resume" class="primary">Resume</button>
+          <button id="btn-photo">Photo mode</button>
+          <button id="btn-pause-controls">How to play</button>
+          <button id="btn-pause-settings">Settings</button>
+          <button id="btn-quit">Wake up (quit to title)</button>
+        </nav>
       </div>
-      <nav class="menu"><button class="back primary">Back</button></nav>
+      <aside id="pause-summary" aria-label="Tonight so far"></aside>
     </div>
   </section>
 
-  <section id="controls" class="screen" hidden>
+  <section id="settings" class="screen modal" hidden>
+    <div class="panel settings-panel">
+      <h2 class="display">Settings</h2>
+      <div class="settings-grid">
+        <fieldset>
+          <legend>Picture</legend>
+          <div class="set-row"><label for="set-quality">Graphics quality</label><select id="set-quality" data-k="quality"><option value="high">High: soft shadows, AO, MSAA</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
+          <div class="set-row"><label for="set-fov">Field of view</label><input id="set-fov" data-k="fov" data-fmt="deg" type="range" min="60" max="95" step="1"><output class="mono" for="set-fov"></output></div>
+          <div class="set-row"><label for="set-shake">Camera shake</label><input id="set-shake" data-k="shake" data-fmt="pct" type="range" min="0" max="1.5" step="0.05"><output class="mono" for="set-shake"></output></div>
+          <div class="set-row"><label for="set-comfort" title="The lucid warp, colour smear, sway and breathing zoom">Dream warp</label><input id="set-comfort" data-k="comfort" data-fmt="pct" type="range" min="0" max="1" step="0.05"><output class="mono" for="set-comfort"></output></div>
+          <div class="set-row"><label for="set-grain">Film grain</label><input id="set-grain" data-k="grain" data-fmt="pct" type="range" min="0" max="2" step="0.05"><output class="mono" for="set-grain"></output></div>
+          <label class="check set-check"><input id="set-flash" data-k="reduceFlash" type="checkbox"> Reduce flashing</label>
+        </fieldset>
+        <fieldset>
+          <legend>Sound</legend>
+          <div class="set-row"><label for="set-vol">Master volume</label><input id="set-vol" data-k="vol" data-fmt="pct" type="range" min="0" max="1" step="0.05"><output class="mono" for="set-vol"></output></div>
+          <div class="set-row"><label for="set-music">Music</label><input id="set-music" data-k="music" data-fmt="pct" type="range" min="0" max="1" step="0.05"><output class="mono" for="set-music"></output></div>
+          <div class="set-row"><label for="set-sfx">Effects</label><input id="set-sfx" data-k="sfx" data-fmt="pct" type="range" min="0" max="1" step="0.05"><output class="mono" for="set-sfx"></output></div>
+        </fieldset>
+        <fieldset>
+          <legend>Controls</legend>
+          <div class="set-row"><label for="set-sens">Mouse sensitivity</label><input id="set-sens" data-k="sens" data-fmt="x" type="range" min="0.4" max="2.5" step="0.05"><output class="mono" for="set-sens"></output></div>
+          <div class="set-row"><label for="set-guard">Guard</label><select id="set-guard" data-k="guardToggle" data-bool><option value="0">Hold right mouse</option><option value="1">Tap to raise, tap to lower</option></select></div>
+          <label class="check set-check"><input id="set-invert" data-k="invert" type="checkbox"> Invert mouse Y</label>
+          <label class="check set-check"><input id="set-reload" data-k="autoReload" type="checkbox"> Reload when the cylinder runs dry</label>
+        </fieldset>
+        <fieldset>
+          <legend>Interface</legend>
+          <div class="set-row"><label for="set-hud">HUD scale</label><select id="set-hud" data-k="hudScale"><option value="auto">Fit the screen</option><option value="0.8">80%</option><option value="0.9">90%</option><option value="1">100%</option><option value="1.15">115%</option><option value="1.3">130%</option><option value="1.45">145%</option></select></div>
+          <div class="set-row"><label for="set-sub">Subtitle size</label><select id="set-sub" data-k="subSize"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></div>
+          <label class="check set-check"><input id="set-tips" data-k="tips" type="checkbox"> Night-Light tips and asides <span class="fine">(the story always plays)</span></label>
+        </fieldset>
+      </div>
+      <nav class="menu row"><button class="back primary">Back</button><button id="btn-reset-settings">Reset to defaults</button></nav>
+    </div>
+  </section>
+
+  <section id="controls" class="screen modal" hidden>
     <div class="panel wide">
       <h2 class="display">How to play</h2>
       <div class="controls-grid">
@@ -193,7 +246,8 @@
             <dt>G</dt><dd>Load it into your <b>rounds</b> (stack up to three)</dd>
             <dt>Wheel / 1–0 / hold Tab</dt><dd>Choose a property</dd>
             <dt>R</dt><dd>Reload</dd>
-            <dt>V · H · Esc</dt><dd>Swap shoulder · help · pause</dd>
+            <dt>V · H · Esc</dt><dd>Swap shoulder · this page · pause</dd>
+            <dt>P</dt><dd>Photo mode: the dream holds still for a picture</dd>
           </dl>
           <h3>Lucidity</h3>
           <p>Absurd combos, such as stacking properties, new pairings, or giving things to yourself, raise Lucidity. That makes every property stronger and the dream stranger. At 100 the dreamer wakes and your run ends. Focusing calms it down.</p>
@@ -206,18 +260,18 @@
     </div>
   </section>
 
-  <section id="journal" class="screen" hidden>
+  <section id="journal" class="screen modal" hidden>
     <div class="panel wide journal">
       <h2 class="display">Journal</h2>
-      <div class="tabs" role="tablist">
-        <button class="tab on" data-tab="figment">The Figment</button>
-        <button class="tab" data-tab="painting">The Painting</button>
-        <button class="tab" data-tab="dreamer">The Dreamer</button>
-        <button class="tab" data-tab="memories">Memories</button>
+      <div class="tabs" role="tablist" aria-label="Journal sections">
+        <button class="tab on" role="tab" aria-selected="true" data-tab="figment">The Figment</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="painting">The Painting</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="dreamer">The Dreamer</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="memories">Memories</button>
       </div>
       <div class="tab-body" data-body="figment">
         <div class="bio">
-          <img class="portrait" src="./docs/character/portrait.png" alt="The Figment: a wooden mannequin in a bowler hat with an apple where its face should be" onerror="this.hidden=true">
+          <figure class="portrait-frame"><img class="portrait" src="./docs/character/portrait.png" width="1000" height="1250" decoding="async" alt="The Figment: a wooden mannequin in a bowler hat with an apple where its face should be" onerror="this.parentNode.hidden=true"><figcaption>L’Homme au Chapeau, study. T. Vautrin, 1958</figcaption></figure>
           <div>
             <h3>The Figment</h3>
             <p>A jointed wooden lay figure, the kind painters pose instead of a person. Black bowler, red scarf, and where the face should be, a green apple hanging in the air. There is no face because the painter never got that far.</p>
@@ -239,30 +293,33 @@
     </div>
   </section>
 
-  <section id="keepsakes" class="screen" hidden>
+  <section id="keepsakes" class="screen modal" hidden>
     <div class="panel wide">
       <h2 class="display">Keepsakes</h2>
-      <p class="fine">Equip memories as keepsakes. Each takes up notches. <span id="notch-count" class="mono"></span></p>
+      <div class="keep-head"><p class="fine">Wear memories as keepsakes. Each one takes up notches.</p><div class="notch-meter"><span class="nm-label">Notches</span><span id="notch-count"></span></div></div>
       <div id="keepsake-list"></div>
       <nav class="menu"><button class="back primary">Done</button></nav>
     </div>
   </section>
 
-  <section id="whims" class="screen" hidden>
-    <div class="panel wide whims-panel">
+  <section id="whims" class="screen modal" hidden>
+    <div class="whims-wrap">
       <p class="eyebrow">between layers</p>
       <h2 class="display">Choose a whim</h2>
-      <div id="whim-cards"></div>
+      <p id="whim-nl"><span class="nl-who"><span class="nl-icon" aria-hidden="true"></span>Night-Light</span> <span class="nl-text"></span></p>
+      <div id="whim-cards" role="group" aria-label="Whims"></div>
+      <p class="whim-hint"><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> to take one, or <kbd>←</kbd> <kbd>→</kbd> and <kbd>Enter</kbd></p>
     </div>
   </section>
 
   <section id="waking" class="screen" hidden>
+    <div class="wake-scrim" aria-hidden="true"></div>
     <div class="waking-inner">
       <p class="eyebrow" id="wake-cause"></p>
       <div id="wake-lines"></div>
       <div id="wake-memory" hidden><div class="eyebrow">A memory surfaces</div><div class="wm-title display"></div><div class="wm-text"></div><div class="wm-unlock"></div></div>
       <div id="wake-stats" class="mono"></div>
-      <nav class="menu"><button id="btn-sleep" class="primary">Fall asleep again</button><button id="btn-wake-keepsakes">Keepsakes</button><button id="btn-wake-journal">Journal</button><button id="btn-wake-title">Title</button></nav>
+      <nav class="menu row"><button id="btn-sleep" class="primary">Fall asleep again</button><button id="btn-wake-keepsakes">Keepsakes</button><button id="btn-wake-journal">Journal</button><button id="btn-wake-title">Title</button></nav>
     </div>
   </section>
 
@@ -273,6 +330,17 @@
     <div class="sb-row"><label for="sb-lucid">Lucidity</label><input id="sb-lucid" type="range" min="0" max="99" step="1" value="0"></div>
     <div class="sb-row"><button id="sb-clear">Clear enemies &amp; debris</button><button id="sb-reset">Rebuild sandbox</button><button id="sb-close">Close (B)</button></div>
   </section>
+
+  <section id="photo-panel" hidden aria-label="Photo mode">
+    <div class="pp-head"><span class="eyebrow">Photo mode</span><span class="pp-note" aria-live="polite"></span></div>
+    <div class="pp-row"><label for="ph-exp">Exposure</label><input id="ph-exp" type="range" min="0.3" max="2.5" step="0.02"><output class="mono" for="ph-exp"></output></div>
+    <div class="pp-row"><label for="ph-vig">Vignette</label><input id="ph-vig" type="range" min="0" max="1.4" step="0.02"><output class="mono" for="ph-vig"></output></div>
+    <div class="pp-row"><label for="ph-grain">Grain</label><input id="ph-grain" type="range" min="0" max="0.25" step="0.005"><output class="mono" for="ph-grain"></output></div>
+    <div class="pp-row"><label for="ph-fov">Field of view</label><input id="ph-fov" type="range" min="15" max="110" step="1"><output class="mono" for="ph-fov"></output></div>
+    <div class="pp-btns"><button id="ph-shoot" class="pp-primary">Capture <kbd>C</kbd></button><button id="ph-reset">Reset view <kbd>R</kbd></button><button id="ph-exit">Leave <kbd>Esc</kbd></button></div>
+    <p class="pp-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Q</kbd><kbd>E</kbd> down, up · <kbd>Shift</kbd> faster · drag or arrows to look · wheel to zoom · <kbd>H</kbd> hide this</p>
+  </section>
+  <div id="photo-flash"></div>
 
   <div id="touch-note" hidden>Juxtapose needs a keyboard and mouse.</div>
 </div>

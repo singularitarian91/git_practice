@@ -41,6 +41,7 @@ Choose **Lucid sandbox** on the title screen to test mechanics freely. It has ev
 | Wheel / `1`–`0` / hold `Tab` | Choose a property. `Tab` opens a slow-motion wheel. |
 | `R` | Reload (break-open revolver) |
 | `V` · `H` · `Esc` | Swap shoulder · help · pause |
+| `P` | **Photo mode**: freeze the dream and fly a free camera. Adjust exposure, vignette, grain and FOV, then press `C` to save a PNG. |
 
 **Parkour.** You can wall-run along walls, wall-jump off them, climb a wall by jumping straight at it, mantle up ledges up to 2.5 m, and speed-vault over low cover. Other moves:
 
@@ -51,6 +52,15 @@ Choose **Lucid sandbox** on the title screen to test mechanics freely. It has ev
 - Bounce on beds, which are trampolines.
 - Blast-jump while you're bursting.
 - Step through a pair of **framed** portals with your speed intact.
+
+**Settings** cover field of view, camera shake, dream warp (motion comfort for the lucidity effects), film grain, reduce flashing, and HUD scale. They also cover subtitle size, Night-Light tips (the story lines always play), toggle or hold guard, auto-reload, and separate master, music and effects volumes. Everything applies live and has a reset.
+
+**In-fight feedback:**
+- Hit markers distinguish hits, heavy hits, kills, posture breaks and deflects.
+- Damage arcs point to whoever hit you.
+- Edge chevrons warn of off-screen perilous lunges and incoming orbs.
+- A waypoint leads to the open door.
+- A heartbeat vignette pulses when you're close to death.
 
 ## The five influences, and where they live
 
@@ -108,8 +118,9 @@ juxtapose/
   index.html, style.css      HUD and menus (DOM overlay)
   src/
     main.js                  boot, game loop, run structure, sandbox
-    render.js                renderer, painted sky, PMREM IBL, soft shadows, light pool,
-                             GTAO + bloom + ACES + "dream" grade pass (lucidity warp)
+    render.js                renderer, painted three-stop sky, PMREM IBL, soft shadows, light pool,
+                             sun-scattered height fog, ink-edge shading for characters,
+                             GTAO + bloom + ACES + "dream" grade pass (lucidity warp, near-death pulse)
     physics.js               Rapier wrapper (fixed 60 Hz step, queries, groups)
     player.js                kinematic character controller + parkour, chase camera, the gun
     animator.js              two-layer animation (locomotion / upper-body overlays), procedural additives
@@ -125,6 +136,7 @@ juxtapose/
     portals.js               framed portals: placement, render-to-texture views, momentum transfer
     narrator.js              the Night-Light: companion lantern, typed subtitles, babble voice
     painting.js              L'Homme au Chapeau drawn procedurally (torn / finished)
+    photo.js                 photo mode: frozen sim, free camera, exposure/vignette/grain, PNG capture
     ui.js, meta.js, input.js, config.js
   blender/
     build_figure.py          the player: model, armature, 42 procedural animation clips, export (--sheet renders the character sheet)

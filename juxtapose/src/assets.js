@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { DREAM } from './render.js';
+import { DREAM, inkify } from './render.js';
 
 // Fetch a .glb; hosts that won't serve binary models get a base64 text copy instead
 async function fetchModel(url) {
@@ -40,7 +40,13 @@ export class Assets {
       return [k, g];
     }));
     for (const [k, g] of results) this[k] = g;
+    // ink edges on anything with a silhouette the player has to read at a glance
+    const inkAll = (root, k) => root.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of (Array.isArray(o.material) ? o.material : [o.material])) if (!m.transparent && !(m.emissiveIntensity > 1 && m.emissive?.getHex())) inkify(m, k);
+    });
     this.figure.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    inkAll(this.figure.scene, 0.5);
     // index every top-level prop object by name
     for (const child of [...this.props.scene.children]) {
       child.traverse((o) => {
@@ -48,6 +54,7 @@ export class Assets {
       });
       this.templates.set(child.name, child);
     }
+    for (const [name, k] of [['Sleepwalker', 0.75], ['Unwatched', 0.45]]) if (this.templates.has(name)) inkAll(this.templates.get(name), k);
     this.makeTextures();
   }
 

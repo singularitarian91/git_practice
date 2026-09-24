@@ -203,35 +203,51 @@ export class VFX {
 
   // ---------------------------------------------------------------- composites
   explosion(pos, radius = 4, opts = {}) {
-    const hot = opts.color ? C(opts.color, 6) : C('#ffb060', 7);
-    const warm = opts.color ? C(opts.color, 2) : C('#ff4a14', 3);
-    const n = Math.round(40 + radius * 10);
+    // a fireball with colour in it rather than a white-out: hot core that cools
+    // through orange to ember before handing over to lit smoke and a dust skirt
+    const hot = opts.color ? C(opts.color, 3.2) : C('#ffc070', 3.4);
+    const warm = opts.color ? C(opts.color, 0.8) : C('#b8300c', 0.9);
+    const n = Math.round(34 + radius * 9);
     const d = new THREE.Vector3();
     // fireball
     for (let i = 0; i < n; i++) {
       rndDir(d);
-      const sp = rnd(2, 7) * radius * 0.45 * (opts.implode ? -1 : 1);
-      this.add.spawn({ x: pos.x + d.x * 0.3, y: pos.y + d.y * 0.3 + 0.2, z: pos.z + d.z * 0.3, vx: d.x * sp, vy: d.y * sp + 1.5, vz: d.z * sp,
-        color: hot, color1: warm, alpha: 1, alpha1: 0, size: rnd(0.8, 1.6) * radius * 0.35, size1: rnd(1.2, 2.2) * radius * 0.4, life: rnd(0.35, 0.8), drag: 4, spin: rnd(-2, 2) });
+      const sp = rnd(2, 6.5) * radius * 0.42 * (opts.implode ? -1 : 1);
+      this.add.spawn({ x: pos.x + d.x * 0.3, y: pos.y + d.y * 0.3 + 0.25, z: pos.z + d.z * 0.3, vx: d.x * sp, vy: d.y * sp + 1.8, vz: d.z * sp,
+        color: hot, color1: warm, alpha: 0.95, alpha1: 0, size: rnd(0.7, 1.4) * radius * 0.32, size1: rnd(1.1, 2.0) * radius * 0.38, life: rnd(0.3, 0.7), drag: 4.2, spin: rnd(-2, 2) });
+    }
+    // a few slow, dense flame tongues that linger at the core
+    for (let i = 0; i < 8 + radius; i++) {
+      rndDir(d); d.y = Math.abs(d.y);
+      this.add.spawn({ x: pos.x + d.x * radius * 0.2, y: pos.y + 0.3 + d.y * radius * 0.15, z: pos.z + d.z * radius * 0.2, vx: d.x, vy: 2.2 + d.y * 2, vz: d.z,
+        color: C('#ff9a3c', 2.2), color1: C('#5a1406', 0.5), alpha: 0.9, alpha1: 0, size: radius * 0.3, size1: radius * 0.55, life: rnd(0.6, 1.0), drag: 2, spin: rnd(-1, 1) });
     }
     // sparks
     for (let i = 0; i < n * 1.2; i++) {
       rndDir(d); d.y = Math.abs(d.y) * 0.8 + 0.1;
       const sp = rnd(8, 26) * (opts.implode ? -0.5 : 1);
-      this.sparks.spawn({ x: pos.x, y: pos.y + 0.2, z: pos.z, vx: d.x * sp, vy: d.y * sp, vz: d.z * sp, color: C('#ffd27a', 8), color1: C('#ff5a1f', 2),
+      this.sparks.spawn({ x: pos.x, y: pos.y + 0.2, z: pos.z, vx: d.x * sp, vy: d.y * sp, vz: d.z * sp, color: C('#ffd27a', 6), color1: C('#ff5a1f', 1.5),
         alpha: 1, alpha1: 0, size: rnd(0.05, 0.12), life: rnd(0.4, 1.2), grav: 14, drag: 1.2, stretch: 0.05 });
     }
-    // smoke
-    for (let i = 0; i < 18 + radius * 3; i++) {
+    // smoke: warm grey, lit from below at first, rising and spreading
+    for (let i = 0; i < 16 + radius * 3; i++) {
       rndDir(d); d.y = Math.abs(d.y);
       const sp = rnd(1, 4) * radius * 0.3;
-      this.smoke.spawn({ x: pos.x + d.x * radius * 0.3, y: pos.y + 0.4 + d.y * radius * 0.2, z: pos.z + d.z * radius * 0.3, vx: d.x * sp, vy: d.y * sp + 1.2, vz: d.z * sp,
-        color: C('#3a302b'), color1: C('#8a7d72'), alpha: 0.75, alpha1: 0, size: radius * 0.5, size1: radius * rnd(1.2, 1.9), life: rnd(1.8, 3.8), drag: 1.6, spin: rnd(-0.6, 0.6), grav: -0.4 });
+      this.smoke.spawn({ x: pos.x + d.x * radius * 0.3, y: pos.y + 0.5 + d.y * radius * 0.25, z: pos.z + d.z * radius * 0.3, vx: d.x * sp, vy: d.y * sp + 1.5, vz: d.z * sp,
+        color: C('#6a574a'), color1: C('#b3a597'), alpha: 0.55, alpha1: 0, size: radius * 0.45, size1: radius * rnd(1.3, 2.0), life: rnd(2.0, 4.0), drag: 1.6, spin: rnd(-0.6, 0.6), grav: -0.5 });
+    }
+    // a skirt of ground dust racing outward
+    for (let i = 0; i < 14 + radius * 2; i++) {
+      const a = (i / (14 + radius * 2)) * Math.PI * 2 + rnd(-0.2, 0.2);
+      const sp = rnd(5, 9) * radius * 0.35;
+      this.smoke.spawn({ x: pos.x + Math.cos(a) * radius * 0.25, y: pos.y + 0.2, z: pos.z + Math.sin(a) * radius * 0.25, vx: Math.cos(a) * sp, vy: 0.5, vz: Math.sin(a) * sp,
+        color: C(opts.dust || '#d8c29c', 0.95), color1: C(opts.dust || '#e6d6b8', 1.05), alpha: 0.5, alpha1: 0, size: radius * 0.25, size1: radius * 0.8, life: rnd(1.0, 1.8), drag: 3.2, spin: rnd(-0.4, 0.4), grav: 0.2 });
     }
     // the flash + shockwave
-    this.add.spawn({ x: pos.x, y: pos.y + 0.5, z: pos.z, color: C('#fff1d6', 12), alpha: 1, alpha1: 0, size: radius * 2.4, size1: radius * 3.2, life: 0.14 });
-    this.ring(new THREE.Vector3(pos.x, pos.y + 0.15, pos.z), 0.5, radius * 2.2, 0.55, opts.implode ? 0x8a5cff : 0xffc27a, 0.9);
-    if (this.renderer) this.renderer.flash(new THREE.Vector3(pos.x, pos.y + 1.2, pos.z), opts.implode ? 0x9b6bff : 0xff8a3a, 60 * radius, radius * 6, 0.55, 0.25);
+    const fk = this.renderer ? this.renderer.flashScale : 1;
+    this.add.spawn({ x: pos.x, y: pos.y + 0.6, z: pos.z, color: C('#ffe6c0', 4 * fk), alpha: 0.9 * fk, alpha1: 0, size: radius * 1.3, size1: radius * 1.9, life: 0.09 });
+    this.ring(new THREE.Vector3(pos.x, pos.y + 0.15, pos.z), 0.5, radius * 2.2, 0.5, opts.implode ? 0x8a5cff : 0xffc27a, 0.85);
+    if (this.renderer) this.renderer.flash(new THREE.Vector3(pos.x, pos.y + 1.2, pos.z), opts.implode ? 0x9b6bff : 0xff8a3a, 26 * radius, radius * 6, 0.45, 0.25);
     this.shake = Math.min(1, this.shake + 0.35 + radius * 0.06);
   }
 

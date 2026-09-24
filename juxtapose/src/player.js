@@ -825,7 +825,7 @@ export class Player {
     this.iframes = 0.18;
     this.game.vfx.shake = Math.min(1, this.game.vfx.shake + amount / 60);
     this.game.audio.sfx('hit', { gain: Math.min(1.2, amount / 15) });
-    this.game.ui.hurtDirection(opts.from || null);
+    this.game.ui.hurtDirection(opts.from || null, opts.type);
     if (opts.props && opts.props.length) {
       for (const p of opts.props) this.applyEcho(p);
     }
@@ -951,10 +951,14 @@ export class Player {
     if (busy || this.disarmed > 0) return;
     if (input.hit('reload') && this.ammo < TUNE.magazine && this.reloadT <= 0) this.reload();
     // LMB: dream rounds
+    const autoReload = game.opts?.autoReload ?? true;
     if (input.btn(0) && this.reloadT <= 0 && this.fireCD <= 0) {
       if (this.ammo > 0) this.fire();
-      else { this.reload(); }
+      else if (autoReload) this.reload();
+      else if (input.click(0)) { game.audio.sfx('fireEmpty'); this.fireCD = 0.2; }
     }
+    // ...but not in the middle of a knife combo, which cancels reloads
+    if (autoReload && this.ammo <= 0 && this.reloadT <= 0 && this.fireCD <= 0 && this.comboT <= 0 && !this.pendingHit && !this.focusing) this.reload();
     if (input.hit('take')) this.take();
     if (input.hit('give') || input.click(1)) this.give();
     if (input.hit('giveSelf')) this.giveSelf();
@@ -1284,8 +1288,9 @@ export class Player {
     const shoulderAmt = (aiming ? 0.85 : 0.55) * this.shoulder;
     const pivot = this.camPivot.clone().addScaledVector(left, -shoulderAmt);
     // lucid dolly zoom: fov breathes while the distance compensates
-    const baseFov = 72 + Math.min(9, hs * 0.55) + this.fovKick * 8;
-    const dolly = L > 0.55 ? Math.sin(game.time * 0.9) * 18 * (L - 0.55) / 0.45 : 0;
+    const comfort = game.opts?.comfort ?? 1;
+    const baseFov = (game.opts?.fov ?? 72) + Math.min(9, hs * 0.55) + this.fovKick * 8;
+    const dolly = L > 0.55 ? Math.sin(game.time * 0.9) * 18 * (L - 0.55) / 0.45 * comfort : 0;
     const fov = baseFov + dolly;
     const comp = Math.tan(THREE.MathUtils.degToRad(baseFov / 2)) / Math.tan(THREE.MathUtils.degToRad(fov / 2));
     let dist = this.camDist * comp;
@@ -1314,13 +1319,13 @@ export class Player {
     // shake (trauma^2)
     const tr = game.vfx.shake;
     game.vfx.shake = Math.max(0, tr - dt * 1.4);
-    const s = tr * tr;
+    const s = tr * tr * (game.opts?.shake ?? 1);
     const t = game.time * 30;
     const sx = (Math.sin(t * 1.1) + Math.sin(t * 2.3) * 0.5) * s * 0.25;
     const sy = (Math.sin(t * 1.7 + 3) + Math.sin(t * 2.9) * 0.5) * s * 0.25;
     cam.position.copy(pos).add(new THREE.Vector3(sx * left.x, sy, sx * left.z));
     // roll: wallrun tilt + lucid sway + drowsiness
-    const rollT = (this.state === 'wallrun' ? (this.wall.leftSide ? 1 : -1) * 0.14 : 0) + Math.sin(game.time * 0.5) * 0.05 * L * L + (this.drowsy > 0 ? Math.sin(game.time * 1.3) * 0.08 : 0);
+    const rollT = (this.state === 'wallrun' ? (this.wall.leftSide ? 1 : -1) * 0.14 : 0) + Math.sin(game.time * 0.5) * 0.05 * L * L * comfort + (this.drowsy > 0 ? Math.sin(game.time * 1.3) * 0.08 * comfort : 0);
     this.roll += (rollT - this.roll) * Math.min(1, dt * 6);
     const target = pivot.clone().addScaledVector(f, 30);
     cam.up.set(0, 1, 0);
@@ -1576,6 +1581,7 @@ export class Player {
     this.gainReverie(15);
     if (kind === 'melee' && opts.shooter) { addPosture(game, opts.shooter, 40); opts.shooter.recoil?.(); }
     game.stats.deflects = (game.stats.deflects || 0) + 1;
+    game.ui.hitMarker?.('deflect');
     game.narrator?.event('deflect');
   }
 
@@ -1697,7 +1703,13 @@ export class Player {
       if (this.pendingHit.t <= 0) { const i = this.pendingHit.idx; this.pendingHit = null; this.meleeHit(i); }
     }
     // guard: hold RMB after the deflect window
-    const wantGuard = !this.dead && input.btn && input.btn(2) && this.deflectT <= 0 && this.state !== 'deathblow' && !this.focusing;
+    let guardHeld = input.btn && input.btn(2);
+    if (game.opts?.guardToggle) {
+      if (input.click && input.click(2)) this.guardLatch = !this.guardLatch;
+      if (this.dead || this.state === 'deathblow' || this.focusing) this.guardLatch = false;
+      guardHeld = !!this.guardLatch;
+    }
+    const wantGuard = !this.dead && guardHeld && this.deflectT <= 0 && this.state !== 'deathblow' && !this.focusing;
     if (wantGuard !== this.guarding) { this.guarding = wantGuard; this.anim.setGuard(wantGuard); }
     // focus: hold X with a full vessel on the ground
     const wantFocus = !this.dead && input.is && input.is('focus') && this.state === 'ground' && this.reverie >= 33 && this.dashT <= 0;

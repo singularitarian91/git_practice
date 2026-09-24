@@ -17,7 +17,8 @@ const BIND = {
   reload: ['KeyR'],
   wheel: ['Tab'],
   shoulder: ['KeyV'],
-  pause: ['Escape', 'KeyP'],
+  pause: ['Escape'],
+  photo: ['KeyP'],
   help: ['KeyH'],
   sandbox: ['KeyB'],
 };
@@ -39,7 +40,9 @@ export class Input {
     this.onLockChange = null;
 
     addEventListener('keydown', (e) => {
-      if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+      // Tab, Space and the arrows belong to the game, except while a menu or
+      // panel is open: there they move focus, press buttons and nudge sliders.
+      if ((e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) && !Input.inMenu(e.target)) e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
       this.down.add(e.code);
       if (/^Digit[0-9]$/.test(e.code)) this.pressed.add(e.code);
@@ -70,17 +73,30 @@ export class Input {
     addEventListener('wheel', (e) => { this.mouse.wheel += Math.sign(e.deltaY); }, { passive: true });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === el;
+      if (this.locked) this.softPending = false;
       this.onLockChange && this.onLockChange(this.locked);
     });
-    document.addEventListener('pointerlockerror', () => { this.lockFailed = true; this.freeLook = true; });
+    document.addEventListener('pointerlockerror', () => {
+      if (this.softPending) { this.softPending = false; return; }
+      this.lockFailed = true; this.freeLook = true;
+    });
   }
 
-  requestLock() {
+  // soft: a failure (say, no user gesture behind the request) is not taken as
+  // "this browser has no pointer lock"; the next click on the dream retries.
+  requestLock({ soft = false, onFail = null } = {}) {
     if (this.locked) return;
+    this.softPending = soft;
+    const fail = () => { if (!soft) { this.lockFailed = true; this.freeLook = true; } if (onFail) onFail(); };
     try {
       const p = this.el.requestPointerLock && this.el.requestPointerLock();
-      if (p && p.catch) p.catch(() => { this.lockFailed = true; this.freeLook = true; });
-    } catch (e) { this.lockFailed = true; this.freeLook = true; }
+      if (p && p.catch) p.catch(fail);
+    } catch (e) { fail(); }
+  }
+  // true while a menu, panel or form control has the keyboard
+  static inMenu(target) {
+    if (target && target.closest && target.closest('.screen, #sandbox-panel, #photo-panel, input, select, button, textarea')) return true;
+    return !!document.querySelector('.screen:not([hidden]), #photo-panel:not([hidden])');
   }
   exitLock() { if (document.pointerLockElement) document.exitPointerLock(); }
 

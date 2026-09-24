@@ -5,6 +5,24 @@ import { PROPS } from './config.js';
 const KEY = 'juxtapose.v1';
 const BASE = ['melting', 'floating', 'reflecting', 'burning', 'heavy', 'framed'];
 
+// Player-facing settings and their defaults. Everything here is persisted
+// through Meta.setSetting and applied live by Game.applySetting.
+export const SETTING_DEFAULTS = {
+  quality: 'high',
+  fov: 72,            // chase camera base field of view, degrees
+  shake: 1,           // camera shake intensity
+  comfort: 1,         // 1 = full dream warp and lucid camera sway, 0 = none
+  grain: 1,           // film grain, relative to the grade's own
+  reduceFlash: false, // softens explosion and impact flashes
+  vol: 0.8, music: 0.7, sfx: 0.9,
+  sens: 1, invert: false,
+  guardToggle: false, // right mouse latches guard instead of holding it
+  autoReload: true,   // reload by itself when the cylinder runs dry
+  hudScale: 'auto',   // 'auto' or a number
+  subSize: 'medium',  // narrator subtitles: small | medium | large
+  tips: true,         // the Night-Light's tips and asides (story lines always play)
+};
+
 // Keepsakes: memories equipped like charms, in a limited number of notches
 export const KEEPSAKES = [
   { id: 'nightlight', memory: 'nightlight', name: 'The Night-Light', cost: 1, desc: 'Perfect-deflect window is 60% longer.' },
@@ -16,23 +34,35 @@ export const KEEPSAKES = [
   { id: 'letter', memory: 'letter', name: 'The Unsent Letter', cost: 3, desc: 'Once per layer, survive a killing blow.' },
 ];
 
-// Whims: run upgrades offered three at a time between layers
+// Whims: run upgrades offered three at a time between layers.
+// `cat` picks the card's icon and eyebrow on the whims screen.
 export const WHIMS = [
-  { id: 'edge', name: 'A Sharper Knife', desc: 'Melee damage +30%.', apply: (m) => { m.melee *= 1.3; } },
-  { id: 'weight', name: 'Heavy Hand', desc: 'Posture damage +35%.', apply: (m) => { m.posture *= 1.35; } },
-  { id: 'pockets', name: 'Deep Pockets', desc: 'Carry 3 more charges of each property.', apply: (m) => { m.maxCharges += 3; } },
-  { id: 'calm', name: 'Lucid Discipline', desc: 'Lucidity rises 25% slower.', apply: (m) => { m.lucidGain *= 0.75; } },
-  { id: 'vessel', name: 'A Second Vessel', desc: 'Reverie holds one more focus.', apply: (m) => { m.reverieMax += 33; } },
-  { id: 'quick', name: 'Quick Hands', desc: 'Fire and slash 20% faster.', apply: (m) => { m.fireRate *= 1.2; m.meleeSpeed *= 1.2; } },
-  { id: 'greed', name: 'Light Fingers', desc: 'Taking gives one extra charge.', apply: (m) => { m.takeBonus += 1; } },
-  { id: 'feather', name: 'Featherfall', desc: 'One more jump in the air.', apply: (m) => { m.extraJump += 1; } },
-  { id: 'glory', name: 'Glory', desc: 'Deathblows heal 15 more.', apply: (m) => { m.gloryHeal += 15; } },
-  { id: 'momentum', name: 'Momentum', desc: 'Dash recovers 40% faster.', apply: (m) => { m.dashCD *= 0.6; } },
-  { id: 'brittle', name: 'Brittle Dream', desc: 'Explosions are 30% larger.', apply: (m) => { m.explosion *= 1.3; } },
-  { id: 'reach', name: 'Long Arm', desc: 'Melee reach +25%.', apply: (m) => { m.meleeRange *= 1.25; } },
-  { id: 'patience', name: 'Patience', desc: 'Focus heals 40% faster.', apply: (m) => { m.focusTime *= 0.6; } },
-  { id: 'timing', name: 'Good Timing', desc: 'Deflect window +40%.', apply: (m) => { m.deflectWindow *= 1.4; } },
+  { id: 'edge', cat: 'blade', name: 'A Sharper Knife', desc: 'Melee damage +30%.', apply: (m) => { m.melee *= 1.3; } },
+  { id: 'weight', cat: 'blade', name: 'Heavy Hand', desc: 'Posture damage +35%.', apply: (m) => { m.posture *= 1.35; } },
+  { id: 'pockets', cat: 'gun', name: 'Deep Pockets', desc: 'Carry 3 more charges of each property.', apply: (m) => { m.maxCharges += 3; } },
+  { id: 'calm', cat: 'mind', name: 'Lucid Discipline', desc: 'Lucidity rises 25% slower.', apply: (m) => { m.lucidGain *= 0.75; } },
+  { id: 'vessel', cat: 'vessel', name: 'A Second Vessel', desc: 'Reverie holds one more focus.', apply: (m) => { m.reverieMax += 33; } },
+  { id: 'quick', cat: 'blade', name: 'Quick Hands', desc: 'Fire and slash 20% faster.', apply: (m) => { m.fireRate *= 1.2; m.meleeSpeed *= 1.2; } },
+  { id: 'greed', cat: 'gun', name: 'Light Fingers', desc: 'Taking gives one extra charge.', apply: (m) => { m.takeBonus += 1; } },
+  { id: 'feather', cat: 'motion', name: 'Featherfall', desc: 'One more jump in the air.', apply: (m) => { m.extraJump += 1; } },
+  { id: 'glory', cat: 'vessel', name: 'Glory', desc: 'Deathblows heal 15 more.', apply: (m) => { m.gloryHeal += 15; } },
+  { id: 'momentum', cat: 'motion', name: 'Momentum', desc: 'Dash recovers 40% faster.', apply: (m) => { m.dashCD *= 0.6; } },
+  { id: 'brittle', cat: 'blast', name: 'Brittle Dream', desc: 'Explosions are 30% larger.', apply: (m) => { m.explosion *= 1.3; } },
+  { id: 'reach', cat: 'blade', name: 'Long Arm', desc: 'Melee reach +25%.', apply: (m) => { m.meleeRange *= 1.25; } },
+  { id: 'patience', cat: 'vessel', name: 'Patience', desc: 'Focus heals 40% faster.', apply: (m) => { m.focusTime *= 0.6; } },
+  { id: 'timing', cat: 'time', name: 'Good Timing', desc: 'Deflect window +40%.', apply: (m) => { m.deflectWindow *= 1.4; } },
 ];
+
+// Whim categories: eyebrow label and a 24x24 stroke glyph
+export const WHIM_CATS = {
+  blade: { label: 'the blade', icon: '<path d="M4.5 19.5l5-5"/><path d="M9.5 14.5c2.5-4.5 6-8 10.5-10.5-2.5 4.5-6 8-10.5 10.5z"/><path d="M3.5 17.5l3 3"/>' },
+  gun: { label: 'the gun', icon: '<path d="M9 3h6M10 3v5.5L5.5 17a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 8.5V3"/><path d="M7.5 14.5h9"/>' },
+  mind: { label: 'the mind', icon: '<path d="M2.5 12c4-5.5 15-5.5 19 0-4 5.5-15 5.5-19 0z"/><path d="M6 12c2.5 2 9.5 2 12 0"/>' },
+  vessel: { label: 'the vessel', icon: '<path d="M9 3.5h6M10 3.5v3.2a7 7 0 1 0 4 0V3.5"/><path d="M5.3 14.5h13.4"/>' },
+  motion: { label: 'the legs', icon: '<path d="M20 4C11.5 5 6.5 11 5 20"/><path d="M20 4c-.8 6.5-5.5 10.5-12 11"/><path d="M11 9.5l3 1M8.5 13l3 .5"/>' },
+  blast: { label: 'the dream', icon: '<path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4M5.3 5.3l2.8 2.8M15.9 15.9l2.8 2.8M5.3 18.7l2.8-2.8M15.9 8.1l2.8-2.8"/><circle cx="12" cy="12" r="2.2"/>' },
+  time: { label: 'the clock', icon: '<circle cx="12" cy="13" r="8"/><path d="M12 8.5V13l3 2M10 2.5h4"/>' },
+};
 
 export function defaultMods() {
   return { melee: 1, meleeRange: 1, meleeSpeed: 1, posture: 1, maxCharges: 0, lucidGain: 1, reverieMax: 99, fireRate: 1,
@@ -141,6 +171,16 @@ export class Meta {
   }
   settings() { return this.data.settings; }
   setSetting(k, v) { this.data.settings[k] = v; this.save(); }
+  // every setting, with defaults filled in for anything never touched
+  allSettings() { return { ...SETTING_DEFAULTS, ...this.data.settings }; }
+  resetSettings() { this.data.settings = {}; this.save(); return this.allSettings(); }
+  // small interface memories (last journal tab, last title button); not settings, so a reset keeps them
+  uiPref(k, v) {
+    this.data.ui = this.data.ui || {};
+    if (v === undefined) return this.data.ui[k];
+    this.data.ui[k] = v; this.save();
+    return v;
+  }
 
   // one memory per run that went deep enough or got strange enough
   endRun(stats) {

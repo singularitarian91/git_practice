@@ -304,9 +304,23 @@ export class ScrapPickup {
     piece.scale.setScalar(1.7);
     this.piece = piece;
     this.obj.add(piece);
-    const beamMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd27a'), transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.55, 9, 16, 1, true), beamMat);
-    beam.position.y = 4.2;
+    // a soft shaft of dusty light: bright at the scrap, fading upward, feathered at the edges
+    const beamMat = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color('#ffc978') }, uOpacity: { value: 0.16 }, uTime: { value: 0 } },
+      vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+        void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform vec3 uColor; uniform float uOpacity, uTime; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+        void main(){
+          float edge = pow(abs(dot(normalize(vN), normalize(vV))), 2.2);
+          float up = pow(1.0 - vUv.y, 1.6) * smoothstep(0.0, 0.04, vUv.y);
+          float motes = 0.75 + 0.25 * sin(vUv.y * 40.0 - uTime * 2.0 + vUv.x * 18.0);
+          gl_FragColor = vec4(uColor * 2.2, edge * up * motes * uOpacity);
+        }`,
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+    });
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 0.4, 12, 24, 1, true), beamMat); // widens toward the sky it falls from
+    beam.position.y = 5.6;
+    beam.userData.noAO = true;
     this.beam = beam;
     this.obj.add(beam);
     game.scene.add(this.obj);
@@ -318,7 +332,8 @@ export class ScrapPickup {
     this.obj.position.y = this.base.y + Math.sin(this.t * 1.6) * 0.1;
     this.piece.rotation.y += dt * 0.9;
     this.piece.rotation.z = Math.sin(this.t * 1.1) * 0.15;
-    this.beam.material.opacity = 0.14 + Math.sin(this.t * 2.3) * 0.05;
+    this.beam.material.uniforms.uOpacity.value = 0.5 + Math.sin(this.t * 2.3) * 0.12;
+    this.beam.material.uniforms.uTime.value = this.t;
     if (Math.random() < dt * 10) game.vfx.add.spawn({ x: this.obj.position.x + (Math.random() - 0.5) * 0.6, y: this.obj.position.y - 0.3, z: this.obj.position.z + (Math.random() - 0.5) * 0.6, vy: 0.9, color: new THREE.Color('#ffd27a').multiplyScalar(3), alpha: 0.9, alpha1: 0, size: 0.06, life: 1.4 });
     const p = game.player;
     if (p && !p.dead && p.pos.clone().setY(p.pos.y + 0.9).distanceTo(this.obj.position) < 1.5) {

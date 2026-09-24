@@ -22,8 +22,11 @@ import { Portals } from './portals.js';
 import { Narrator } from './narrator.js';
 import { CombatHUD } from './combat.js';
 import { defaultMods, SCRAPS } from './meta.js';
+import { PhotoMode } from './photo.js';
 
 const $ = (s) => document.querySelector(s);
+// With "Night-Light tips and asides" off, only these lines still play
+const STORY_LINES = new Set(['wake0', 'wakeN', 'layer1', 'layer2', 'layer3', 'bossPhase', 'bossDown', 'death', 'lucidWake', 'scrap', 'laststand']);
 
 class Game {
   constructor() {
@@ -46,8 +49,9 @@ class Game {
     const fill = $('.load-fill');
     const msg = $('.load-msg');
     this.meta = new Meta();
-    const S = this.meta.settings();
+    const S = this.opts = this.meta.allSettings(); // live settings; player.js reads fov/shake/comfort/guard/reload here
     this.render = new Renderer($('#stage'), S.quality || 'high');
+    this.grainBase = this.render.dream.uniforms.uGrain.value;
     this.scene = this.render.scene;
     fill.style.width = '15%';
     msg.textContent = 'Waking the physics...';
@@ -57,12 +61,8 @@ class Game {
     this.assets = new Assets();
     await this.assets.load((p) => { fill.style.width = (30 + p * 60) + '%'; });
     this.input = new Input(this.render.renderer.domElement);
-    this.input.sensitivity = 0.0022 * (S.sens ?? 1);
-    this.input.invertY = !!S.invert;
     this.vfx = new VFX(this.scene, this.assets.textures, this.render);
     this.audio = new DreamAudio();
-    this.audio.setMasterVolume(S.vol ?? 0.8);
-    this.audio.setMusicVolume(S.music ?? 0.7);
     this.ui = new UI(this);
     this.lucidity = new Lucidity(this);
     this.destruction = new Destruction(this);
@@ -70,7 +70,13 @@ class Game {
     this.narrator = new Narrator(this);
     this.combatHUD = new CombatHUD(this);
     this.portals = new Portals(this);
+    this.photo = new PhotoMode(this);
     this.stats = this.freshStats();
+    // the Night-Light's tips and asides can be muted; its story lines can't
+    const say = this.narrator.say.bind(this.narrator);
+    this.narrator.say = (key, o) => { if (this.opts.tips || STORY_LINES.has(key)) say(key, o); };
+    for (const k of Object.keys(this.opts)) if (k !== 'quality') this.applySetting(k, this.opts[k]);
+    addEventListener('resize', () => this.applyHudScale());
     this.bindMenus();
     fill.style.width = '100%';
     this.toTitle();
@@ -80,7 +86,35 @@ class Game {
     window.__game = this;
   }
 
-  freshStats() { return { gives: 0, takes: 0, kills: 0, destroyed: 0, explosions: 0, propUse: {} }; }
+  freshStats() { return { gives: 0, takes: 0, kills: 0, destroyed: 0, explosions: 0, propUse: {}, time: 0 }; }
+
+  // ------------------------------------------------------------ settings
+  applySetting(k, v) {
+    this.opts[k] = v;
+    const du = this.render.dream.uniforms;
+    switch (k) {
+      case 'quality': if (this.render.qualityName !== v) this.render.setQuality(v); break;
+      case 'sens': this.input.sensitivity = 0.0022 * v; break;
+      case 'invert': this.input.invertY = !!v; break;
+      case 'vol': this.audio.setMasterVolume(v); break;
+      case 'music': this.audio.setMusicVolume(v); break;
+      case 'sfx': this.audio.setSfxVolume(v); break;
+      case 'comfort': du.uComfort.value = v; break;
+      case 'grain': du.uGrain.value = this.grainBase * v; break;
+      case 'reduceFlash': this.render.flashScale = v ? 0.35 : 1; break;
+      case 'hudScale': this.applyHudScale(); break;
+      case 'subSize':
+        document.body.classList.toggle('sub-small', v === 'small');
+        document.body.classList.toggle('sub-large', v === 'large');
+        break;
+      default: break; // fov, shake, tips, guardToggle, autoReload are read where they are used
+    }
+  }
+  applyHudScale() {
+    const v = this.opts.hudScale;
+    const fit = Math.min(1.4, Math.max(0.85, 1 + (Math.min(innerWidth / 1280, innerHeight / 720) - 1) * 0.55));
+    this.ui.setHudScale(v === 'auto' || !(+v > 0) ? fit : +v);
+  }
 
   // ------------------------------------------------------------ hooks
   explode(pos, opts) { this.destruction.explode(pos, opts); }
@@ -106,7 +140,10 @@ class Game {
     const c = spawnEntity(this, e.name, pos, { rotY: e.obj.rotation.y, anchored: e.kind === 'wall' ? true : undefined });
     return c;
   }
-  onEntityDeath(e) { /* removed from the set in the loop */ }
+  onEntityDeath(e, opts = {}) {
+    // removed from the set in the loop; here, only the kill marker
+    if (e.kind === 'enemy' && this.state === 'playing' && opts.type !== 'forgotten' && opts.type !== 'void') this.ui.hitMarker('kill');
+  }
   onPlayerDeath() {
     if (this.sandbox) {
       this.ui.toast('You wake, and fall straight back to sleep.', 'warn');
@@ -215,6 +252,7 @@ class Game {
     this.lucidity.reset();
     this.lucidity.cap = 100;
     this.stats = this.freshStats();
+    this.scrapsAtStart = this.meta.scraps.size;
     this.recentCombos = [];
     this.newRun();
     this.narrator.reset();
@@ -231,6 +269,7 @@ class Game {
     this.lucidity.reset();
     this.lucidity.cap = 99;
     this.stats = this.freshStats();
+    this.scrapsAtStart = this.meta.scraps.size;
     this.newRun();
     this.clearWorld();
     const lvl = this.buildLevel('sandbox', 0);
@@ -285,6 +324,7 @@ class Game {
   }
 
   enterPlay() {
+    this.helpFromGame = false;
     this.ui.hideScreens();
     this.ui.setHud(true);
     this.ui.fade(0, 1.4);
@@ -304,11 +344,14 @@ class Game {
       // a whim between layers, then down
       this.input.exitLock();
       this.state = 'whims';
-      this.narrator.say('whim');
+      // the last of the layer, held still and dimmed behind the cards
+      this.ui.setHud(false);
+      this.ui.fade(0, 0.7);
       this.ui.showWhims((w) => {
         w.apply(this.run.mods);
         this.run.whims.push(w.id);
         this.depth++;
+        this.ui.fade(1, 0);
         this.loadLayer(this.depth, carry);
         this.transitioning = false;
         this.ui.toast(`Whim: ${w.name}`, 'good');
@@ -351,6 +394,7 @@ class Game {
   pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
+    this.ui.renderPauseSummary();
     this.ui.show('pause');
     this.audio.setPaused(true);
     this.input.exitLock();
@@ -359,20 +403,32 @@ class Game {
   resume() {
     if (this.state !== 'paused') return;
     this.state = 'playing';
+    this.helpFromGame = false;
     this.ui.hideScreens();
     this.audio.setPaused(false);
-    this.input.requestLock();
+    this.input.requestLock({ soft: true });
+  }
+  enterPhoto() {
+    if (this.sbOpen) { this.sbOpen = false; $('#sandbox-panel').hidden = true; }
+    if (this.photo.enter()) this.audio.sfx('uiSelect');
   }
 
   // ------------------------------------------------------------ menus
   bindMenus() {
     const back = () => {
+      if (this.helpFromGame) { this.helpFromGame = false; this.resume(); return; }
       if (this.returnTo) { const r = this.returnTo; this.returnTo = null; this.ui.show(r); return; }
       if (this.state === 'paused') this.ui.show('pause');
       else if (this.state === 'title') this.ui.show('title');
       else this.ui.hideScreens();
     };
-    const click = (id, fn) => $(id).addEventListener('click', () => { this.audio.start(); this.audio.sfx('uiSelect'); fn(); });
+    const click = (id, fn) => $(id).addEventListener('click', () => {
+      this.audio.start(); this.audio.sfx('uiSelect');
+      const b = $(id);
+      if (document.activeElement !== b) b.focus({ preventScroll: true }); // so the next screen remembers where we came from
+      if (b.closest('#title')) this.meta.uiPref('titleFocus', id.slice(1)); // the title menu remembers across sessions too
+      fn();
+    });
     click('#btn-run', () => this.startRun());
     click('#btn-sandbox', () => this.startSandbox());
     click('#btn-journal', () => { this.ui.renderJournal(); this.ui.show('journal'); });
@@ -382,25 +438,34 @@ class Game {
     click('#btn-controls', () => this.ui.show('controls'));
     click('#btn-settings', () => this.ui.show('settings'));
     click('#btn-resume', () => this.resume());
+    click('#btn-photo', () => this.enterPhoto());
     click('#btn-pause-controls', () => this.ui.show('controls'));
     click('#btn-pause-settings', () => this.ui.show('settings'));
     click('#btn-quit', () => { if (this.sandbox) this.toTitle(); else { this.state = 'playing'; this.endRun('death'); } });
     click('#btn-sleep', () => this.startRun());
     click('#btn-wake-title', () => this.toTitle());
     for (const b of document.querySelectorAll('.screen .back')) b.addEventListener('click', () => { this.audio.sfx('uiBack'); back(); });
-    for (const b of document.querySelectorAll('.menu button')) b.addEventListener('mouseenter', () => this.audio.sfx('uiHover'));
-    // settings
-    const S = this.meta.settings();
-    const q = $('#set-quality'); q.value = S.quality || 'high';
-    q.addEventListener('change', () => { this.meta.setSetting('quality', q.value); this.render.setQuality(q.value); this.qualityLocked = true; });
-    const sens = $('#set-sens'); sens.value = S.sens ?? 1;
-    sens.addEventListener('input', () => { this.input.sensitivity = 0.0022 * +sens.value; this.meta.setSetting('sens', +sens.value); });
-    const vol = $('#set-vol'); vol.value = S.vol ?? 0.8;
-    vol.addEventListener('input', () => { this.audio.setMasterVolume(+vol.value); this.meta.setSetting('vol', +vol.value); });
-    const mus = $('#set-music'); mus.value = S.music ?? 0.7;
-    mus.addEventListener('input', () => { this.audio.setMusicVolume(+mus.value); this.meta.setSetting('music', +mus.value); });
-    const inv = $('#set-invert'); inv.checked = !!S.invert;
-    inv.addEventListener('change', () => { this.input.invertY = inv.checked; this.meta.setSetting('invert', inv.checked); });
+    for (const b of document.querySelectorAll('.menu button')) b.addEventListener('mouseenter', () => { this.audio.sfx('uiHover'); if (document.activeElement !== b) b.focus({ preventScroll: true }); });
+    this.bindSettings();
+    // keyboard: arrows walk the open menu, Esc goes back, H closes the help it opened
+    addEventListener('keydown', (e) => {
+      if (this.state === 'photo' || this.state === 'boot') return;
+      const scr = this.ui.visibleScreen();
+      if (!scr) return;
+      if (e.code === 'KeyH' && scr.id === 'controls' && this.helpFromGame) {
+        e.preventDefault(); this.input.pressed.delete('KeyH');
+        this.audio.sfx('uiBack'); back();
+        return;
+      }
+      if (e.code === 'Escape') {
+        this.input.pressed.delete('Escape');
+        if (this.helpFromGame && scr.id === 'controls') { this.helpFromGame = false; this.ui.renderPauseSummary(); this.ui.show('pause'); return; }
+        const b = scr.querySelector('.back');
+        if (b && b.offsetParent !== null) { e.preventDefault(); b.click(); }
+        return;
+      }
+      this.ui.menuKey(e, scr);
+    });
     // canvas click captures the mouse
     this.render.renderer.domElement.addEventListener('mousedown', () => {
       this.render.renderer.domElement.focus({ preventScroll: true });
@@ -426,6 +491,43 @@ class Game {
     });
     $('#sb-reset').addEventListener('click', () => { this.toggleSandboxPanel(false); this.startSandbox(); });
     $('#sb-close').addEventListener('click', () => this.toggleSandboxPanel(false));
+  }
+
+  // Settings form: every control carries data-k (the setting) and, for sliders, data-fmt
+  bindSettings() {
+    const fmt = { deg: (v) => `${Math.round(v)}°`, pct: (v) => `${Math.round(v * 100)}%`, x: (v) => `${v.toFixed(2)}×` };
+    const inputs = [...document.querySelectorAll('#settings [data-k]')];
+    const label = (el) => { const o = el.parentNode.querySelector('output'); if (o && el.dataset.fmt) o.textContent = fmt[el.dataset.fmt](+el.value); };
+    const read = (el) => el.type === 'checkbox' ? el.checked : el.type === 'range' ? +el.value
+      : el.hasAttribute('data-bool') ? el.value === '1' : (el.value !== '' && !isNaN(+el.value) ? +el.value : el.value);
+    const write = (el, v) => {
+      if (el.type === 'checkbox') el.checked = !!v;
+      else if (el.hasAttribute('data-bool')) el.value = v ? '1' : '0';
+      else el.value = String(v);
+      label(el);
+    };
+    this.syncSettingsForm = () => { for (const el of inputs) write(el, this.opts[el.dataset.k]); };
+    for (const el of inputs) {
+      el.addEventListener(el.type === 'range' ? 'input' : 'change', () => {
+        const k = el.dataset.k, v = read(el);
+        this.meta.setSetting(k, v);
+        this.applySetting(k, v);
+        if (k === 'quality') this.qualityLocked = true;
+        label(el);
+      });
+    }
+    this.syncSettingsForm();
+    const reset = $('#btn-reset-settings');
+    reset.addEventListener('click', () => {
+      this.audio.sfx('uiBack');
+      this.opts = this.meta.resetSettings();
+      for (const k of Object.keys(this.opts)) this.applySetting(k, this.opts[k]);
+      this.qualityLocked = false;
+      this.syncSettingsForm();
+      reset.textContent = 'Restored';
+      clearTimeout(this._resetT);
+      this._resetT = setTimeout(() => { reset.textContent = 'Reset to defaults'; }, 1500);
+    });
   }
 
   // drop graphics quality automatically if the machine can't keep up
@@ -505,13 +607,15 @@ class Game {
 
   tick(rdt) {
     const input = this.input;
-    this.time += rdt;
+    if (this.state !== 'photo') this.time += rdt; // photo mode holds the dream still, sky and grain included
     let dt = rdt;
     if (this.state === 'playing' || this.state === 'transition' || this.state === 'waking') {
       // global keys
       if (this.state === 'playing') {
         if (input.hit('pause')) { this.pause(); input.endFrame(); this.render.render(); return; }
-        if (input.hit('help')) { this.pause(); this.ui.show('controls'); }
+        if (input.hit('photo') && !this.player.dead) { this.enterPhoto(); input.endFrame(); this.render.render(); return; }
+        if (input.hit('help')) { this.pause(); this.ui.show('controls'); this.helpFromGame = true; }
+        this.stats.time += rdt;
         if (input.hit('shoulder')) this.player.shoulder *= -1;
         if (input.hit('sandbox') && this.sandbox) this.toggleSandboxPanel(!this.sbOpen);
         // property wheel: hold Tab, slow time
@@ -592,9 +696,22 @@ class Game {
       this.render.dream.uniforms.uHurt.value = 0;
     } else if (this.state === 'paused') {
       dt = 0;
+    } else if (this.state === 'photo') {
+      dt = 0;
+      this.photo.update(rdt, input);
+    }
+    // near death: the heartbeat vignette, only while actually playing
+    if (this.state !== 'photo') {
+      const du = this.render.dream.uniforms, pl = this.player;
+      let low = 0;
+      if ((this.state === 'playing' || this.state === 'transition') && pl && !pl.dead) {
+        const t = Math.min(1, Math.max(0, (pl.hp / pl.maxHp - 0.35) / (0.1 - 0.35)));
+        low = t * t * (3 - 2 * t);
+      }
+      du.uLowHp.value = this.ui.visibleScreen() ? 0 : du.uLowHp.value + (low - du.uLowHp.value) * Math.min(1, rdt * 4);
     }
     this.vfx.update(dt);
-    const focus = this.player ? this.player.renderPos : (this.attractFig ? this.attractFig.grp.position : new THREE.Vector3());
+    const focus = this.state === 'photo' ? this.photo.focus() : this.player ? this.player.renderPos : (this.attractFig ? this.attractFig.grp.position : new THREE.Vector3());
     this.render.update(dt, focus, this.time);
     this.audio.update(rdt);
     this.ui.update(rdt);

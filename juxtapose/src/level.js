@@ -23,61 +23,92 @@ export function mulberry(seed) {
 }
 
 export const LOOKS = {
+  // Dali: deep cobalt overhead, pale cyan band, a creamy horizon; long raking light
   desert: {
-    zenith: '#2a5f93', horizon: '#f1c08a', ground: '#9c6d3e', cloud: '#fff1dc', clouds: 0.9,
-    sunDir: [0.62, 0.2, 0.38], sunColor: '#ffcf98', sunIntensity: 3.4,
+    zenith: '#1d4b8c', mid: '#8db8d8', horizon: '#f5d7a8', ground: '#a8783f', cloud: '#fff4e2', clouds: 0.85, haze: 0.55,
+    sunDir: [0.62, 0.2, 0.38], sunColor: '#ffd3a2', sunIntensity: 3.6,
     hemiSky: '#a9c8f0', hemiGround: '#8a5a33', hemiIntensity: 0.55,
-    fog: '#e6b98c', fogDensity: 0.0085, exposure: 1.0, envIntensity: 0.75, tint: '#fff6ea', saturation: 1.05,
-    sand: ['#d8a86a', '#c48f55', '#e7bf83'],
+    fog: '#e8c79c', fogDensity: 0.0078, fogFalloff: 0.045, fogSun: '#ffd9a8', fogSunAmt: 0.5,
+    exposure: 1.0, envIntensity: 0.75, tint: '#fff8ee', saturation: 1.08,
+    sand: ['#d9a86a', '#c48f55', '#ebc38a'],
   },
+  // de Chirico: viridian sky over a lemon horizon, ochre stone, black shadows
   piazza: {
-    zenith: '#0d3a3c', horizon: '#cad8a2', ground: '#4c4a33', cloud: '#e9f3d9', clouds: 0.35,
-    sunDir: [0.85, 0.11, 0.25], sunColor: '#ffc987', sunIntensity: 3.8,
-    hemiSky: '#8fc9b8', hemiGround: '#5a4a30', hemiIntensity: 0.5,
-    fog: '#a8b98e', fogDensity: 0.0072, exposure: 1.02, envIntensity: 0.7, tint: '#f6fff0', saturation: 1.0,
-    sand: ['#b9a27c', '#a38d69', '#cbb58f'],
+    zenith: '#0e3a3e', mid: '#3d8a7e', horizon: '#ecd999', ground: '#5a4a33', cloud: '#eef6dc', clouds: 0.3, haze: 0.5,
+    sunDir: [0.85, 0.11, 0.25], sunColor: '#ffc46f', sunIntensity: 4.3,
+    hemiSky: '#8fc6b4', hemiGround: '#8a6a42', hemiIntensity: 0.62,
+    fog: '#d3c890', fogDensity: 0.0048, fogFalloff: 0.05, fogSun: '#ffcf80', fogSunAmt: 0.55,
+    exposure: 1.0, envIntensity: 0.7, tint: '#fff9ee', saturation: 1.1,
+    sand: ['#c9a877', '#b39063', '#d9bc8b'],
   },
+  // the Unwatched: cold moonlight against a rose horizon
   boss: {
-    zenith: '#120e2b', horizon: '#6a3f78', ground: '#1b1426', cloud: '#8c6fb3', clouds: 0.6, stars: 0.7,
-    sunDir: [0.25, 0.55, 0.3], sunColor: '#c9aaff', sunIntensity: 1.9,
-    hemiSky: '#8f7bd6', hemiGround: '#2a1c33', hemiIntensity: 0.55,
-    fog: '#33244a', fogDensity: 0.011, exposure: 1.2, envIntensity: 0.9, tint: '#efe6ff', saturation: 1.05,
-    sand: ['#51466a', '#463c5e', '#5d5277'],
+    zenith: '#0b0922', mid: '#2c1f58', horizon: '#b8657e', ground: '#140f1f', cloud: '#8c6fb3', clouds: 0.55, stars: 0.8, haze: 0.5,
+    sunDir: [0.25, 0.55, 0.3], sunColor: '#c4d2ff', sunIntensity: 2.2,
+    hemiSky: '#7a6fc4', hemiGround: '#3a2640', hemiIntensity: 0.6,
+    fog: '#2b2042', fogDensity: 0.0085, fogFalloff: 0.06, fogSun: '#ff9fb4', fogSunAmt: 0.35,
+    exposure: 1.2, envIntensity: 0.9, tint: '#f1ecff', saturation: 1.05,
+    sand: ['#4d4467', '#433a5d', '#5a5077'],
   },
   sandbox: {
-    zenith: '#3a6fa6', horizon: '#f5dcc0', ground: '#9c7a55', cloud: '#ffffff', clouds: 1,
+    zenith: '#2464aa', mid: '#8fc0e2', horizon: '#f6dfbd', ground: '#9c7a55', cloud: '#ffffff', clouds: 1, haze: 0.4,
     sunDir: [0.5, 0.45, 0.35], sunColor: '#fff0d6', sunIntensity: 3.2,
     hemiSky: '#b7d2f2', hemiGround: '#8a6a45', hemiIntensity: 0.6,
-    fog: '#ecd2b4', fogDensity: 0.0055, exposure: 1.0, envIntensity: 0.8, tint: '#ffffff', saturation: 1.0,
+    fog: '#ecd6b8', fogDensity: 0.0042, fogFalloff: 0.045, fogSunAmt: 0.35,
+    exposure: 1.0, envIntensity: 0.8, tint: '#ffffff', saturation: 1.02,
     sand: ['#dcb482', '#caa06d', '#ecc998'],
   },
   bedroom: {
-    zenith: '#9cc6ea', horizon: '#fff1d8', ground: '#c9b294', cloud: '#ffffff', clouds: 0.8,
+    zenith: '#9cc6ea', mid: '#cfe2f0', horizon: '#fff1d8', ground: '#c9b294', cloud: '#ffffff', clouds: 0.8,
     sunDir: [-0.6, 0.35, 0.4], sunColor: '#fff0cf', sunIntensity: 4.5,
     hemiSky: '#dbe8f5', hemiGround: '#b8977a', hemiIntensity: 0.9,
-    fog: '#f3e6d4', fogDensity: 0.002, exposure: 1.1, envIntensity: 0.8, tint: '#fff8ee', saturation: 0.9,
+    fog: '#f3e6d4', fogDensity: 0.002, fogFalloff: 0, fogSunAmt: 0, exposure: 1.1, envIntensity: 0.8, tint: '#fff8ee', saturation: 0.95,
   },
 };
 
 // ---------------------------------------------------------------- textures
+// value noise that wraps every `p` lattice cells, so textures tile without seams
+function tnoise(x, y, p) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const m = (a) => ((a % p) + p) % p;
+  const a = hash(m(xi), m(yi)), b = hash(m(xi + 1), m(yi)), c = hash(m(xi), m(yi + 1)), d = hash(m(xi + 1), m(yi + 1));
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function tfbm(x, y, p, o = 3) { let s = 0, a = 0.5; for (let i = 0; i < o; i++) { s += a * tnoise(x, y, p); x *= 2; y *= 2; p *= 2; a *= 0.5; } return s; }
+
 function sandNormalMap() {
-  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const S = 512, c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d'), img = g.createImageData(S, S);
   const H = new Float32Array(S * S);
+  const TAU = Math.PI * 2;
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     const u = x / S, v = y / S;
-    const warp = Math.sin((v * 3 + Math.sin(u * 6.283 * 2) * 0.15) * 6.283 * 7);
-    H[y * S + x] = warp * 0.5 + fbm(u * 16, v * 16, 3) * 0.6;
+    // ripples run mostly one way but bend around low-frequency swirls
+    const bend = (tfbm(u * 3, v * 3, 3, 3) - 0.5) * 2.2;
+    const ph = (v * 14 + Math.sin(u * TAU * 2 + bend) * 0.35 + bend * 0.6) * TAU;
+    const saw = (Math.sin(ph) + 0.35 * Math.sin(ph * 2 + 0.6)) * 0.5; // asymmetric crest
+    const amp = 0.25 + 0.75 * ss(0.3, 0.72, tfbm(u * 4 + 0.5, v * 4, 4, 3)); // calm patches between ripple fields
+    H[y * S + x] = saw * amp + (tfbm(u * 32, v * 32, 32, 2) - 0.5) * 0.35;
   }
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     const hx = H[y * S + ((x + 1) % S)] - H[y * S + ((x - 1 + S) % S)];
     const hy = H[((y + 1) % S) * S + x] - H[((y - 1 + S) % S) * S + x];
-    const n = new THREE.Vector3(-hx * 1.6, -hy * 1.6, 1).normalize();
+    const n = new THREE.Vector3(-hx * 2.4, -hy * 2.4, 1).normalize();
     const i = (y * S + x) * 4;
     img.data[i] = (n.x * 0.5 + 0.5) * 255; img.data[i + 1] = (n.y * 0.5 + 0.5) * 255; img.data[i + 2] = (n.z * 0.5 + 0.5) * 255; img.data[i + 3] = 255;
   }
   g.putImageData(img, 0, 0);
-  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t;
+}
+
+// distant ripples resolve into flat sand instead of shimmering corduroy
+function fadeNormalWithDistance(mat, near = 16, far = 70) {
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_maps>',
+      THREE.ShaderChunk.normal_fragment_maps.replace('mapN.xy *= normalScale;', `mapN.xy *= normalScale * (1.0 - 0.85 * smoothstep(${near.toFixed(1)}, ${far.toFixed(1)}, length(vViewPosition)));`));
+  };
+  mat.customProgramCacheKey = () => 'sandfade';
 }
 
 function pavingTextures() {
@@ -177,7 +208,7 @@ export class Level {
         const dune = Math.sin(x * 0.045 + fbm(x * 0.01, z * 0.01) * 6) * 0.5 + 0.5;
         h += ss(46, 90, r) * (5 + dune * 9 + fbm(x * 0.02, z * 0.02) * 8);
         h -= ss(108, 125, r) * 60;
-        if (this.key === 'sandbox') h *= r < 60 ? 0.2 : 1;
+        if (this.key === 'sandbox') h *= 0.2 + 0.8 * ss(54, 70, r); // flat floor that rises smoothly into the dunes
         return h;
       }
       case 'piazza': {
@@ -221,8 +252,9 @@ export class Level {
       if (this.key === 'boss') mat.color.set('#8a7aa6');
     } else {
       const nm = sandNormalMap();
-      nm.repeat.set(size / 7, size / 7);
-      mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0, normalMap: nm, normalScale: new THREE.Vector2(0.55, 0.55) });
+      nm.repeat.set(size / 11, size / 11);
+      mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0, normalMap: nm, normalScale: new THREE.Vector2(0.5, 0.5) });
+      fadeNormalWithDistance(mat);
     }
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
@@ -237,8 +269,13 @@ export class Level {
     const ceil = game.physics.fixed({ x: 0, y: TUNE.ceiling, z: 0 });
     game.physics.collider(RAPIER.ColliderDesc.cuboid(200, 0.5, 200), ceil, G.CEIL, ALL & ~G.PLAYER);
     this.bodies.push(ceil);
-    const cm = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.035, side: THREE.DoubleSide, depthWrite: false, fog: true }));
+    const cc = document.createElement('canvas'); cc.width = cc.height = 128;
+    const cg = cc.getContext('2d'), gr = cg.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.45, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    cg.fillStyle = gr; cg.fillRect(0, 0, 128, 128);
+    const cm = new THREE.Mesh(new THREE.PlaneGeometry(160, 160), new THREE.MeshBasicMaterial({ color: '#ffffff', alphaMap: new THREE.CanvasTexture(cc), transparent: true, opacity: 0.03, side: THREE.DoubleSide, depthWrite: false, fog: true }));
     cm.rotation.x = Math.PI / 2; cm.position.y = TUNE.ceiling - 0.5;
+    cm.userData.noAO = true;
     this.group.add(cm);
   }
 
@@ -416,9 +453,22 @@ export class Level {
   }
 
   // ------------------------------------------------------------ builders
+  // clouds take a little of the layer's light into themselves instead of reading as grey lumps
+  dressTemplates(look) {
+    const t = this.game.assets.templates.get('Cloud');
+    if (t) t.traverse((m) => {
+      if (m.isMesh && m.material.name === 'Cloud') {
+        m.material.emissive.set(look.cloud || '#ffffff');
+        m.material.emissiveIntensity = look.cloudGlow ?? 0.3;
+        m.material.roughness = 1;
+      }
+    });
+  }
+
   build() {
     const game = this.game;
     game.render.setLook(LOOKS[this.key]);
+    this.dressTemplates(LOOKS[this.key]);
     this.buildTerrain();
     this.skyDressing();
     const R = this.rng;
@@ -528,6 +578,13 @@ export class Level {
     this.addRail(pts.slice(12, 25));
     this.put('Frame', -5, -22, { rotY: 0.3 });
     this.put('Frame', 6, 22, { rotY: Math.PI });
+    if (this.game.assets.has('Candle')) {
+      for (let i = 0; i < 20; i++) {
+        const a = (i / 20) * Math.PI * 2 + Math.PI / 20, d = 29.2 + (i % 2) * 0.6;
+        const x = Math.cos(a) * d, z = Math.sin(a) * d;
+        this.decoration('Candle', new THREE.Vector3(x, this.groundY(x, z), z), R() * 6, 0.9 + R() * 0.5);
+      }
+    }
     this.bossSpawn = new THREE.Vector3(0, 0, 8);
     { const a = 0.8, d = 24; this.scrapSpots.push(new THREE.Vector3(Math.cos(a) * d, 5.4, Math.sin(a) * d)); }
     { const a = (1 / 10) * Math.PI * 2, d = 31; this.scrapSpots.push(new THREE.Vector3(Math.cos(a) * d, 5.1, Math.sin(a) * d)); }
@@ -621,11 +678,92 @@ export class Level {
 
   enemiesAlive() { let n = 0; for (const e of this.game.entities) if (e.kind === 'enemy' && !e.dead) n++; return n; }
 
+  // footprints pressed into the sand: an instanced ring buffer of soft dents that fade
+  footprints(dt) {
+    const game = this.game, p = game.player;
+    if (!p || (this.key !== 'desert' && this.key !== 'sandbox')) return;
+    if (!this.prints) {
+      const c = document.createElement('canvas'); c.width = 64; c.height = 128;
+      const g = c.getContext('2d');
+      const blob = (x, y, rx, ry, a) => { const gr = g.createRadialGradient(x, y, 0, x, y, Math.max(rx, ry)); gr.addColorStop(0, `rgba(255,255,255,${a})`); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.save(); g.translate(x, y); g.scale(rx / Math.max(rx, ry), ry / Math.max(rx, ry)); g.translate(-x, -y); g.fillStyle = gr; g.beginPath(); g.arc(x, y, Math.max(rx, ry), 0, 7); g.fill(); g.restore(); };
+      blob(32, 42, 20, 34, 0.9); blob(32, 96, 16, 22, 0.8);
+      const tex = new THREE.CanvasTexture(c);
+      const N = 160;
+      const geo = new THREE.PlaneGeometry(0.16, 0.3); geo.rotateX(-Math.PI / 2);
+      const aAlpha = new THREE.InstancedBufferAttribute(new Float32Array(N), 1); aAlpha.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('aAlpha', aAlpha);
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { uMap: { value: tex }, uColor: { value: new THREE.Color('#6b4524') } },
+        vertexShader: `attribute float aAlpha; varying float vA; varying vec2 vUv;
+          void main(){ vA = aAlpha; vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform sampler2D uMap; uniform vec3 uColor; varying float vA; varying vec2 vUv;
+          void main(){ float a = texture2D(uMap, vUv).a * vA; if (a < 0.01) discard; gl_FragColor = vec4(uColor, a * 0.32); }`,
+        transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3,
+      });
+      const mesh = new THREE.InstancedMesh(geo, mat, N);
+      mesh.frustumCulled = false; mesh.userData.noAO = true; mesh.count = N;
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      for (let i = 0; i < N; i++) mesh.setMatrixAt(i, zero);
+      this.group.add(mesh);
+      this.prints = { mesh, aAlpha, age: new Float32Array(N).fill(1e9), next: 0, dist: 0, side: 1, last: p.pos.clone(), N };
+    }
+    const P = this.prints;
+    const moved = Math.hypot(p.pos.x - P.last.x, p.pos.z - P.last.z);
+    P.last.copy(p.pos);
+    const onSand = p.grounded && p.state !== 'grind' && moved < 1 && Math.abs(p.pos.y - this.heightAt(p.pos.x, p.pos.z)) < 0.35;
+    if (onSand) P.dist += moved;
+    if (onSand && P.dist > 0.62) {
+      P.dist = 0;
+      const dir = new THREE.Vector3(p.vel.x, 0, p.vel.z);
+      if (dir.lengthSq() > 0.5) {
+        dir.normalize();
+        const side = new THREE.Vector3(dir.z, 0, -dir.x).multiplyScalar(0.11 * P.side);
+        P.side = -P.side;
+        const x = p.pos.x + side.x, z = p.pos.z + side.z;
+        const m = new THREE.Matrix4().compose(new THREE.Vector3(x, this.heightAt(x, z) + 0.03, z),
+          new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(dir.x, dir.z)), new THREE.Vector3(1, 1, 1));
+        P.mesh.setMatrixAt(P.next, m); P.age[P.next] = 0;
+        P.next = (P.next + 1) % P.N;
+        P.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    const A = P.aAlpha.array;
+    for (let i = 0; i < P.N; i++) { P.age[i] += dt; A[i] = Math.max(0, 1 - P.age[i] / 14); }
+    P.aAlpha.needsUpdate = true;
+  }
+
+  // air that belongs to each layer: glinting sand on the wind, warm pollen in the
+  // piazza, slow fireflies around the Unwatched
+  ambience(dt) {
+    const game = this.game, p = game.player;
+    if (!p || game.render.qualityName === 'low') return;
+    const A = {
+      desert: { rate: 22, color: '#ffe2b0', k: 2.2, size: 0.035, vx: 1.6, vy: 0.05, life: 3.5, spread: 16, low: true },
+      sandbox: { rate: 14, color: '#fff0d0', k: 2.0, size: 0.03, vx: 1.0, vy: 0.08, life: 3.5, spread: 14, low: true },
+      piazza: { rate: 10, color: '#fff2c0', k: 2.4, size: 0.03, vx: 0.4, vy: -0.08, life: 6, spread: 16 },
+      boss: { rate: 12, color: '#c9b0ff', k: 3.2, size: 0.05, vx: 0.2, vy: 0.2, life: 5, spread: 20 },
+    }[this.key];
+    if (!A) return;
+    this._amb = (this._amb || 0) + dt * A.rate;
+    const c = new THREE.Color(A.color).multiplyScalar(A.k);
+    const rand = this._ambRng || (this._ambRng = mulberry(this.seed ^ 0x5eed)); // own stream: never perturbs gameplay randomness
+    while (this._amb >= 1) {
+      this._amb -= 1;
+      const a = rand() * Math.PI * 2, r = Math.sqrt(rand()) * A.spread;
+      const x = p.pos.x + Math.cos(a) * r, z = p.pos.z + Math.sin(a) * r;
+      const y = (A.low ? this.heightAt(x, z) + rand() * 1.2 : p.pos.y + rand() * 6) + 0.1;
+      game.vfx.add.spawn({ x, y, z, vx: A.vx * (0.6 + rand() * 0.8), vy: A.vy + (rand() - 0.5) * 0.15, vz: (rand() - 0.5) * 0.4,
+        color: c, alpha: 0.8, alpha1: 0, size: A.size, size1: A.size * 0.6, life: A.life * (0.6 + rand() * 0.8) });
+    }
+  }
+
   update(dt) {
     const game = this.game;
     this.time += dt;
     for (const d of this.deco) { d.o.rotation.y += d.spin * dt; d.o.position.y += Math.sin(this.time * 0.2 + d.bob) * 0.01; }
     if (this.train) { this.train.position.x += dt * 6; if (this.train.position.x > 140) this.train.position.x = -140; }
+    this.ambience(dt);
+    this.footprints(dt);
     // waves
     if (this.pendingWave) {
       this.waveDelay -= dt;

@@ -26,6 +26,29 @@ export class Projectiles {
     }
     return m;
   }
+  // enemy orbs: an ink-dark bubble with a burning rim, so a volley reads as a threat
+  // against bright sand instead of blooming into a white-out
+  orbMat(color) {
+    const k = 'orb' + color;
+    let m = this.mats.get(k);
+    if (!m) {
+      m = new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color(color) }, uTime: { value: 0 } },
+        vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP;
+          void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vP = position; gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform vec3 uColor; uniform float uTime; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+          void main(){
+            float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+            float swirl = 0.5 + 0.5 * sin(vP.y * 22.0 + uTime * 6.0 + sin(vP.x * 18.0 + uTime * 3.0) * 2.0);
+            vec3 core = mix(vec3(0.03, 0.02, 0.05), uColor * 0.35, swirl * 0.35);
+            vec3 col = mix(core, uColor * 3.2, smoothstep(0.35, 0.95, f));
+            gl_FragColor = vec4(col, 1.0);
+          }`,
+      });
+      this.mats.set(k, m);
+    }
+    return m;
+  }
   clear() { for (const p of this.list) p.mesh.parent?.remove(p.mesh); this.list = []; }
 
   roundColor(props) {
@@ -63,7 +86,7 @@ export class Projectiles {
 
   enemyOrb(origin, vel, opts = {}) {
     const color = opts.color || '#7ff7ff';
-    const mesh = new THREE.Mesh(this.geoOrb, this.mat(color, 5));
+    const mesh = new THREE.Mesh(this.geoOrb, this.orbMat(color));
     mesh.scale.setScalar(opts.size || 1);
     mesh.position.copy(origin);
     this.game.scene.add(mesh);
@@ -77,6 +100,7 @@ export class Projectiles {
 
   update(dt) {
     const game = this.game;
+    for (const m of this.mats.values()) if (m.uniforms) m.uniforms.uTime.value = game.time;
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.life -= dt;

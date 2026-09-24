@@ -84,14 +84,23 @@ export class Narrator {
       fl.name = 'NightLight_Flame';
       o.add(jar, fl);
     }
-    o.scale.setScalar(1.3);
-    o.traverse((m) => { if (m.isMesh) m.castShadow = false; });
+    o.scale.setScalar(1.15);
+    // a lantern, not a lighthouse: thin glass, a modest flame, and nothing that blooms into a blob
+    o.traverse((m) => {
+      if (!m.isMesh) return;
+      m.castShadow = false;
+      m.material = m.material.clone();
+      const mm = m.material;
+      if (mm.name === 'JarGlass') { mm.opacity = 0.16; mm.roughness = 0.12; mm.envMapIntensity = 0.6; m.userData.noAO = true; }
+      if (mm.name === 'Tin' || mm.name === 'Wire') { mm.roughness = Math.max(mm.roughness, 0.5); mm.envMapIntensity = 0.5; }
+      if (mm.name === 'Flame' || m.name === 'NightLight_Flame') { mm.emissiveIntensity = Math.min(mm.emissiveIntensity || 2, 2.2); }
+    });
     this.flame = o.getObjectByName('NightLight_Flame');
     game.scene.add(o);
     this.obj = o;
     const p = game.player;
     if (p) o.position.copy(p.pos).add(new THREE.Vector3(0.8, 2.1, 0));
-    this.light = game.render.claim(this, 0xffb865, 3.5, 6);
+    this.light = game.render.claim(this, 0xffb865, 2.4, 5);
   }
   despawn() {
     if (this.obj) { this.obj.parent?.remove(this.obj); this.obj = null; }
@@ -167,7 +176,16 @@ export class Narrator {
       this.obj.rotation.set(Math.sin(game.time * 1.3) * 0.12 - this.vel.z * 0.05, game.time * 0.4, this.vel.x * 0.05);
       const talking = !!this.cur && this.cur.shown < this.cur.text.length;
       if (this.flame) this.flame.scale.setScalar(1 + Math.sin(game.time * 23) * 0.08 + (talking ? Math.sin(game.time * 40) * 0.25 : 0));
-      if (this.light) { this.light.position.copy(this.obj.position); this.light.userData.base = talking ? 5 : 3.2; }
+      // the light sits outside the jar, between it and the Figment: it warms the figure
+      // without searing the glass it lives in
+      if (this.light) {
+        this.light.position.copy(this.obj.position).lerp(p.renderPos, 0.35);
+        this.light.position.y = this.obj.position.y - 0.3;
+        this.light.userData.base = talking ? 3.2 : 2.2;
+      }
+      // fade out if the camera swings right up to it
+      const camD = this.obj.position.distanceTo(game.render.camera.position);
+      this.obj.visible = camD > 0.7;
       if (Math.random() < dt * 4) game.vfx.add.spawn({ x: this.obj.position.x, y: this.obj.position.y + 0.12, z: this.obj.position.z, vy: 0.3, color: new THREE.Color('#ffc070').multiplyScalar(3), alpha: 0.8, alpha1: 0, size: 0.04, life: 0.8 });
     }
   }
