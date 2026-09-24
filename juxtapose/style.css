@@ -507,3 +507,12 @@ input[type=checkbox] { width: 16px; height: 16px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01s !important; transition-duration: 0.01s !important; }
 }
+
+/* error / lost-GPU panel: small, top centre, above everything, never blocking input behind it */
+#crash { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 1000; width: min(560px, calc(100vw - 32px)); padding: 14px 16px 12px; background: rgba(22, 16, 24, 0.94); border: 1px solid rgba(208, 106, 94, 0.55); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 8px; color: var(--bone, #efe4cf); }
+#crash .eyebrow { color: #e0897d; }
+#crash p { margin: 0; font-size: 17px; line-height: 1.35; }
+#crash textarea { width: 100%; font: 12px/1.4 'IBM Plex Mono', ui-monospace, monospace; color: #d8ccb8; background: rgba(0,0,0,0.35); border: 1px solid rgba(239,228,207,0.14); border-radius: 4px; padding: 6px 8px; resize: vertical; }
+#crash .crash-actions { display: flex; gap: 10px; justify-content: flex-end; }
+#crash button { font: italic 16px 'Cormorant Garamond', Georgia, serif; color: #efe4cf; background: rgba(239,228,207,0.08); border: 1px solid rgba(239,228,207,0.2); border-radius: 4px; padding: 5px 12px; cursor: pointer; }
+#crash button:focus-visible { outline: 2px solid #d9a441; outline-offset: 2px; }

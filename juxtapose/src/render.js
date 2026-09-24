@@ -205,8 +205,34 @@ void main(){
 export const QUALITY = {
   low: { pixelRatio: 0.85, shadows: 1024, bloom: true, ao: false, samples: 0 },
   medium: { pixelRatio: 1.0, shadows: 2048, bloom: true, ao: false, samples: 2 },
-  high: { pixelRatio: 1.25, shadows: 4096, bloom: true, ao: true, samples: 4 },
+  high: { pixelRatio: 1.25, shadows: 4096, bloom: true, ao: true, samples: 2 },
 };
+
+// NaN or Inf anywhere in the HDR buffer (a specular spike past half-float range,
+// a degenerate normal) gets smeared by bloom into big black squares. Scrub it first.
+const SanitizeShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: /* glsl */`varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */`
+uniform sampler2D tDiffuse; varying vec2 vUv;
+void main(){
+  vec4 c = texture2D(tDiffuse, vUv);
+  if (any(isnan(c)) || any(isinf(c))) c = vec4(0.0, 0.0, 0.0, 1.0);
+  gl_FragColor = vec4(clamp(c.rgb, 0.0, 64.0), c.a);
+}`,
+};
+
+// Probe the GPU once: software renderers and integrated chips start at a gentler setting
+export function suggestQuality(renderer) {
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    if (/SwiftShader|llvmpipe|Software|Basic Render/i.test(name)) return 'low';
+    if (/NVIDIA|GeForce|Quadro|RTX|Radeon RX|Radeon Pro|AMD Radeon\(TM\) RX|Apple M[1-9] (Pro|Max|Ultra)/i.test(name)) return 'high';
+    return 'medium';
+  } catch (e) { return 'medium'; }
+}
 
 export class Renderer {
   constructor(container, quality = 'high') {
@@ -275,12 +301,15 @@ export class Renderer {
     this.qualityName = q;
     const Q = this.quality = QUALITY[q] || QUALITY.high;
     const r = this.renderer;
-    r.setPixelRatio(Math.min(devicePixelRatio || 1, Q.pixelRatio * (devicePixelRatio > 1 ? 1.3 : 1)));
+    r.setPixelRatio(Math.min(devicePixelRatio || 1, Q.pixelRatio)); // never pay for a retina screen twice over
     this.sun.shadow.mapSize.set(Q.shadows, Q.shadows);
     if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
     const size = r.getDrawingBufferSize(new THREE.Vector2());
     const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: Q.samples });
     if (this.composer) this.composer.dispose();
+    // the old passes hold their own render targets; free them or every quality change leaks VRAM
+    if (this.gtao) { this.gtao.dispose(); this.gtao = null; }
+    if (this.bloom) { this.bloom.dispose(); this.bloom = null; }
     const c = this.composer = new EffectComposer(r, rt);
     c.addPass(new RenderPass(this.scene, this.camera));
     this.gtao = null;
@@ -303,6 +332,7 @@ export class Renderer {
       };
       c.addPass(this.gtao);
     }
+    c.addPass(new ShaderPass(SanitizeShader));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.45, 0.5, 0.92);
     if (Q.bloom) c.addPass(this.bloom);
     c.addPass(new OutputPass());

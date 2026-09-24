@@ -88,7 +88,7 @@ export class CombatHUD {
     const post = new THREE.Mesh(this.geo, mat(0xffb347)); post.scale.set(0.001, 0.07, 1); post.position.z = 0.001;
     const hpbg = new THREE.Mesh(this.geo, mat(0x0c0a10, 0.55)); hpbg.scale.set(1.06, 0.045, 1); hpbg.position.y = -0.1;
     const hp = new THREE.Mesh(this.geo, mat(0xefe4cf)); hp.scale.set(1, 0.025, 1); hp.position.set(0, -0.1, 0.001);
-    for (const m of [bg, post, hpbg, hp]) { m.renderOrder = 20; grp.add(m); }
+    for (const m of [bg, post, hpbg, hp]) { m.renderOrder = 20; m.userData.op = m.material.opacity; grp.add(m); }
     const mark = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.markTex, color: 0xff2a1a, depthTest: false, transparent: true, toneMapped: false, fog: false }));
     mark.scale.setScalar(0.75); mark.position.y = 0.45; mark.renderOrder = 21; grp.add(mark);
     const peril = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.perilTex, depthTest: false, transparent: true, toneMapped: false, fog: false }));
@@ -118,8 +118,13 @@ export class CombatHUD {
       const top = e.kind === 'boss' ? c.clone().add(new THREE.Vector3(0, 2.2, 0)) : c.clone().add(new THREE.Vector3(0, e.extent.y + 0.45, 0));
       it.grp.position.copy(top);
       it.grp.quaternion.copy(cam.quaternion);
+      // keep a constant size on screen, and fade out as it nears the lens: an enemy right
+      // behind the camera must not paint its dark bar across the whole view
       const d = cam.position.distanceTo(top);
-      it.grp.scale.setScalar(THREE.MathUtils.clamp(d * 0.085, 1.0, 3.2));
+      const near = THREE.MathUtils.smoothstep(d, 2.4, 5.0);
+      if (near < 0.02) { it.grp.visible = false; continue; }
+      it.grp.scale.setScalar(Math.min(3.2, d * 0.085));
+      for (const m of it.grp.children) if (m.userData.op !== undefined) m.material.opacity = m.userData.op * near;
       const k = e.posture / e.postureMax;
       it.post.scale.x = Math.max(0.001, k);
       it.post.material.color.setRGB(1, 0.7 - 0.55 * k, 0.28 - 0.2 * k);

@@ -20,6 +20,15 @@
 <div id="app">
   <div id="stage"></div>
 
+  <!-- shown only if the game hits an error or loses the GPU: details to copy into a bug report -->
+  <div id="crash" role="alertdialog" aria-labelledby="crash-msg" hidden>
+    <div class="eyebrow">The dream stumbled</div>
+    <p id="crash-msg"></p>
+    <label for="crash-text" class="fine">Details</label>
+    <textarea id="crash-text" rows="4" readonly></textarea>
+    <div class="crash-actions"><button id="crash-copy" type="button">Copy details</button><button id="crash-close" type="button">Keep dreaming</button></div>
+  </div>
+
   <!-- ============================ HUD ============================ -->
   <div id="hud" hidden>
     <div id="hud-top-left">

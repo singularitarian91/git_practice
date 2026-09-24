@@ -1,6 +1,6 @@
 // Juxtapose - boot, game loop and run structure.
 import * as THREE from 'three';
-import { Renderer, DREAM } from './render.js';
+import { Renderer, DREAM, suggestQuality } from './render.js';
 import { Physics } from './physics.js';
 import { Assets } from './assets.js';
 import { Input } from './input.js';
@@ -50,7 +50,14 @@ class Game {
     const msg = $('.load-msg');
     this.meta = new Meta();
     const S = this.opts = this.meta.allSettings(); // live settings; player.js reads fov/shake/comfort/guard/reload here
-    this.render = new Renderer($('#stage'), S.quality || 'high');
+    const chosen = this.meta.data.settings && this.meta.data.settings.quality;
+    this.render = new Renderer($('#stage'), chosen || 'medium');
+    if (!chosen) {
+      const q = suggestQuality(this.render.renderer);
+      if (q !== this.render.qualityName) this.render.setQuality(q);
+      this.opts.quality = q;
+    }
+    this.watchContext();
     this.grainBase = this.render.dream.uniforms.uGrain.value;
     this.scene = this.render.scene;
     fill.style.width = '15%';
@@ -78,6 +85,7 @@ class Game {
     for (const k of Object.keys(this.opts)) if (k !== 'quality') this.applySetting(k, this.opts[k]);
     addEventListener('resize', () => this.applyHudScale());
     this.bindMenus();
+    this.bindErrors();
     fill.style.width = '100%';
     this.toTitle();
     this.last = performance.now();
@@ -85,6 +93,87 @@ class Game {
     if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) $('#touch-note').hidden = false;
     window.__game = this;
   }
+
+  // ------------------------------------------------------------ robustness
+  // Compile every shader the first shots, hits and kills will need while the layer
+  // fades in, instead of stalling the first time something is hit.
+  warmShaders() {
+    const r = this.render.renderer;
+    if (!r.compileAsync || this.render.contextLost) return;
+    const warm = new THREE.Group();
+    warm.position.set(0, -400, 0);
+    try {
+      warm.add(new THREE.Mesh(this.projectiles.geoRound, this.projectiles.mat('#fff2c8', 5)));
+      if (this.projectiles.orbMat) warm.add(new THREE.Mesh(this.projectiles.geoOrb, this.projectiles.orbMat('#7ff7ff')));
+      for (const name of ['Wall_Fractured', 'Column_Fractured', 'Drawers_Fractured', 'TP_Stucco_Fractured', 'Sleepwalker']) {
+        const t = this.assets.templates.get(name);
+        if (t) warm.add(t.clone(true));
+      }
+      const hud = this.combatHUD.make({ id: '__warm' });
+      hud.grp.position.set(0, -400, 0);
+      this.scene.add(warm);
+      const cleanup = () => {
+        this.scene.remove(warm);
+        hud.grp.parent?.remove(hud.grp);
+        this.combatHUD.items.delete('__warm');
+      };
+      r.compileAsync(this.scene, this.render.camera).then(cleanup, cleanup);
+    } catch (e) { console.warn('shader warm-up skipped', e); this.scene.remove(warm); }
+  }
+
+  // Lost WebGL (a driver reset, the GPU out of memory): pause, wait for it to come
+  // back, then rebuild the post chain one quality step lower.
+  watchContext() {
+    const cv = this.render.renderer.domElement;
+    cv.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.render.contextLost = true;
+      if (this.state === 'playing') this.pause();
+      this.showError(null, 'The graphics driver dropped the dream. Waiting for it to come back...');
+    });
+    cv.addEventListener('webglcontextrestored', () => {
+      this.render.contextLost = false;
+      const q = this.render.qualityName === 'high' ? 'medium' : 'low';
+      this.render.setQuality(q);
+      this.render.refreshEnvironment();
+      this.opts.quality = q;
+      this.meta.setSetting('quality', q);
+      this.hideError();
+      this.ui.toast(`The picture is back. Graphics set to ${q} to keep it steady.`);
+    });
+  }
+
+  bindErrors() {
+    const panel = $('#crash');
+    if (!panel) return;
+    $('#crash-copy').addEventListener('click', () => {
+      const text = panel.dataset.details || '';
+      const done = () => { $('#crash-copy').textContent = 'Copied'; };
+      try { navigator.clipboard.writeText(text).then(done, () => { $('#crash-text').select?.(); }); } catch (e) { /* select fallback */ }
+    });
+    $('#crash-close').addEventListener('click', () => this.hideError());
+    // only the game's own failures, not the host page's or benign browser notices
+    const ours = (x) => /src\/[a-z]+\.js/.test(String((x && (x.stack || x.filename)) || '')) && !/ResizeObserver/.test(String(x && x.message));
+    addEventListener('error', (e) => { if (ours(e.error) || ours(e)) this.showError(e.error || e.message); });
+    addEventListener('unhandledrejection', (e) => { if (ours(e.reason)) this.showError(e.reason); });
+  }
+  showError(err, message) {
+    const panel = $('#crash');
+    if (!panel || (!panel.hidden && !message)) return;
+    const gl = this.render?.renderer?.getContext();
+    let gpu = '';
+    try { const ext = gl.getExtension('WEBGL_debug_renderer_info'); gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : ''; } catch (e) { /* no info */ }
+    const details = [
+      message || String(err && (err.stack || err.message) || err),
+      `state ${this.state} · layer ${this.level?.key || '-'} · quality ${this.render?.qualityName}`,
+      `gpu ${gpu || 'unknown'} · ${navigator.userAgent}`,
+    ].join('\n');
+    panel.dataset.details = details;
+    $('#crash-msg').textContent = message || 'Something in the dream broke. It may carry on; if it does not, these details will help fix it.';
+    $('#crash-text').value = details;
+    panel.hidden = false;
+  }
+  hideError() { const panel = $('#crash'); if (panel) panel.hidden = true; }
 
   freshStats() { return { gives: 0, takes: 0, kills: 0, destroyed: 0, explosions: 0, propUse: {}, time: 0 }; }
 
@@ -324,6 +413,7 @@ class Game {
   }
 
   enterPlay() {
+    this.warmShaders();
     this.helpFromGame = false;
     this.ui.hideScreens();
     this.ui.setHud(true);
@@ -602,7 +692,13 @@ class Game {
     requestAnimationFrame((tt) => this.frame(tt));
     const rdt = Math.min(0.05, (t - this.last) / 1000 || 0.016);
     this.last = t;
-    try { this.tick(rdt); } catch (err) { console.error(err); }
+    try { this.tick(rdt); this.tickErrors = 0; } catch (err) {
+      console.error(err);
+      // a frame that keeps throwing freezes the picture; say so instead of dying quietly
+      this.tickErrors = (this.tickErrors || 0) + 1;
+      if (this.tickErrors === 3) this.showError(err);
+      try { if (!this.noRender) this.render.render(); } catch (e) { /* the renderer itself is down */ }
+    }
   }
 
   tick(rdt) {
