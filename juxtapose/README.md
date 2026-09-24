@@ -30,11 +30,15 @@ Choose **Lucid sandbox** on the title screen to test mechanics freely. It has ev
 | `C` / `Ctrl` | Slide while running. Ground-pound in the air. |
 | Mouse | Chase camera, Ratchet & Clank style |
 | Left mouse | Fire dream rounds |
-| Right mouse | **Take** a property from what you aim at |
+| `F` | Palette-knife combo (three hits). A **deathblow** when the red mark shows. |
+| `F` in the air while holding `C` (or looking down) | **Pogo**: strike down and bounce off whatever you hit |
+| Right mouse | Tap to **deflect** (timed). Hold to **guard**. |
+| `X` (hold) | **Focus**: spend reverie to heal and calm the dream |
+| `Q` | **Take** a property from what you aim at |
 | `E` / middle mouse | **Give** the selected property to what you aim at |
-| `Q` | Give it to **yourself** |
-| `F` | Load it into your **rounds** (up to three at once) |
-| Wheel / `1`–`9` / hold `Tab` | Choose a property. `Tab` opens a slow-motion wheel. |
+| `Z` | Give it to **yourself** |
+| `G` | Load it into your **rounds** (up to three at once) |
+| Wheel / `1`–`0` / hold `Tab` | Choose a property. `Tab` opens a slow-motion wheel. |
 | `R` | Reload (break-open revolver) |
 | `V` · `H` · `Esc` | Swap shoulder · help · pause |
 
@@ -46,6 +50,17 @@ Choose **Lucid sandbox** on the title screen to test mechanics freely. It has ev
 - Grind brass rails held up by Dalí crutches.
 - Bounce on beds, which are trampolines.
 - Blast-jump while you're bursting.
+- Step through a pair of **framed** portals with your speed intact.
+
+## The five influences, and where they live
+
+| Reference | In Juxtapose |
+|---|---|
+| **Hollow Knight** | The palette-knife combo. **Pogo** off enemies, props and the boss's knees. **Reverie** fills as you land hits and **Focus** turns it into health. **Keepsakes**, memories worn like charms in limited notches. Lore as **canvas scraps** hidden behind platforming, under shafts of light. |
+| **Sekiro** | **Deflect** (tap) and **guard** (hold). Enemy **posture** bars fill from deflects, hits, pogos and explosions, and when one breaks it kneels for a **deathblow**. A red **危** marks a perilous lunge you have to jump or dash away from. The boss can be broken too, and its eye drops within reach. |
+| **Doom** | Deathblows double as **glory kills**: they heal, pay out every property the enemy carried plus one more, and a burning kill leaves **armour**. There's no passive regeneration, so you heal by being aggressive (or by focusing). Staggered enemies yield extra charges when you take from them. |
+| **Dead Cells** | Short runs down through three layers. Between layers you pick one of three **whims** (run upgrades). Memories are the meta-progression, and each one adds a property to the dream pool. |
+| **Portal** | The **framed** property hangs gilt oval picture frames on surfaces. Two make a linked pair you can see and move through, and speed is conserved: fall into a floor frame and you're flung out of a wall. The **Night-Light** is the narrator, a candle in a jar with a dry voice who walks you through the rules. |
 
 ## The properties
 
@@ -60,6 +75,7 @@ Choose **Lucid sandbox** on the title screen to test mechanics freely. It has ev
 | Multiplying | Bowler hat | Two copies appear, properties included | Two decoys draw fire | Every round splits in three |
 | Hollow | Birdcage | Becomes intangible. Hollow enemies fade away. | Phase through walls, take no damage | Rounds pierce everything |
 | Bursting | Pomegranate | Explodes after a short fuse and spreads its other properties to everything in the blast | Your next jump is a blast jump | Explosive rounds |
+| Framed | Empty frame on an easel | Hangs a portal frame on a surface; two make a linked pair | Marks a return frame, and pressing Z again steps back through it | Every shot hangs a portal where it lands |
 
 Properties interact through shared channels instead of hand-written pairs, so combinations emerge on their own:
 
@@ -71,13 +87,19 @@ Properties interact through shared channels instead of hand-written pairs, so co
 
 **Lucidity** rises with absurdity: stacking properties, new pairings, or giving things to yourself. Higher Lucidity makes every property stronger, warps the picture (FOV dolly zoom, chromatic smear, swirling sky, tempo drag in the score), and brings more anxieties. At 100 the dreamer wakes and the run ends.
 
+## The story
+
+You are the **Figment**, the wooden lay figure from *L'Homme au Chapeau*. Théo Vautrin began that painting in 1958 and abandoned it when he caught the 6:40 train and never came back. His sister **Odile**, a 78-year-old clock restorer, has kept it under a sheet for sixty years. You wake up inside her dreams, and each night you fight down toward the one thing she won't look at. The **Night-Light**, the candle she kept burning in the window, floats beside you and narrates.
+
+The full story bible is in [`docs/STORY.md`](docs/STORY.md) and the character sheet renders are in [`docs/character/`](docs/character/). It contains spoilers.
+
 ## Run structure
 
-1. **The Soft Desert** (Dalí): melting clocks on dead trees, ruined corridors built for wall-running, floating stairs, a four-poster bed in the sand, and rails on crutches.
-2. **Golconda Piazza** (de Chirico and Magritte): long shadows, arcades with rails along their tops, a train on the horizon, and men in bowler hats raining from the sky.
-3. **The Unwatched**, the boss: a giant eye on four impossible legs, animated with procedural two-bone IK stepping. You can only hurt it while you are *not* looking at it, and it only moves when you look away. Stare at it too long and it looks back. It attacks with orbs carrying your last three combos.
+1. **The Soft Desert** (Dalí): melting clocks on dead trees, ruined corridors built for wall-running, floating stairs, a four-poster bed in the sand, and rails on crutches. It stands for the time she let run down.
+2. **Golconda Piazza** (de Chirico and Magritte): long shadows, arcades with rails along their tops, a train on the horizon, and men in bowler hats raining from the sky. It is the city he left for, where every crowd was the same man.
+3. **The Unwatched**, the boss: a giant eye on four impossible legs, animated with procedural two-bone IK stepping. You can only hurt it while you are *not* looking at it, and it only moves when you look away. Stare too long and it looks back. It attacks with orbs carrying your last three combos. Break its posture and it kneels for a deathblow.
 
-When you die, the dreamer wakes. A short, quiet vignette of their morning follows, and its details depend on how deep you got and which property you leaned on. Runs that go deep enough or strange enough leave behind a **memory**, which unlocks new properties and adds a new object to the dreamer's bedroom. The room fills in as the mystery does.
+When you die, the dreamer wakes. A short, quiet vignette of her morning follows, and its details depend on how deep you got and which property you leaned on. Runs that go deep enough or strange enough leave behind a **memory**. A memory unlocks a property, becomes a **keepsake**, and adds a new object to the dreamer's bedroom, so the room fills in as the mystery does. Nine **canvas scraps** reassemble the painting in the **Journal**. Beating the boss finishes it.
 
 ## How it's built
 
@@ -99,9 +121,14 @@ juxtapose/
     level.js                 procedural dream layers from the Blender kit, rails, the bedroom
     vfx.js                   instanced billboard particles, decals, shockwaves
     audio.js                 generative, fully synthesized score + beat-quantized SFX
+    combat.js                posture/stagger, deathblow rules, world-space posture bars and marks
+    portals.js               framed portals: placement, render-to-texture views, momentum transfer
+    narrator.js              the Night-Light: companion lantern, typed subtitles, babble voice
+    painting.js              L'Homme au Chapeau drawn procedurally (torn / finished)
     ui.js, meta.js, input.js, config.js
   blender/
-    build_figure.py          the player: model, armature, 32 procedural animation clips, export
+    build_figure.py          the player: model, armature, 42 procedural animation clips, export (--sheet renders the character sheet)
+    character_sheet.py       Cycles hero portrait, turnaround, moveset and gun renders -> docs/character/
     figure_anims.py          the animation library (run, sprint, strafe, slide, wall-run, mantle,
                              vault, flips, grind, ground-pound, reload, take/give...)
     build_props.py           every prop, the environment kit, enemies, boss, Voronoi-fractured walls
@@ -113,7 +140,7 @@ juxtapose/
 Rebuild the art with Blender's Python module (`pip install bpy==4.2.0`, Python 3.11):
 
 ```bash
-python3 juxtapose/blender/build_figure.py            # add --preview for pose sheets
+python3 juxtapose/blender/build_figure.py            # add --preview (poses), --combat (combat poses), --sheet (character sheet)
 python3 juxtapose/blender/build_props.py
 ```
 

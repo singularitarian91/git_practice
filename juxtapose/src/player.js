@@ -7,6 +7,7 @@ import { G, groups, ALL, TUNE, PROPS, PROP_INFO } from './config.js';
 import { FigureAnimator } from './animator.js';
 import { giveTo, takeFrom, takeCandidate, lucidityForGive } from './properties.js';
 import { rnd } from './vfx.js';
+import { addPosture, canDeathblow, slashArc } from './combat.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
@@ -109,6 +110,15 @@ export class Player {
     this.drowsy = 0;
     this.disarmed = 0;
     this.lastFootIdx = -1;
+    // combat v2: melee combo, pogo, deflect/guard, focus, deathblow, armour
+    this.reverie = 0;
+    this.armor = 0;
+    this.combo = 0; this.comboT = 0; this.meleeCD = 0; this.pendingHit = null;
+    this.deflectT = 0; this.deflectCD = 0; this.guarding = false;
+    this.pogoT = 0;
+    this.focusing = false; this.focusT = 0;
+    this.db = null; this.dbTarget = null;
+    this.lastStand = true;
     this.updateVial();
   }
 
@@ -117,7 +127,7 @@ export class Player {
   get selectedProp() { const a = this.available; return a[((this.selected % a.length) + a.length) % a.length]; }
   chargesOf(p) { return this.game.sandbox ? Infinity : (this.charges.get(p) || 0); }
   spend(p) { if (!this.game.sandbox) this.charges.set(p, Math.max(0, (this.charges.get(p) || 0) - 1)); }
-  addCharges(p, n) { this.charges.set(p, Math.min(TUNE.maxCharges, (this.charges.get(p) || 0) + n)); }
+  addCharges(p, n) { this.charges.set(p, Math.min(TUNE.maxCharges + (this.game.run?.mods.maxCharges || 0), (this.charges.get(p) || 0) + n)); }
   camForward(out = new THREE.Vector3()) {
     return out.set(Math.sin(this.camYaw) * Math.cos(this.camPitch), Math.sin(this.camPitch), Math.cos(this.camYaw) * Math.cos(this.camPitch));
   }
@@ -135,13 +145,17 @@ export class Player {
     if (this.self.has('heavy')) g *= 1.35;
     return g;
   }
-  maxJumps() { return 2 + (this.self.has('floating') ? 1 : 0); }
+  maxJumps() { return 2 + (this.self.has('floating') ? 1 : 0) + (this.game.run?.mods.extraJump || 0); }
+  get mods() { return this.game.run.mods; }
+  keep(id) { return this.game.run.keepsakes.has(id); }
   moveSpeed() {
     let s = this.sprintT > TUNE.sprintAfter ? TUNE.sprintSpeed : TUNE.runSpeed;
     if (this.self.has('melting')) s *= 1.3;
     if (this.self.has('heavy')) s *= 0.88;
     if (this.self.has('sleeping')) s *= 0.85;
     if (this.drowsy > 0) s *= 0.55;
+    if (this.guarding) s *= 0.55;
+    if (this.focusing) s = 0;
     return s;
   }
   filterGroups() {
@@ -174,10 +188,12 @@ export class Player {
 
     switch (this.state) {
       case 'mantle': case 'vault': return this.scriptedMove(h);
+      case 'deathblow': return this.deathblowMove(h);
       case 'grind': return this.grindMove(h);
       default: break;
     }
 
+    if (this.focusing) { this.jumpBuf = 0; this.pendingIn.dash = false; this.pendingIn.crouch = false; }
     if (this.dashT > 0) {
       this.dashT -= h;
       this.vel.x = this.dashDir.x * TUNE.dashSpeed; this.vel.z = this.dashDir.z * TUNE.dashSpeed;
@@ -235,6 +251,7 @@ export class Player {
         this.vel.z = approach(this.vel.z, target.z, acc);
       }
       this.vel.y -= g * h;
+      if (this.pogoT > 0) { this.pogoT -= h; this.checkPogo(); if (this.pogoT <= 0 && this.state === 'air' && this.anim.base === 'DownStrike') this.anim.play('Fall', { fade: 0.15 }); }
       if (this.self.has('floating') && this.jumpHeld && this.vel.y < -2.5) this.vel.y = -2.5; // glide
       if (this.drowsy > 0 && this.vel.y < -8) this.vel.y = -8;
       this.vel.y = Math.max(-TUNE.maxFall, this.vel.y);
@@ -261,7 +278,8 @@ export class Player {
   integrate(h) {
     const desired = { x: this.vel.x * h, y: this.vel.y * h, z: this.vel.z * h };
     const kcc = this.kcc;
-    kcc.computeColliderMovement(this.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, this.filterGroups());
+    const portals = this.game.portals;
+    kcc.computeColliderMovement(this.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, this.filterGroups(), portals ? portals.playerPredicate : undefined);
     const mv = kcc.computedMovement();
     const wasGrounded = this.grounded;
     this.grounded = kcc.computedGrounded();
@@ -274,6 +292,7 @@ export class Player {
     const nx = t.x + mv.x, ny = t.y + mv.y, nz = t.z + mv.z;
     this.body.setNextKinematicTranslation({ x: nx, y: ny, z: nz });
     this.pos.set(nx, ny - this.halfHNow() - this.r, nz);
+    if (portals && portals.afterPlayerMove(this, new THREE.Vector3(t.x, t.y, t.z), new THREE.Vector3(nx, ny, nz))) return;
     // horizontal velocity absorbs wall collisions (keeps momentum honest)
     if (h > 0 && this.dashT <= 0 && this.state !== 'pound') {
       const ax = mv.x / h, az = mv.z / h;
@@ -387,7 +406,8 @@ export class Player {
     const w = this.wish();
     if (w.lengthSq() < 0.01) this.flatForward(w);
     this.dashDir.copy(w.setY(0).normalize());
-    this.dashT = TUNE.dashTime; this.dashCD = TUNE.dashCooldown;
+    this.dashT = TUNE.dashTime; this.dashCD = TUNE.dashCooldown * (this.game.run?.mods.dashCD ?? 1);
+    if (this.keep('ticket')) this.dropDecoy();
     if (this.state === 'air') this.airDashUsed = true;
     if (this.state === 'slide') this.endSlide();
     this.iframes = Math.max(this.iframes, 0.12);
@@ -477,6 +497,7 @@ export class Player {
   }
 
   land() {
+    this.pogoT = 0;
     const fall = this.fallFrom - this.pos.y;
     const wasPound = this.state === 'pound';
     this.state = 'ground';
@@ -528,6 +549,7 @@ export class Player {
   }
 
   tryWallRun(wish) {
+    if (this.game.portals?.playerInFrame(this)) return false;
     if (this.wall.cool > 0 || this.hspeed() < TUNE.wallRunMinSpeed) return false;
     if (this.heightAboveGround() < 0.8) return false;
     const v = new THREE.Vector3(this.vel.x, 0, this.vel.z).normalize();
@@ -616,6 +638,7 @@ export class Player {
   }
 
   tryClimb(wish) {
+    if (this.game.portals?.playerInFrame(this)) return false;
     const hit = this.wallAhead(0.7);
     if (!hit) return false;
     const f = wish.clone().setY(0).normalize();
@@ -628,6 +651,7 @@ export class Player {
 
   // ledge detection -> scripted mantle
   tryMantle(force = false) {
+    if (this.game.portals?.playerInFrame(this)) return false;
     const f = this.facingDir();
     const ph = this.game.physics;
     const chest = { x: this.pos.x, y: this.pos.y + 0.9, z: this.pos.z };
@@ -655,6 +679,7 @@ export class Player {
   }
 
   tryVault() {
+    if (this.game.portals?.playerInFrame(this)) return false;
     const f = this.facingDir();
     const ph = this.game.physics;
     const knee = ph.ray({ x: this.pos.x, y: this.pos.y + 0.55, z: this.pos.z }, { x: f.x, y: 0, z: f.z }, 1.1, this.rayMask());
@@ -786,6 +811,14 @@ export class Player {
   hurt(amount, opts = {}) {
     if (this.dead || this.iframes > 0 || this.self.has('hollow') || this.game.godMode) return;
     if (this.state === 'mantle' || this.state === 'vault') amount *= 0.5;
+    if (this.state === 'deathblow') return;
+    if (this.focusing) this.stopFocus();
+    if (this.armor > 0) { const a = Math.min(this.armor, amount); this.armor -= a; amount -= a; this.game.vfx.impact(this.renderPos.clone().setY(this.renderPos.y + 1.2), new THREE.Vector3(0, 1, 0), '#fff4d6', 0.8); }
+    if (this.hp - amount <= 0 && this.keep('letter') && this.lastStand) {
+      this.lastStand = false; amount = this.hp - 1; this.iframes = 1.2;
+      this.game.ui.toast('The unsent letter holds you together.', 'good');
+      this.game.narrator?.say('laststand');
+    }
     this.hp -= amount;
     this.hurtFlash = Math.min(1, this.hurtFlash + amount / 25);
     this.regenT = 0;
@@ -854,6 +887,28 @@ export class Player {
     this.game.ui.toast('The dream catches you.');
   }
 
+  // Carried through a portal: centre = new capsule centre, q = rotation from entry to exit
+  portalWarp(center, q) {
+    const hh = this.halfHNow() + this.r;
+    this.body.setTranslation({ x: center.x, y: center.y, z: center.z }, true);
+    this.body.setNextKinematicTranslation({ x: center.x, y: center.y, z: center.z });
+    this.pos.set(center.x, center.y - hh, center.z);
+    this.prevPos.copy(this.pos); this.renderPos.copy(this.pos);
+    this.vel.applyQuaternion(q);
+    const f = this.camForward(new THREE.Vector3()).applyQuaternion(q);
+    const newYaw = Math.atan2(f.x, f.z);
+    const dYaw = newYaw - this.camYaw;
+    this.camYaw = newYaw;
+    this.yaw += dYaw;
+    this.camPitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(f.y, -1, 1)), -1.15, 1.05);
+    this.camPivot.copy(this.pos).add(new THREE.Vector3(0, 2.0, 0));
+    if (this.state !== 'air') { if (this.state === 'slide') this.setCrouch(false); this.state = 'air'; this.anim.play('Fall', { fade: 0.15 }); }
+    this.grind.rail = null; this.grind.cool = 0.3;
+    this.fallFrom = this.pos.y;
+    this.jumpsUsed = Math.min(this.jumpsUsed, 1); this.airDashUsed = false;
+    this.safeT = 0;
+  }
+
   teleport(p, yaw) {
     this.pos.copy(p); this.prevPos.copy(p); this.renderPos.copy(p);
     this.body.setTranslation({ x: p.x, y: p.y + this.halfHNow() + this.r, z: p.z }, true);
@@ -892,6 +947,7 @@ export class Player {
       if (this.reloadT <= 0) { this.ammo = TUNE.magazine; game.audio.sfx('reloadEnd', { quantize: 'loose' }); }
       if (busy) { this.reloadT = 0; }
     }
+    if (busy && input.hit('melee') && this.state !== 'deathblow') this.melee();
     if (busy || this.disarmed > 0) return;
     if (input.hit('reload') && this.ammo < TUNE.magazine && this.reloadT <= 0) this.reload();
     // LMB: dream rounds
@@ -899,11 +955,13 @@ export class Player {
       if (this.ammo > 0) this.fire();
       else { this.reload(); }
     }
-    if (input.click(2)) this.take();
+    if (input.hit('take')) this.take();
     if (input.hit('give') || input.click(1)) this.give();
     if (input.hit('giveSelf')) this.giveSelf();
     if (input.hit('giveRounds')) this.giveRounds();
-    if (input.btn(2) || input.btn(0)) this.aimHold = Math.max(this.aimHold, 0.6);
+    if (input.hit('melee')) this.melee();
+    if (input.click(2)) this.deflectPress();
+    if (input.btn(0)) this.aimHold = Math.max(this.aimHold, 0.6);
   }
 
   select(i) {
@@ -929,7 +987,7 @@ export class Player {
   fire() {
     const game = this.game;
     this.ammo--;
-    this.fireCD = TUNE.fireRate;
+    this.fireCD = TUNE.fireRate / (this.game.run?.mods.fireRate || 1);
     this.aimHold = 1.4;
     const from = this.muzzle('Give');
     const dir = this.aimPoint.clone().sub(from).normalize();
@@ -960,6 +1018,7 @@ export class Player {
     this.aimHold = 1.2;
     this.anim.trigger('Take');
     const p = takeCandidate(target);
+    const rip = target && target.staggered > 0 ? 2 : 0; // ripping a property out of a staggered foe yields more (Doom's chainsaw)
     if (!target || !p) {
       game.projectiles.propertyShot(from, this.aimPoint, '#cfd3da', 90, () => game.vfx.impact(this.aimPoint, this.aimNormal, '#cfd3da', 0.5));
       game.audio.sfx('fireEmpty');
@@ -973,7 +1032,7 @@ export class Player {
       if (!got) return;
       game.vfx.propertyBurst(point, got, 0.8);
       game.projectiles.propertyShot(point, this.muzzle('Take'), PROP_INFO[got].color, 32, () => {
-        this.addCharges(got, TUNE.takeCharges);
+        this.addCharges(got, TUNE.takeCharges + rip + (this.game.run?.mods.takeBonus || 0));
         const idx = this.available.indexOf(got);
         if (idx >= 0 && this.chargesOf(this.selectedProp) <= 0) this.select(idx);
         this.updateVial();
@@ -989,6 +1048,20 @@ export class Player {
     const p = this.selectedProp;
     this.aimHold = 1.2;
     if (this.chargesOf(p) <= 0) { game.ui.toast(`No ${PROP_INFO[p].label.toLowerCase()} left. Take it from a ${PROP_INFO[p].source.toLowerCase()}.`); game.audio.sfx('fireEmpty'); return; }
+    if (p === 'framed') {
+      // framed doesn't go *into* a thing, it hangs a portal *on* a surface
+      const hit = this.aimHit;
+      if (!hit || !game.portals) { game.ui.toast('Aim at a wall or the ground to hang a frame.'); game.audio.sfx('fireEmpty'); return; }
+      const from = this.muzzle('Give');
+      this.anim.trigger('Give');
+      this.spend(p);
+      this.updateVial();
+      game.audio.sfx('give', { property: p, quantize: true });
+      game.projectiles.propertyShot(from, hit.point.clone(), PROP_INFO[p].color, 90, () => {
+        if (game.portals.place(hit, 'give')) { game.recordCombo(p); game.lucidity.gain(2, 'a window'); } else this.addCharges(p, 1);
+      });
+      return;
+    }
     const target = this.aimEntity;
     if (!target || target.immutable) { game.ui.toast('Aim at something to give it a property.'); game.audio.sfx('fireEmpty'); return; }
     const from = this.muzzle('Give');
@@ -1005,6 +1078,17 @@ export class Player {
   giveSelf() {
     const game = this.game;
     const p = this.selectedProp;
+    if (p === 'framed' && game.portals) {
+      // framed on yourself: hang a return frame; use it again to step back through
+      if (game.portals.hasAnchor) { game.portals.recallPlayer(this); game.audio.sfx('portal', { position: this.pos }); return; }
+      if (this.chargesOf(p) <= 0) { game.ui.toast('No framed to give yourself.'); game.audio.sfx('fireEmpty'); return; }
+      this.spend(p); this.updateVial();
+      game.portals.anchorPlayer(this);
+      this.anim.trigger('Infuse');
+      game.audio.sfx('infuse', { property: p, quantize: 'loose' });
+      game.ui.toast('A return frame hangs here. Press Z again to step back to it.');
+      return;
+    }
     if (this.chargesOf(p) <= 0) { game.ui.toast(`No ${PROP_INFO[p].label.toLowerCase()} to give yourself.`); game.audio.sfx('fireEmpty'); return; }
     this.spend(p);
     const { v, reason } = lucidityForGive(game, 'self', p);
@@ -1096,9 +1180,7 @@ export class Player {
     }
     if (changed) this.refreshSelfLook();
     if (this.hp <= 0 && !this.dead) this.die();
-    // regeneration
-    this.regenT += dt;
-    if (this.regenT > 6 && this.hp < this.maxHp && !this.dead) this.hp = Math.min(this.maxHp, this.hp + dt * 5);
+    this.updateCombat(dt, input);
     // interpolate the fixed-step position for rendering
     this.renderPos.lerpVectors(this.prevPos, this.pos, alpha);
     // camera look input
@@ -1246,6 +1328,11 @@ export class Player {
     cam.rotateZ(this.roll + (Math.sin(t * 0.9) * s * 0.03));
     cam.fov = fov;
     cam.updateProjectionMatrix();
+    // if the chase camera has swung behind a frame's wall, look through the frame instead
+    this.camRaw = this.camRaw || { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
+    this.camRaw.pos.copy(cam.position); this.camRaw.quat.copy(cam.quaternion);
+    const through = game.portals && game.portals.cameraThrough(this.camPivot, cam.position);
+    if (through) { cam.position.applyMatrix4(through.m); cam.quaternion.premultiply(through.q); }
   }
 
   setFade(e, v) {
@@ -1264,13 +1351,15 @@ export class Player {
   updateAim() {
     const game = this.game;
     const cam = game.render.camera;
-    const f = new THREE.Vector3();
-    cam.getWorldDirection(f);
+    const raw = this.camRaw;
+    const eye = raw ? raw.pos : cam.position;
+    const f = raw ? new THREE.Vector3(0, 0, -1).applyQuaternion(raw.quat) : cam.getWorldDirection(new THREE.Vector3());
     // start the ray at the pivot plane so nothing behind the player is hit
-    const start = cam.position.clone().addScaledVector(f, cam.position.distanceTo(this.camPivot) * 0.9);
+    const start = eye.clone().addScaledVector(f, eye.distanceTo(this.camPivot) * 0.9);
     const mask = ALL & ~G.PLAYER & ~G.DEBRIS;
     let hit = game.physics.ray(start, f, 300, mask);
     this.aimEntity = null;
+    this.aimHit = hit ? { point: hit.point.clone(), normal: hit.normal.clone(), entity: hit.entity, collider: hit.collider } : null;
     if (hit) {
       this.aimPoint.copy(hit.point); this.aimNormal.copy(hit.normal);
       this.aimEntity = hit.entity && !hit.entity.immutable ? hit.entity : null;
@@ -1293,8 +1382,10 @@ export class Player {
     for (const d of this.decoys) {
       if (d.dead) continue;
       d.t -= dt;
-      d.dir += (Math.random() - 0.5) * dt * 2;
-      d.pos.x += Math.sin(d.dir) * 6 * dt; d.pos.z += Math.cos(d.dir) * 6 * dt;
+      if (!d.still) {
+        d.dir += (Math.random() - 0.5) * dt * 2;
+        d.pos.x += Math.sin(d.dir) * 6 * dt; d.pos.z += Math.cos(d.dir) * 6 * dt;
+      }
       const g = this.game.physics.ray({ x: d.pos.x, y: d.pos.y + 3, z: d.pos.z }, { x: 0, y: -1, z: 0 }, 10, G.WORLD);
       if (g) d.pos.y = g.point.y;
       d.grp.position.copy(d.pos);
@@ -1303,6 +1394,351 @@ export class Player {
       if (d.t <= 0) { d.dead = true; d.grp.parent?.remove(d.grp); this.game.vfx.propertyBurst(d.pos.clone().setY(d.pos.y + 1), 'multiplying', 0.6); }
     }
     this.decoys = this.decoys.filter((d) => !d.dead);
+  }
+
+  // ============================================================ combat v2
+  // Hollow Knight: a three-hit palette-knife combo, down-strike pogo, focus heal.
+  // Sekiro: deflect (tap RMB) / guard (hold RMB), posture, deathblows.
+  // Doom: deathblows and staggered rips pay out health, charges and armour.
+  melee() {
+    const game = this.game;
+    if (this.dead || this.state === 'deathblow' || this.focusing) return;
+    const target = this.findDeathblowTarget();
+    if (target) { this.startDeathblow(target); return; }
+    if (this.meleeCD > 0) return;
+    if (this.state === 'air' && (this.crouchHeld || this.camPitch < -0.45) && this.pogoT <= 0) { this.startPogo(); return; }
+    this.combo = this.comboT > 0 ? (this.combo % 3) + 1 : 1;
+    this.comboT = 0.62;
+    const sp = 1.2 * (this.mods.meleeSpeed || 1);
+    this.anim.trigger('Slash' + this.combo, { speed: sp, fade: 0.04 });
+    this.aimHold = Math.max(this.aimHold, 0.9);
+    this.meleeCD = [0, 0.24, 0.24, 0.4][this.combo] / sp * 1.2;
+    this.pendingHit = { t: [0, 0.09, 0.09, 0.2][this.combo] / sp * 1.2, idx: this.combo };
+    game.audio.sfx('slash', { position: this.pos, pitch: this.combo === 3 ? -4 : this.combo * 2 });
+    if (this.state === 'ground') { const f = this.flatForward(new THREE.Vector3()); this.vel.x += f.x * 3.2; this.vel.z += f.z * 3.2; }
+    if (this.reloadT > 0) this.reloadT = 0;
+  }
+
+  meleeHit(idx) {
+    const game = this.game;
+    const f = this.flatForward(new THREE.Vector3());
+    const origin = this.pos.clone().setY(this.pos.y + 1.1).addScaledVector(f, 0.3);
+    const R = (idx === 3 ? 3.1 : 2.6) * (this.mods.meleeRange || 1) * (this.keep('sketch') ? 1.4 : 1);
+    const cosA = Math.cos(idx === 3 ? 0.85 : 1.2);
+    const dmg = [0, 20, 20, 34][idx] * (this.mods.melee || 1);
+    let hits = 0;
+    const sketchTargets = [];
+    for (const e of game.entities) {
+      if (e.dead || e.immutable) continue;
+      let c = e.center();
+      // the boss is reached through its legs
+      if (e.kind === 'boss' && e.legs) {
+        let best = null, bd = Infinity;
+        for (const l of e.legs) for (const q of [l.foot, l.lo.getWorldPosition(new THREE.Vector3())]) { const dd = q.distanceTo(origin); if (dd < bd) { bd = dd; best = q; } }
+        if (e.staggered > 0 || c.distanceTo(origin) < bd) best = c;
+        c = best.clone();
+      }
+      const d = c.clone().sub(origin);
+      const dist = d.length() - (e.kind === 'boss' ? 0.3 : e.radius() * 0.6);
+      if (dist > R || Math.abs(d.y) > 2.4) continue;
+      const flat = d.clone().setY(0);
+      if (flat.lengthSq() > 0.01 && flat.normalize().dot(f) < cosA && dist > 0.9) continue;
+      if (e.kind === 'enemy' || e.kind === 'boss') {
+        e.damage(dmg, { type: 'melee', point: c.clone(), dir: f.clone(), force: e.kind === 'boss' && e.staggered > 0 });
+        addPosture(game, e, [0, 16, 16, 30][idx] * (e.kind === 'boss' ? 0.6 : 1));
+        if (e.body && e.kind === 'enemy' && e.body.isDynamic()) { const m = e.body.mass(); e.body.applyImpulse({ x: f.x * (idx === 3 ? 7 : 3.5) * m, y: (idx === 3 ? 2 : 1) * m, z: f.z * (idx === 3 ? 7 : 3.5) * m }, true); }
+        if (this.self.has('burning')) e.addProp('burning', { quiet: true });
+        this.gainReverie(11);
+        hits++;
+        sketchTargets.push(e);
+      } else {
+        e.damage(dmg * 0.8, { point: c.clone(), dir: f.clone(), heavy: idx === 3 });
+        if (e.body && e.body.isDynamic()) { const m = e.body.mass(); e.body.applyImpulseAtPoint({ x: f.x * 4 * m, y: 1.5 * m, z: f.z * 4 * m }, c, true); }
+        hits++;
+      }
+    }
+    // the blade parries orbs out of the air
+    for (const p of game.projectiles.list) {
+      if (p.type === 'orb' && p.owner === 'enemy' && p.pos.distanceTo(origin) < R) { this.reflectOrb(p); this.gainReverie(6); hits++; }
+    }
+    // every third slash with the unfinished sketch paints your selected property on
+    if (idx === 3 && this.keep('sketch') && sketchTargets.length) {
+      const pr = this.selectedProp;
+      if (pr !== 'framed' && this.chargesOf(pr) > 0) { this.spend(pr); sketchTargets[0].addProp(pr); this.updateVial(); }
+    }
+    const a0 = idx === 2 ? 1.2 : -1.2, a1 = -a0;
+    slashArc(game, origin, f, idx === 3 ? 0 : a0 * 1.1, idx === 3 ? 0.01 : a1 * 1.1, R * 0.7, hits ? '#ffe0a0' : '#f0ead8', idx === 3 ? Math.PI / 2 : (idx === 2 ? -0.35 : 0.2));
+    if (idx === 3) slashArc(game, origin, f, -0.6, 0.6, R * 0.75, '#ffe0a0', Math.PI / 2);
+    if (hits) {
+      game.hitStop(0.035 + 0.02 * idx);
+      game.audio.sfx('slashHit', { position: origin, gain: idx === 3 ? 1.3 : 1 });
+      game.vfx.shake = Math.min(1, game.vfx.shake + 0.08 * idx);
+    }
+  }
+
+  gainReverie(n) { this.reverie = Math.min(this.mods.reverieMax || 99, this.reverie + n); }
+
+  startPogo() {
+    this.pogoT = 0.6;
+    this.meleeCD = 0.18;
+    this.anim.play('DownStrike', { fade: 0.05, lockUpper: true, restart: true });
+    this.vel.y = Math.min(this.vel.y, -3);
+    this.game.audio.sfx('slash', { position: this.pos, pitch: -6 });
+  }
+
+  // Hollow Knight pogo: a downward strike that bounces off anything it hits
+  checkPogo() {
+    const game = this.game;
+    const below = this.pos.clone().setY(this.pos.y - 0.25);
+    for (const e of game.entities) {
+      if (e.dead || e.immutable || e === this) continue;
+      let c = e.center();
+      if (e.kind === 'boss') { if (e.staggered <= 0) continue; }
+      const top = c.y + (e.kind === 'enemy' ? e.extent.y : e.extent.y * 0.8);
+      const hd = Math.hypot(c.x - below.x, c.z - below.z);
+      if (hd > e.radius() + 0.7 || below.y > top + 0.5 || below.y < c.y - e.extent.y - 0.2) continue;
+      this.pogoBounce(e, new THREE.Vector3(below.x, Math.min(below.y, top), below.z));
+      return true;
+    }
+    for (const p of game.projectiles.list) {
+      if (p.type === 'orb' && p.pos.distanceTo(below) < 1.0) { p.life = 0; this.pogoBounce(null, p.pos.clone()); return true; }
+    }
+    return false;
+  }
+
+  pogoBounce(e, point) {
+    const game = this.game;
+    this.pogoT = 0;
+    this.vel.y = 12.5 * (this.keep('opendoor') ? 1.25 : 1);
+    this.jumpsUsed = 1;
+    if (this.keep('opendoor')) this.airDashUsed = false;
+    this.airDashUsed = this.keep('opendoor') ? false : this.airDashUsed;
+    this.fallFrom = this.pos.y;
+    if (e && (e.kind === 'enemy' || e.kind === 'boss')) {
+      e.damage(18 * (this.mods.melee || 1), { type: 'pogo', point, dir: new THREE.Vector3(0, -1, 0) });
+      addPosture(game, e, 14);
+      this.gainReverie(8);
+    } else if (e) {
+      e.damage(10, { point, dir: new THREE.Vector3(0, -1, 0) });
+      if (e.body && e.body.isDynamic()) e.body.applyImpulse({ x: 0, y: -3 * e.body.mass(), z: 0 }, true);
+    }
+    game.audio.sfx('pogo', { position: point });
+    game.vfx.impact(point, new THREE.Vector3(0, 1, 0), '#ffe0a0', 1.2);
+    game.vfx.ring(point.clone().setY(point.y + 0.05), 0.2, 1.4, 0.3, 0xffe0a0, 0.8);
+    game.hitStop(0.04);
+    this.anim.play('JumpUp', { fade: 0.05, restart: true, onDone: () => { if (this.state === 'air') this.anim.play('Fall', { fade: 0.25 }); } });
+    game.narrator?.event('pogo');
+  }
+
+  deflectPress() {
+    if (this.dead || this.state === 'deathblow' || this.focusing) return;
+    if (this.deflectCD > 0) { this.guardFrom = this.game.time; return; }
+    this.deflectT = 0.2 * (this.keep('nightlight') ? 1.6 : 1) * (this.mods.deflectWindow || 1);
+    this.deflectCD = 0.34;
+    this.anim.trigger('Deflect', { speed: 1.5, fade: 0.03 });
+    this.aimHold = Math.max(this.aimHold, 0.8);
+  }
+
+  // Called by attacks aimed at the player. Returns 'deflect' | 'guard' | 'hit' | 'ignore'.
+  incoming(kind, dmg, from, opts = {}) {
+    if (this.dead) return 'ignore';
+    if (this.self.has('hollow')) return 'ignore';
+    const facing = !from || from.clone().sub(this.pos).setY(0).normalize().dot(this.flatForward(new THREE.Vector3())) > -0.2;
+    if (this.deflectT > 0 && facing && !opts.perilous) { this.onDeflect(kind, from, opts); return 'deflect'; }
+    if (this.guarding && facing && !opts.perilous) {
+      this.hurt(dmg * 0.3, { ...opts, type: 'guard', from, props: null });
+      this.anim.trigger('DeflectHit', { speed: 1.2 });
+      this.game.audio.sfx('guardHit', { position: this.pos });
+      this.game.vfx.impact(this.pos.clone().setY(this.pos.y + 1.3), new THREE.Vector3(0, 1, 0), '#ffd9a0', 0.8);
+      this.gainReverie(3);
+      return 'guard';
+    }
+    this.hurt(dmg, { ...opts, from });
+    if (opts.perilous || kind === 'melee') {
+      this.knock((from ? this.pos.clone().sub(from).setY(0).normalize() : new THREE.Vector3()).multiplyScalar(opts.perilous ? 11 : 6).setY(opts.perilous ? 5 : 2));
+      if (opts.perilous && this.state === 'ground') this.anim.play('Stagger', { fade: 0.05, restart: true, onDone: () => this.resumeLoco() });
+    }
+    return 'hit';
+  }
+
+  onDeflect(kind, from, opts) {
+    const game = this.game;
+    this.deflectT = Math.max(this.deflectT, 0.12); // a volley can be deflected in rhythm
+    this.deflectCD = 0;
+    this.anim.trigger('DeflectHit', { speed: 1.6 });
+    const at = this.pos.clone().setY(this.pos.y + 1.35).addScaledVector(this.flatForward(new THREE.Vector3()), 0.5);
+    game.audio.sfx('deflect', { position: at });
+    game.vfx.impact(at, this.flatForward(new THREE.Vector3()), '#fff2c0', 2.2);
+    game.vfx.add.spawn({ x: at.x, y: at.y, z: at.z, color: new THREE.Color('#fff4d0').multiplyScalar(8), alpha: 1, alpha1: 0, size: 1.2, size1: 0.2, life: 0.12 });
+    game.render.flash(at, 0xffe6b0, 14, 6, 0.12);
+    game.hitStop(0.07);
+    if (this.keep('loupe')) game.slowMo(0.45, 0.3);
+    this.gainReverie(15);
+    if (kind === 'melee' && opts.shooter) { addPosture(game, opts.shooter, 40); opts.shooter.recoil?.(); }
+    game.stats.deflects = (game.stats.deflects || 0) + 1;
+    game.narrator?.event('deflect');
+  }
+
+  reflectOrb(p) {
+    p.owner = 'player';
+    const target = p.shooter && !p.shooter.dead ? p.shooter.center() : p.pos.clone().sub(p.vel);
+    p.vel.copy(target.sub(p.pos).normalize().multiplyScalar(Math.max(18, p.vel.length() * 1.5)));
+    p.life = 4;
+    p.deflected = true;
+  }
+
+  // ---- focus (heal with reverie) ----
+  startFocus() {
+    this.focusing = true; this.focusT = 0;
+    this.anim.play('Focus', { fade: 0.2, lockUpper: true });
+    this.game.audio.sfx('focus', { position: this.pos, gain: 0.5 });
+  }
+  stopFocus() {
+    if (!this.focusing) return;
+    this.focusing = false;
+    this.resumeLoco();
+  }
+
+  // ---- deathblow ----
+  findDeathblowTarget() {
+    const game = this.game;
+    const f = this.flatForward(new THREE.Vector3());
+    let best = null, bd = Infinity;
+    for (const e of game.entities) {
+      if (!canDeathblow(e)) continue;
+      const c = e.center();
+      const d = c.clone().sub(this.pos); const h = d.clone().setY(0);
+      const reach = e.kind === 'boss' ? 6.5 : 3.8;
+      if (h.length() > reach || Math.abs(d.y) > (e.kind === 'boss' ? 5 : 2.5)) continue;
+      if (h.lengthSq() > 0.5 && h.normalize().dot(f) < 0.1) continue;
+      const s = d.length();
+      if (s < bd) { bd = s; best = e; }
+    }
+    return best;
+  }
+
+  startDeathblow(e) {
+    const game = this.game;
+    this.db = { e, t: 0, done: false };
+    this.state = 'deathblow';
+    this.iframes = 1.1;
+    this.focusing = false; this.guarding = false; this.pogoT = 0;
+    const d = e.center().sub(this.pos).setY(0).normalize();
+    this.db.dir = d;
+    this.yaw = Math.atan2(d.x, d.z);
+    this.anim.play('Deathblow', { fade: 0.04, lockUpper: true, restart: true });
+    game.audio.sfx('slash', { position: this.pos, pitch: -8, gain: 1.3 });
+    game.slowMo(0.35, 0.35);
+  }
+
+  deathblowMove(h) {
+    const db = this.db;
+    const e = db.e;
+    db.t += h;
+    const target = e.dead ? this.pos.clone() : e.center();
+    const to = target.clone().sub(this.pos).setY(0);
+    const want = e.kind === 'boss' ? 2.6 : 1.1;
+    if (db.t < 0.22 && to.length() > want) { to.normalize().multiplyScalar(16); this.vel.set(to.x, this.grounded ? -3 : this.vel.y - 20 * h, to.z); }
+    else { this.vel.x *= 0.7; this.vel.z *= 0.7; this.vel.y = this.grounded ? -3 : this.vel.y - 20 * h; }
+    if (!db.done && db.t >= 0.4) { db.done = true; this.executeDeathblow(e); }
+    if (db.t >= 0.9) {
+      this.state = this.grounded ? 'ground' : 'air';
+      this.db = null;
+      this.resumeLoco();
+    }
+    this.integrate(h);
+  }
+
+  executeDeathblow(e) {
+    const game = this.game;
+    if (e.dead) return;
+    const c = e.center();
+    game.hitStop(0.12);
+    game.audio.sfx('deathblow', { position: c, gain: 1.2 });
+    game.vfx.shake = Math.min(1, game.vfx.shake + 0.55);
+    game.vfx.impact(c, this.db.dir.clone().negate(), '#ffd27a', 3);
+    game.vfx.add.spawn({ x: c.x, y: c.y, z: c.z, color: new THREE.Color('#ff5a3a').multiplyScalar(8), alpha: 1, alpha1: 0, size: 2.2, size1: 0.4, life: 0.18 });
+    game.render.flash(c, 0xff6a3a, 30, 9, 0.35);
+    const burning = e.props.has('burning');
+    const carried = [...e.props].filter((p) => p !== 'framed');
+    if (e.kind === 'boss') {
+      e.damage(e.maxHp * 0.18, { type: 'deathblow', force: true, point: c });
+      e.posture = 0; e.staggered = 0.001;
+      this.gainReverie(33);
+    } else {
+      e.lastDir = this.db.dir.clone().multiplyScalar(2.2);
+      e.deathblown = true;
+      e.damage(9999, { type: 'deathblow', point: c, dir: this.db.dir.clone() });
+      this.heal(20 + (this.mods.gloryHeal || 0));
+      this.gainReverie(30);
+      // the payout: every property it carried plus one more
+      const avail = this.available.filter((p) => p !== 'framed');
+      const drops = new Set(carried.filter((p) => avail.includes(p)));
+      drops.add(avail[Math.floor(Math.random() * avail.length)]);
+      for (const p of drops) this.addCharges(p, 1);
+      game.ui.toast('Deathblow · +' + [...drops].map((p) => PROP_INFO[p].label.toLowerCase()).join(', +'), 'good');
+      this.updateVial();
+      if (burning) this.armor = Math.min(50, this.armor + 20);
+      if (this.keep('seed')) game.explode(c, { radius: 3.4, damage: 45, source: 'self' });
+      game.lucidity.value = Math.max(0, game.lucidity.value - 4);
+    }
+    game.stats.deathblows = (game.stats.deathblows || 0) + 1;
+    game.narrator?.event('deathblow');
+  }
+
+  updateCombat(dt, input) {
+    const game = this.game;
+    this.comboT = Math.max(0, this.comboT - dt);
+    this.meleeCD = Math.max(0, this.meleeCD - dt);
+    this.deflectT = Math.max(0, this.deflectT - dt);
+    this.deflectCD = Math.max(0, this.deflectCD - dt);
+    if (this.pendingHit) {
+      this.pendingHit.t -= dt;
+      if (this.pendingHit.t <= 0) { const i = this.pendingHit.idx; this.pendingHit = null; this.meleeHit(i); }
+    }
+    // guard: hold RMB after the deflect window
+    const wantGuard = !this.dead && input.btn && input.btn(2) && this.deflectT <= 0 && this.state !== 'deathblow' && !this.focusing;
+    if (wantGuard !== this.guarding) { this.guarding = wantGuard; this.anim.setGuard(wantGuard); }
+    // focus: hold X with a full vessel on the ground
+    const wantFocus = !this.dead && input.is && input.is('focus') && this.state === 'ground' && this.reverie >= 33 && this.dashT <= 0;
+    if (wantFocus && !this.focusing) this.startFocus();
+    else if (!wantFocus && this.focusing && !(input.is && input.is('focus'))) this.stopFocus();
+    if (this.focusing) {
+      this.focusT += dt;
+      const need = 1.0 * (this.mods.focusTime || 1);
+      const apple = this.renderPos.clone().setY(this.renderPos.y + 1.0);
+      if (Math.random() < dt * 30) {
+        const d = new THREE.Vector3(rnd(-1, 1), rnd(0, 1), rnd(-1, 1)).normalize().multiplyScalar(1.4);
+        const p = apple.clone().add(d);
+        game.vfx.add.spawn({ x: p.x, y: p.y, z: p.z, vx: -d.x * 1.6, vy: -d.y * 1.6, vz: -d.z * 1.6, color: new THREE.Color('#ffe6a0').multiplyScalar(3), alpha: 1, alpha1: 0, size: 0.08, life: 0.7 });
+      }
+      if (this.focusT >= need) {
+        this.focusT = 0;
+        this.reverie -= 33;
+        this.heal(30 * (this.mods.heal || 1));
+        game.lucidity.value = Math.max(0, game.lucidity.value - 6);
+        game.vfx.propertyBurst(apple, 'floating', 0.9);
+        game.audio.sfx('pickup', { position: apple });
+        game.narrator?.event('focus');
+        if (this.reverie < 33) this.stopFocus();
+      }
+    }
+    // deathblow prompt
+    this.dbTarget = this.state === 'deathblow' ? null : this.findDeathblowTarget();
+  }
+
+  dropDecoy() {
+    const game = this.game;
+    if (this.decoys.length >= 3) return;
+    const fig = game.assets.cloneFigure();
+    fig.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.material.transparent = true; m.material.opacity = 0.45; m.material.emissive = new THREE.Color('#ffd84a'); m.material.emissiveIntensity = 0.3; } });
+    const grp = new THREE.Group(); grp.add(fig);
+    const anim = new FigureAnimator(fig, game.assets.figure.animations);
+    anim.play('Idle', { fade: 0 });
+    const pos = this.pos.clone();
+    grp.position.copy(pos); grp.rotation.y = this.yaw;
+    game.scene.add(grp);
+    this.decoys.push({ grp, anim, pos, dir: this.yaw, t: 2.5, dead: false, still: true });
   }
 
   dispose() {

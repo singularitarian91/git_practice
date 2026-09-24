@@ -6,6 +6,7 @@ import { Entity } from './entities.js';
 import { RAPIER } from './physics.js';
 import { G, ALL, TUNE } from './config.js';
 import { rnd } from './vfx.js';
+import { initPosture, updatePosture, canDeathblow } from './combat.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -70,7 +71,24 @@ export class Sleepwalker extends Entity {
     this.fireRate = opts.fireRate || 1;
     this.t = 0;
     this.maxVy = 0;
+    initPosture(this, this.variant === 'golconda' ? 80 : 70);
+    this.lungeCool = rnd(2.5, 5);
+    this.lunge = null;
+    this.recoilT = 0;
   }
+
+  // a deflected lunge throws it back on its heels
+  recoil() {
+    this.recoilT = 0.6;
+    if (this.lunge) this.lunge.phase = 'recover', this.lunge.t = 0;
+    const pl = this.game.player;
+    if (pl && this.body) {
+      const d = this.obj.position.clone().sub(pl.pos).setY(0).normalize();
+      const m = this.body.mass();
+      this.body.applyImpulse({ x: d.x * 6 * m, y: 1.5 * m, z: d.z * 6 * m }, true);
+    }
+  }
+  onStagger() { this.lunge = null; this.windup = 0; }
 
   radius() { return 0.45; }
 
@@ -82,6 +100,7 @@ export class Sleepwalker extends Entity {
       if (amount > 28 && opts.type !== 'fire' && opts.type !== 'melt') this.removeProp('sleeping');
     }
     this.flinch = Math.min(1, this.flinch + amount / 30);
+    if (!opts.silent && opts.type !== 'melee' && opts.type !== 'deathblow') this.postureT = Math.min(this.postureT, 0.5);
     this.flash = 1;
     if (!opts.silent) {
       this.game.audio.sfx('enemyHit', { position: this.center(), gain: 0.7 });
@@ -132,7 +151,8 @@ export class Sleepwalker extends Entity {
       const body = game.physics.dynamic(holder.position, holder.quaternion, { linDamp: 0.1, angDamp: 0.3 });
       game.physics.collider(RAPIER.ColliderDesc.cuboid(size.x, size.y, size.z).setTranslation(ctr.x, ctr.y, ctr.z), body, G.DEBRIS, G.WORLD | G.WALL | G.PROP | G.DEBRIS, { density: 0.8, friction: 0.7 });
       const m = body.mass();
-      body.applyImpulse({ x: (dir.x * 4 + rnd(-2, 2)) * m, y: rnd(2, 5) * m, z: (dir.z * 4 + rnd(-2, 2)) * m }, true);
+      const f = this.deathblown ? 3 : 1;
+      body.applyImpulse({ x: (dir.x * 4 * f + rnd(-2, 2)) * m, y: rnd(2, 5) * f * m, z: (dir.z * 4 * f + rnd(-2, 2)) * m }, true);
       body.applyTorqueImpulse({ x: rnd(-1, 1) * m * 0.3, y: rnd(-1, 1) * m * 0.3, z: rnd(-1, 1) * m * 0.3 }, true);
       game.destruction.debris.push({ body, mesh: holder, t: 0, life: rnd(4, 7), fade: 0, burning: this.props.has('burning') ? 3 : 0, pv: null, hurt: 9 });
     }
@@ -189,7 +209,10 @@ export class Sleepwalker extends Entity {
     const target = this.decoy && !this.decoy.dead ? this.decoy.pos : (pl ? pl.pos : pos);
     const toT = target.clone().sub(pos); toT.y = 0;
     const dT = toT.length();
-    const controllable = !asleep && !floating && !this.falling && !hollow;
+    updatePosture(this, dt);
+    this.recoilT = Math.max(0, this.recoilT - dt);
+    const staggered = this.staggered > 0;
+    const controllable = !asleep && !floating && !this.falling && !hollow && !staggered && this.recoilT <= 0;
     if (controllable) {
       if (this.canSee) {
         toT.normalize();
@@ -226,14 +249,41 @@ export class Sleepwalker extends Entity {
     }
     this.obj.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
 
+    // ---- lunge (melee): a white glint can be deflected, a red 危 must be dodged
+    this.lungeCool -= dt;
+    if (controllable && this.canSee && pl && !pl.dead && !this.lunge && this.windup <= 0 && this.lungeCool <= 0 && dT < 5.5 && this.decoy == null) {
+      const perilous = Math.random() < (this.variant === 'golconda' ? 0.35 : 0.25);
+      this.lunge = { phase: 'wind', t: 0, perilous, hit: false, dir: toT.clone().normalize() };
+      if (perilous) game.audio.sfx('perilous', { position: pos });
+      else game.vfx.add.spawn({ x: pos.x, y: pos.y + 1.4, z: pos.z, color: new THREE.Color('#ffffff').multiplyScalar(8), alpha: 1, alpha1: 0, size: 0.7, size1: 0.1, life: 0.3, rot: 0.78 });
+    }
+    if (this.lunge) {
+      const L = this.lunge;
+      L.t += dt;
+      if (staggered || asleep || floating || hollow) this.lunge = null;
+      else if (L.phase === 'wind') {
+        b.setLinvel({ x: v.x * 0.8, y: v.y, z: v.z * 0.8 }, true);
+        if (pl) L.dir.copy(pl.pos.clone().sub(pos).setY(0).normalize());
+        if (L.t > (L.perilous ? 0.75 : 0.55)) { L.phase = 'strike'; L.t = 0; }
+      } else if (L.phase === 'strike') {
+        b.setLinvel({ x: L.dir.x * 12, y: v.y, z: L.dir.z * 12 }, true);
+        if (pl && !L.hit && pl.pos.distanceTo(pos) < 1.5) {
+          L.hit = true;
+          const res = pl.incoming('melee', L.perilous ? 24 : 15, pos.clone(), { perilous: L.perilous, shooter: this, type: 'lunge' });
+          if (res !== 'deflect') { L.phase = 'recover'; L.t = 0; }
+        }
+        if (L.t > 0.3) { L.phase = 'recover'; L.t = 0; }
+      } else if (L.phase === 'recover') {
+        b.setLinvel({ x: v.x * 0.85, y: v.y, z: v.z * 0.85 }, true);
+        if (L.t > 0.5) { this.lunge = null; this.lungeCool = rnd(3.5, 6.5); }
+      }
+    }
+
     // ---- attacks
-    if (controllable && this.canSee && pl && !pl.dead) {
+    if (controllable && !this.lunge && this.canSee && pl && !pl.dead) {
       this.cool -= dt * this.fireRate * (P.has('burning') ? 0.6 : 1);
       if (this.cool <= 0 && this.windup <= 0 && dT < 32) { this.windup = 0.65; game.audio.sfx('enemyShoot', { position: pos, gain: 0.35, pitch: -12 }); }
-      if (dT < 1.4) {
-        this.meleeT -= dt;
-        if (this.meleeT <= 0) { this.meleeT = 0.9; pl.hurt(9, { type: 'melee', from: pos.clone() }); }
-      }
+
     }
     if (this.windup > 0) {
       this.windup -= dt;
@@ -272,7 +322,29 @@ export class Sleepwalker extends Entity {
     this.pose('SW_ForearmR', -0.15 - drowse * 0.2);
     this.pose('SW_Head', 0.15 + drowse * 0.5 - this.flinch * 0.4, Math.sin(this.t * 0.7) * 0.2, 0.25 * Math.sin(this.t * 0.5) + drowse * 0.3);
     this.pose('SW_Drawer', 0, 0, 0, 0, 0, open * 0.22);
-    const glow = 1 + this.flash * 5 + open * 4 + (P.has('burning') ? 1 : 0);
+    // lunge wind-up / strike overrides
+    if (this.lunge) {
+      const L = this.lunge;
+      const w = L.phase === 'wind' ? Math.min(1, L.t / 0.3) : L.phase === 'strike' ? 1 : Math.max(0, 1 - L.t / 0.3);
+      const st = L.phase === 'strike' ? 1 : 0;
+      this.pose('SW_Torso', -0.35 * w * (1 - st) + 0.45 * st, 0, 0);
+      this.pose('SW_ArmL', -2.6 * w * (1 - st) - 1.2 * st, 0, 0.3);
+      this.pose('SW_ArmR', -2.6 * w * (1 - st) - 1.2 * st, 0, -0.3);
+      this.pose('SW_Head', -0.3 * w + 0.3 * st, 0, 0);
+    }
+    // staggered: slumped, one knee down, the red deathblow mark overhead
+    if (staggered) {
+      this.pose('SW_Hips', 0.3, 0, 0.1, 0, -0.35, 0);
+      this.pose('SW_LegL', -1.3, 0, 0.1); this.pose('SW_ShinL', 1.5);
+      this.pose('SW_LegR', 0.2, 0, -0.1); this.pose('SW_ShinR', 1.9);
+      this.pose('SW_Torso', 0.6, 0.2, 0.2);
+      this.pose('SW_ArmL', 0.1, 0, 0.2); this.pose('SW_ArmR', -0.2, 0, -0.1);
+      this.pose('SW_Head', 0.8, 0, 0.3);
+    } else if (this.recoilT > 0) {
+      this.pose('SW_Torso', -0.5 * this.recoilT / 0.6, 0, 0);
+    }
+    const glory = canDeathblow(this);
+    const glow = 1 + this.flash * 5 + open * 4 + (P.has('burning') ? 1 : 0) + (glory ? 3 + Math.sin(this.t * 14) * 2 : 0);
     for (const m of this.coreMats) m.emissiveIntensity = m.userData.baseEI * glow * (asleep ? 0.2 : 1);
   }
 

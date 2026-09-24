@@ -57,6 +57,7 @@
       </svg>
       <div id="hurt-ring"></div>
     </div>
+    <div id="db-prompt" hidden><kbd>F</kbd> Deathblow</div>
     <div id="target" hidden>
       <div class="t-name"></div>
       <div class="t-props"></div>
@@ -66,8 +67,17 @@
     <div id="hud-bottom-left">
       <div id="self-chips"></div>
       <div id="hp">
-        <div class="hp-label">Figment</div>
-        <div class="hp-bar"><div class="hp-fill"></div></div>
+        <svg id="reverie" viewBox="0 0 40 40" width="40" height="40" aria-label="Reverie">
+          <circle cx="20" cy="20" r="17" class="rv-ring"/>
+          <clipPath id="rv-clip"><circle cx="20" cy="20" r="15"/></clipPath>
+          <rect class="rv-fill" x="0" y="40" width="40" height="40" clip-path="url(#rv-clip)"/>
+          <circle cx="20" cy="20" r="15" class="rv-glass"/>
+          <text x="20" y="24.5" class="rv-num">0</text>
+        </svg>
+        <div class="hp-main">
+          <div class="hp-label">Figment</div>
+          <div class="hp-bar"><div class="hp-fill"></div><div class="hp-armor"></div></div>
+        </div>
         <div class="hp-val mono">100</div>
       </div>
     </div>
@@ -84,6 +94,8 @@
     </div>
 
     <div id="toasts"></div>
+    <div id="narrator" hidden><span class="nl-icon" aria-hidden="true"></span><span class="nl-text"></span></div>
+    <div id="lore-card" hidden><div class="eyebrow">A scrap of the painting</div><div class="lc-text"></div><div class="lc-src"></div></div>
     <div id="wheel" hidden><div class="wheel-ring"></div><div class="wheel-center"><div class="wc-name display"></div><div class="wc-desc"></div></div></div>
   </div>
 
@@ -108,7 +120,8 @@
       <nav class="menu">
         <button id="btn-run" class="primary">Begin the night</button>
         <button id="btn-sandbox">Lucid sandbox</button>
-        <button id="btn-memories">Memories</button>
+        <button id="btn-journal">Journal</button>
+        <button id="btn-keepsakes">Keepsakes</button>
         <button id="btn-controls">How to play</button>
         <button id="btn-settings">Settings</button>
       </nav>
@@ -160,22 +173,32 @@
             <dt>Mouse</dt><dd>Look; the camera swings behind you</dd>
           </dl>
           <h3>Parkour</h3>
-          <p>Jump alongside a wall to <b>wall-run</b>. Jump straight into one to <b>climb</b>. Run at a ledge to <b>mantle</b> or <b>vault</b>. Land on a brass rail to <b>grind</b>. Beds are trampolines. Slide-jump to keep your speed.</p>
+          <p>Jump alongside a wall to <b>wall-run</b>. Jump straight into one to <b>climb</b>. Run at a ledge to <b>mantle</b> or <b>vault</b>. Land on a brass rail to <b>grind</b>. Beds are trampolines. Step into a <b>framed</b> portal and keep your speed.</p>
+          <h3>The blade</h3>
+          <dl class="keys">
+            <dt>F</dt><dd>Palette-knife combo (three hits) · <b>Deathblow</b> when the red mark shows</dd>
+            <dt>F in the air + C</dt><dd><b>Pogo</b>: strike down and bounce off whatever you hit</dd>
+            <dt>Right mouse</dt><dd>Tap to <b>deflect</b> (time it with the hit) · hold to <b>guard</b></dd>
+            <dt>X (hold)</dt><dd><b>Focus</b>: spend reverie to heal and calm the dream</dd>
+          </dl>
+          <p>Deflects and hits build an enemy's <b>posture</b>. Break it, or wound it badly, and it kneels. A deathblow heals you and gives you its properties. A red <b>危</b> means the attack can't be blocked: jump or dash.</p>
         </div>
         <div>
           <h3>The Juxtaposition Gun</h3>
           <dl class="keys">
             <dt>Left mouse</dt><dd>Fire dream rounds</dd>
-            <dt>Right mouse</dt><dd><b>Take</b> a property from what you aim at</dd>
+            <dt>Q</dt><dd><b>Take</b> a property from what you aim at</dd>
             <dt>E / middle mouse</dt><dd><b>Give</b> the selected property to what you aim at</dd>
-            <dt>Q</dt><dd>Give it to <b>yourself</b></dd>
-            <dt>F</dt><dd>Load it into your <b>rounds</b> (stack up to three)</dd>
-            <dt>Wheel / 1–9 / hold Tab</dt><dd>Choose a property</dd>
+            <dt>Z</dt><dd>Give it to <b>yourself</b></dd>
+            <dt>G</dt><dd>Load it into your <b>rounds</b> (stack up to three)</dd>
+            <dt>Wheel / 1–0 / hold Tab</dt><dd>Choose a property</dd>
             <dt>R</dt><dd>Reload</dd>
             <dt>V · H · Esc</dt><dd>Swap shoulder · help · pause</dd>
           </dl>
           <h3>Lucidity</h3>
-          <p>Absurd combos, such as stacking properties, new pairings, or giving things to yourself, raise Lucidity. That makes every property stronger and the dream stranger. At 100 the dreamer wakes and your run ends.</p>
+          <p>Absurd combos, such as stacking properties, new pairings, or giving things to yourself, raise Lucidity. That makes every property stronger and the dream stranger. At 100 the dreamer wakes and your run ends. Focusing calms it down.</p>
+          <h3>Between nights</h3>
+          <p>Waking leaves <b>memories</b>, which become <b>keepsakes</b> you equip in notches. Scraps of the painting are hidden in every layer. Between layers, choose a <b>whim</b>.</p>
         </div>
       </div>
       <div id="prop-table"></div>
@@ -183,12 +206,53 @@
     </div>
   </section>
 
-  <section id="memories" class="screen" hidden>
-    <div class="panel wide">
-      <h2 class="display">Memories</h2>
-      <p class="fine">Each night that goes deep or strange enough leaves a memory behind. Memories add new properties to the dream.</p>
-      <div id="memory-list"></div>
+  <section id="journal" class="screen" hidden>
+    <div class="panel wide journal">
+      <h2 class="display">Journal</h2>
+      <div class="tabs" role="tablist">
+        <button class="tab on" data-tab="figment">The Figment</button>
+        <button class="tab" data-tab="painting">The Painting</button>
+        <button class="tab" data-tab="dreamer">The Dreamer</button>
+        <button class="tab" data-tab="memories">Memories</button>
+      </div>
+      <div class="tab-body" data-body="figment">
+        <div class="bio">
+          <img class="portrait" src="./docs/character/portrait.png" alt="The Figment: a wooden mannequin in a bowler hat with an apple where its face should be" onerror="this.hidden=true">
+          <div>
+            <h3>The Figment</h3>
+            <p>A jointed wooden lay figure, the kind painters pose instead of a person. Black bowler, red scarf, and where the face should be, a green apple hanging in the air. There is no face because the painter never got that far.</p>
+            <p>You are the subject of <i>L’Homme au Chapeau</i>, a canvas Théo Vautrin began in the winter of 1958 and abandoned when he left town. You woke up on the sand with a gun that takes the qualities of things and gives them to other things, and a pull downward. You want to be finished.</p>
+            <p><b>The Juxtaposition Gun.</b> Brass and walnut. The copper gramophone bell <i>takes</i>, the barrel ringed with glowing glass <i>gives</i>, and a palette-knife bayonet folds out underneath. Théo used to say a painting is just two things put next to each other until they mean a third.</p>
+            <p><b>The Night-Light.</b> The candle that burned in the window every night for sixty years. It floats beside you in its jar. It knows the rules of the dream. It will not tell you what is at the bottom.</p>
+          </div>
+        </div>
+      </div>
+      <div class="tab-body" data-body="painting" hidden>
+        <div class="painting-wrap"><canvas id="painting-canvas" width="480" height="600"></canvas><div id="scrap-list"></div></div>
+      </div>
+      <div class="tab-body" data-body="dreamer" hidden><div id="dreamer-bio"></div></div>
+      <div class="tab-body" data-body="memories" hidden>
+        <p class="fine">Each night that goes deep or strange enough leaves a memory behind. Memories add new properties to the dream and become keepsakes.</p>
+        <div id="memory-list"></div>
+      </div>
       <nav class="menu"><button class="back primary">Back</button></nav>
+    </div>
+  </section>
+
+  <section id="keepsakes" class="screen" hidden>
+    <div class="panel wide">
+      <h2 class="display">Keepsakes</h2>
+      <p class="fine">Equip memories as keepsakes. Each takes up notches. <span id="notch-count" class="mono"></span></p>
+      <div id="keepsake-list"></div>
+      <nav class="menu"><button class="back primary">Done</button></nav>
+    </div>
+  </section>
+
+  <section id="whims" class="screen" hidden>
+    <div class="panel wide whims-panel">
+      <p class="eyebrow">between layers</p>
+      <h2 class="display">Choose a whim</h2>
+      <div id="whim-cards"></div>
     </div>
   </section>
 
@@ -198,7 +262,7 @@
       <div id="wake-lines"></div>
       <div id="wake-memory" hidden><div class="eyebrow">A memory surfaces</div><div class="wm-title display"></div><div class="wm-text"></div><div class="wm-unlock"></div></div>
       <div id="wake-stats" class="mono"></div>
-      <nav class="menu"><button id="btn-sleep" class="primary">Fall asleep again</button><button id="btn-wake-title">Title</button></nav>
+      <nav class="menu"><button id="btn-sleep" class="primary">Fall asleep again</button><button id="btn-wake-keepsakes">Keepsakes</button><button id="btn-wake-journal">Journal</button><button id="btn-wake-title">Title</button></nav>
     </div>
   </section>
 

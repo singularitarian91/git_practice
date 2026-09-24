@@ -1,7 +1,8 @@
 // HUD + menus (DOM overlay).
 import * as THREE from 'three';
 import { PROPS, PROP_INFO, propIconSVG, TUNE, LAYERS } from './config.js';
-import { MEMORIES } from './meta.js';
+import { MEMORIES, KEEPSAKES, WHIMS, SCRAPS } from './meta.js';
+import { drawPainting } from './painting.js';
 import { takeCandidate } from './properties.js';
 
 const $ = (s) => document.querySelector(s);
@@ -18,7 +19,12 @@ export class UI {
       selfChips: $('#self-chips'), hp: $('#hp'), hpFill: $('.hp-fill'), hpVal: $('.hp-val'),
       ribbon: $('#ribbon'), rounds: $('#rounds'), ammo: $('#ammo'), vIcon: $('.v-icon'), vName: $('.v-name'), vCount: $('.v-count'),
       toasts: $('#toasts'), wheel: $('#wheel'), fade: $('#fade'), card: $('#card'),
+      armor: $('.hp-armor'), reverie: $('#reverie'), rvFill: $('#reverie .rv-fill'), rvNum: $('#reverie .rv-num'), dbPrompt: $('#db-prompt'),
+      lore: $('#lore-card'),
     };
+    for (const t of document.querySelectorAll('#journal .tab')) {
+      t.addEventListener('click', () => this.journalTab(t.dataset.tab));
+    }
     this.hitT = 0;
     this.lastTarget = null;
     this.lastKey = '';
@@ -37,7 +43,7 @@ export class UI {
   setHud(on) { this.hud.hidden = !on; }
 
   buildRibbon() {
-    this.el.ribbon.innerHTML = PROPS.map((p, i) => `<div class="slot" data-p="${p}" style="color:${PROP_INFO[p].color}" title="${PROP_INFO[p].label}"><span class="n">${i + 1}</span>${propIconSVG(p, 22)}<span class="c">0</span></div>`).join('');
+    this.el.ribbon.innerHTML = PROPS.map((p, i) => `<div class="slot" data-p="${p}" style="color:${PROP_INFO[p].color}" title="${PROP_INFO[p].label}"><span class="n">${(i + 1) % 10}</span>${propIconSVG(p, 22)}<span class="c">0</span></div>`).join('');
   }
   buildAmmo() {
     this.el.ammo.innerHTML = Array.from({ length: TUNE.magazine }, () => '<div class="pip"></div>').join('');
@@ -172,10 +178,17 @@ export class UI {
     this.el.lucid.classList.toggle('warn', L >= 75);
     // layer + objective
     this.el.objective.textContent = g.level?.objective || '';
-    // health
+    // health, armour, reverie
     const hp = Math.max(0, pl.hp);
     this.el.hpFill.style.width = (hp / pl.maxHp * 100).toFixed(1) + '%';
-    this.el.hpVal.textContent = Math.ceil(hp);
+    this.el.hpVal.textContent = Math.ceil(hp) + (pl.armor > 0 ? ` +${Math.ceil(pl.armor)}` : '');
+    this.el.armor.style.width = Math.min(100, pl.armor / pl.maxHp * 100).toFixed(1) + '%';
+    const rmax = g.run?.mods.reverieMax || 99;
+    const rk = pl.reverie / rmax;
+    this.el.rvFill.setAttribute('y', (40 - rk * 40).toFixed(1));
+    this.el.rvNum.textContent = Math.floor(pl.reverie / 33);
+    this.el.reverie.classList.toggle('full', pl.reverie >= 33);
+    this.el.dbPrompt.hidden = !pl.dbTarget;
     this.el.hp.classList.toggle('low', hp < 30);
     // self properties
     const selfKey = [...pl.self].map(([p, t]) => p + Math.ceil(t)).join() + (pl.drowsy > 0 ? 'd' : '') + (pl.disarmed > 0 ? 'x' : '');
@@ -231,7 +244,7 @@ export class UI {
         this.el.tProps.innerHTML = [...t.props].map((p) => this.chip(p, '', t.innate.has(p))).join('');
         const cand = takeCandidate(t);
         const parts = [];
-        if (cand) parts.push(`<kbd>RMB</kbd> take <span style="color:${PROP_INFO[cand].color}">${PROP_INFO[cand].label.toLowerCase()}</span>`);
+        if (cand) parts.push(`<kbd>Q</kbd> take <span style="color:${PROP_INFO[cand].color}">${PROP_INFO[cand].label.toLowerCase()}</span>`);
         if (pl.chargesOf(sel) > 0) parts.push(`<kbd>E</kbd> give <span style="color:${PROP_INFO[sel].color}">${PROP_INFO[sel].label.toLowerCase()}</span>`);
         this.el.tHint.innerHTML = parts.join(' &nbsp;·&nbsp; ');
       }
@@ -246,6 +259,85 @@ export class UI {
       this.el.boss.classList.toggle('unwatched', vul);
       this.el.bossText.textContent = b.props.has('sleeping') ? 'Asleep: vulnerable' : vul ? 'Unwatched: vulnerable' : b.stare > 2.4 ? 'Watched. Look away!' : 'Watched: it cannot be hurt';
     } else this.el.boss.hidden = true;
+  }
+
+  // -------------------------------------------------------------- lore
+  loreCard(scrap) {
+    const el = this.el.lore;
+    el.querySelector('.lc-text').textContent = scrap.text;
+    el.querySelector('.lc-src').textContent = '— ' + scrap.src;
+    el.hidden = false;
+    el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    clearTimeout(this._lore);
+    this._lore = setTimeout(() => { el.hidden = true; }, 8000);
+  }
+
+  journalTab(tab) {
+    for (const t of document.querySelectorAll('#journal .tab')) t.classList.toggle('on', t.dataset.tab === tab);
+    for (const b of document.querySelectorAll('#journal .tab-body')) b.hidden = b.dataset.body !== tab;
+    if (tab === 'painting') this.renderPainting();
+    if (tab === 'dreamer') this.renderDreamer();
+    if (tab === 'memories') this.renderMemories();
+  }
+  renderJournal() { this.journalTab('figment'); }
+
+  renderPainting() {
+    const meta = this.game.meta;
+    const found = meta.scraps;
+    drawPainting($('#painting-canvas'), { found, finished: meta.data.bossKills > 0 });
+    $('#scrap-list').innerHTML = `<p class="fine">${found.size} of 9 scraps recovered.${meta.data.bossKills > 0 ? ' The painting is finished.' : ''}</p>` + SCRAPS.map((s) => found.has(s.id)
+      ? `<div class="scrap">${s.text}<span class="src">${s.src} · layer ${['I', 'II', 'III'][s.layer]}</span></div>`
+      : `<div class="scrap missing">A torn corner, somewhere in layer ${['I', 'II', 'III'][s.layer]}.</div>`).join('');
+  }
+
+  renderDreamer() {
+    const meta = this.game.meta;
+    const mem = meta.memories, sc = meta.scraps;
+    const parts = ['<p>Someone is asleep. It is very late. The dream smells faintly of candle wax and clock oil.</p>'];
+    if (meta.knowsName) parts.push('<p>Her name is <b>Odile Vautrin</b>. She is seventy-eight. She restored clocks for fifty years in a small shop on the Rue des Horloges, and lives alone above it now, with the shutters down.</p>');
+    if (mem.has('nightlight') || sc.has(3)) parts.push('<p>For years she kept a candle burning in the window, every night, in case someone came home late.</p>');
+    if (sc.has(1) || sc.has(4)) parts.push('<p>She had a younger brother, <b>Théo</b>, who painted. He thought everything was funnier if you put it next to something else.</p>');
+    if (mem.has('station') || sc.has(5)) parts.push('<p>In December 1958 Théo caught the 6:40 train to the city. She went to platform 3 every morning for a month afterwards.</p>');
+    if (mem.has('pomegranate')) parts.push('<p>He left a note under a split pomegranate on the kitchen table. She knows it by heart and has never said it aloud.</p>');
+    if (mem.has('birdcage')) parts.push('<p>His canary, Pip, flew out of the door he left open. She kept the cage.</p>');
+    if (sc.has(7) || mem.has('easel')) parts.push('<p>There is a painting in the back bedroom, under a sheet. She dusts around it.</p>');
+    if (mem.has('letter') || sc.has(8)) parts.push('<p>In the second drawer there is a letter she has never opened. The handwriting is not his.</p>');
+    if (meta.data.bossKills > 0) parts.push('<p><i>She lifted the sheet. She finished the face. It was hers.</i></p>');
+    $('#dreamer-bio').innerHTML = parts.join('');
+  }
+
+  renderKeepsakes() {
+    const meta = this.game.meta;
+    const eq = new Set(meta.equipped());
+    $('#notch-count').textContent = `Notches used: ${meta.usedNotches()} / ${meta.notches}`;
+    $('#keepsake-list').innerHTML = KEEPSAKES.map((k) => {
+      const un = meta.keepsakeUnlocked(k);
+      const mem = MEMORIES.find((m) => m.id === k.memory);
+      return `<button class="keep${eq.has(k.id) ? ' on' : ''}${un ? '' : ' locked'}" data-id="${k.id}" ${un ? '' : 'disabled'}>
+        <span class="kc">${'◆'.repeat(k.cost)}</span><div class="kn">${un ? k.name : 'Unremembered'}</div>
+        <div class="kd">${un ? k.desc : 'Wake with the memory “' + (mem ? mem.title : '?') + '” to find it.'}</div></button>`;
+    }).join('');
+    for (const b of document.querySelectorAll('#keepsake-list .keep')) {
+      b.addEventListener('click', () => {
+        const ok = meta.toggleKeepsake(b.dataset.id);
+        this.game.audio.sfx(ok ? 'uiSelect' : 'fireEmpty');
+        if (!ok) this.toast('Not enough notches.');
+        this.renderKeepsakes();
+      });
+    }
+  }
+
+  showWhims(onPick) {
+    const g = this.game;
+    const taken = new Set(g.run.whims);
+    const pool = WHIMS.filter((w) => !taken.has(w.id));
+    const pick = [];
+    while (pick.length < 3 && pool.length) pick.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    $('#whim-cards').innerHTML = pick.map((w, i) => `<button class="whim" data-i="${i}"><div class="wn">${w.name}</div><div class="wd">${w.desc}</div></button>`).join('');
+    this.show('whims');
+    for (const b of document.querySelectorAll('#whim-cards .whim')) {
+      b.addEventListener('click', () => { g.audio.sfx('uiSelect'); onPick(pick[+b.dataset.i]); }, { once: true });
+    }
   }
 
   // -------------------------------------------------------------- screens

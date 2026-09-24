@@ -306,6 +306,56 @@ def shot_detail_props():
     return dict(loc=(-0.2, -3.7, 1.45), target=(0.05, 0.15, 0.8), lens=35)
 
 
+def clone_hierarchy(name, prefix, loc, rz=0.0):
+    """Linked-mesh copy of a whole hierarchy (for showing two states side by side)."""
+    src = bpy.data.objects[name]
+    mapping = {}
+    for o in hierarchy(src):
+        n = bpy.data.objects.new(prefix + o.name, o.data)
+        bpy.context.scene.collection.objects.link(n)
+        mapping[o.name] = n
+    for o in hierarchy(src):
+        n = mapping[o.name]
+        if o.parent:
+            n.parent = mapping[o.parent.name]
+        n.location = o.location.copy()
+        n.rotation_euler = o.rotation_euler.copy()
+    mapping[name].location = V(loc)
+    mapping[name].rotation_euler = (0, 0, math.radians(rz))
+    return mapping
+
+
+def shot_dream_frames():
+    show('Frame', (-2.35, 0.2, 0), 18)
+    show('PortalRing', (-0.2, 1.1, 1.25), 0)
+    show('Easel', (1.55, 0.2, 0), -12)
+    m = clone_hierarchy('Easel', 'PV_', (3.05, 0.9, 0), -24)
+    m['Easel_Sheet'].hide_render = True
+    return dict(loc=(0.2, -6.6, 1.75), target=(0.3, 0.4, 1.12), lens=32)
+
+
+def shot_keepsakes():
+    show('NightLight', (-0.17, 0.0, 0.32), 20)
+    show('CanvasScrap', (0.25, 0.05, 0.3), -15)
+    o = clone('CanvasScrap', 'PV_scrap_back', (0.62, 0.35, 0.3), 160)
+    o.rotation_euler = (math.radians(10), 0, math.radians(160))
+    show('Apple', (-0.45, -0.1, 0), 20)
+    return dict(loc=(0.05, -1.35, 0.5), target=(0.12, 0.1, 0.28), lens=42)
+
+
+def shot_detail_easel():
+    show('Frame', (-1.05, 0.25, 0), 22)
+    show('Easel', (0.45, 0.2, 0), -25)
+    show('PortalRing', (2.2, 2.3, 1.25), -20)
+    return dict(loc=(-0.2, -3.9, 1.55), target=(0.5, 0.35, 1.2), lens=34)
+
+
+def shot_detail_nightlight():
+    show('NightLight', (0.0, 0.0, 0.2), 25)
+    show('CanvasScrap', (0.42, 0.35, 0.22), -25)
+    return dict(loc=(-0.05, -0.75, 0.33), target=(0.12, 0.05, 0.2), lens=45)
+
+
 SHOTS = [
     ('sources_large', shot_sources_large),
     ('sources_small', shot_sources_small),
@@ -318,6 +368,10 @@ SHOTS = [
     ('detail_head', shot_detail_head),
     ('detail_eye', shot_detail_eye),
     ('detail_props', shot_detail_props),
+    ('dream_frames', shot_dream_frames),
+    ('keepsakes', shot_keepsakes),
+    ('detail_easel', shot_detail_easel),
+    ('detail_nightlight', shot_detail_nightlight),
 ]
 
 

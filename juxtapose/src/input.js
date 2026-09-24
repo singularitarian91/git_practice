@@ -8,9 +8,12 @@ const BIND = {
   jump: ['Space'],
   dash: ['ShiftLeft', 'ShiftRight'],
   crouch: ['KeyC', 'ControlLeft', 'ControlRight'],
+  take: ['KeyQ'],
   give: ['KeyE'],
-  giveSelf: ['KeyQ'],
-  giveRounds: ['KeyF'],
+  giveSelf: ['KeyZ'],
+  giveRounds: ['KeyG'],
+  melee: ['KeyF'],
+  focus: ['KeyX'],
   reload: ['KeyR'],
   wheel: ['Tab'],
   shoulder: ['KeyV'],
@@ -39,7 +42,7 @@ export class Input {
       if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
       this.down.add(e.code);
-      if (/^Digit[1-9]$/.test(e.code)) this.pressed.add(e.code);
+      if (/^Digit[0-9]$/.test(e.code)) this.pressed.add(e.code);
     });
     addEventListener('keyup', (e) => {
       this.down.delete(e.code);
@@ -88,6 +91,7 @@ export class Input {
   click(b) { return this.enabled && this.mousePressed.has(b); }
   digit() {
     for (let i = 1; i <= 9; i++) if (this.pressed.has('Digit' + i)) return i;
+    if (this.pressed.has('Digit0')) return 10;
     return 0;
   }
   moveAxis() {

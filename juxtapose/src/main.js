@@ -15,14 +15,20 @@ import { Level, LOOKS, buildBedroom } from './level.js';
 import { Player } from './player.js';
 import { Sleepwalker } from './enemies.js';
 import { Unwatched } from './boss.js';
-import { spawnEntity, Pickup } from './entities.js';
+import { spawnEntity, Pickup, ScrapPickup } from './entities.js';
 import { LAYERS, PROPS, PROP_INFO, TUNE } from './config.js';
 import { FigureAnimator } from './animator.js';
+import { Portals } from './portals.js';
+import { Narrator } from './narrator.js';
+import { CombatHUD } from './combat.js';
+import { defaultMods, SCRAPS } from './meta.js';
 
 const $ = (s) => document.querySelector(s);
 
 class Game {
   constructor() {
+    this.run = { mods: defaultMods(), keepsakes: new Set(), whims: [] };
+    this.hitStopT = 0; this.slowT = 0; this.slowScale = 1;
     this.state = 'boot';
     this.time = 0;
     this.timeScale = 1;
@@ -61,6 +67,9 @@ class Game {
     this.lucidity = new Lucidity(this);
     this.destruction = new Destruction(this);
     this.projectiles = new Projectiles(this);
+    this.narrator = new Narrator(this);
+    this.combatHUD = new CombatHUD(this);
+    this.portals = new Portals(this);
     this.stats = this.freshStats();
     this.bindMenus();
     fill.style.width = '100%';
@@ -106,19 +115,34 @@ class Game {
     }
     this.endRun('death');
   }
+  // brief freeze on impact (weight) and short slow-motion (drama)
+  hitStop(d) { this.hitStopT = Math.max(this.hitStopT, d); }
+  slowMo(d, scale = 0.3) { this.slowT = Math.max(this.slowT, d); this.slowScale = scale; }
+
+  newRun() {
+    this.run = { mods: defaultMods(), keepsakes: new Set(this.meta.equipped()), whims: [] };
+  }
+
   onBossDefeated() {
     this.ui.toast('The eye closes.', 'good');
+    this.narrator.say('bossDown', { priority: true });
+    this.meta.data.bossKills = (this.meta.data.bossKills || 0) + 1;
+    if (this.meta.addScrap(9)) this.ui.loreCard(SCRAPS[8]);
+    this.meta.save();
     this.audio.stinger('memory');
     setTimeout(() => { if (this.state === 'playing') this.endRun('victory'); }, 4500);
   }
 
   // ------------------------------------------------------------ world lifecycle
   clearWorld() {
+    this.combatHUD.clear();
+    this.narrator.despawn();
     for (const e of this.entities) { e.obj.parent?.remove(e.obj); if (e.fireLight) this.render.release(e.fireLight); }
     this.entities.clear();
     for (const p of this.pickups) p.obj.parent?.remove(p.obj);
     this.pickups = [];
     this.projectiles.clear();
+    this.portals.clear();
     for (const d of this.destruction.debris) d.mesh.parent?.remove(d.mesh);
     this.destruction.debris = [];
     this.vfx.clear();
@@ -151,6 +175,7 @@ class Game {
     this.physics.beforeStep = (h) => { if (this.player) this.player.fixedUpdate(h); };
     if (carry) {
       p.charges = carry.charges; p.roundProps = carry.roundProps; p.hp = Math.max(40, carry.hp); p.selected = carry.selected;
+      p.reverie = carry.reverie || 0; p.armor = carry.armor || 0;
       p.updateVial();
     }
     return p;
@@ -191,8 +216,11 @@ class Game {
     this.lucidity.cap = 100;
     this.stats = this.freshStats();
     this.recentCombos = [];
-    this.loadLayer(0, { charges: new Map([['melting', 1], ['floating', 1]]), roundProps: new Map(), hp: TUNE.playerHP, selected: 0 });
+    this.newRun();
+    this.narrator.reset();
+    this.loadLayer(0, { charges: new Map([['melting', 1], ['floating', 1]]), roundProps: new Map(), hp: TUNE.playerHP, selected: 0, reverie: 0, armor: 0 });
     this.audio.stinger('runStart');
+    if (this.meta.data.runs === 0) this.narrator.sayAll('wake0'); else this.narrator.say('wakeN');
   }
 
   startSandbox() {
@@ -203,9 +231,14 @@ class Game {
     this.lucidity.reset();
     this.lucidity.cap = 99;
     this.stats = this.freshStats();
+    this.newRun();
     this.clearWorld();
     const lvl = this.buildLevel('sandbox', 0);
     this.makePlayer(lvl.spawn, lvl.spawnYaw);
+    this.player.reverie = 99;
+    this.narrator.reset();
+    this.narrator.spawn();
+    this.narrator.say('sandbox');
     this.state = 'playing';
     for (const p of lvl.dummies) this.spawnEnemy(p.clone().setY(lvl.groundY(p.x, p.z) + 0.1), { fireRate: 0.5 });
     this.enterPlay();
@@ -230,6 +263,14 @@ class Game {
     const drop = lvl.spawn.clone().setY(lvl.spawn.y + (index === 0 ? 0 : 18));
     this.makePlayer(drop, lvl.spawnYaw, carry);
     this.state = 'playing';
+    this.narrator.spawn();
+    this.narrator.say('layer' + (index + 1));
+    this.layerT = 0;
+    const found = this.meta.scraps;
+    lvl.scrapSpots.forEach((pos, k) => {
+      const sc = SCRAPS.find((s) => s.layer === index && s.id === index * 3 + k + 1);
+      if (sc && sc.id !== 9 && !found.has(sc.id)) this.pickups.push(new ScrapPickup(this, pos, sc));
+    });
     if (key === 'boss') {
       this.boss = new Unwatched(this, lvl.bossSpawn.clone().setY(lvl.groundY(lvl.bossSpawn.x, lvl.bossSpawn.z)));
       this.entities.add(this.boss);
@@ -257,12 +298,21 @@ class Game {
     this.audio.stinger('descend');
     this.ui.fade(1, 1.1);
     const p = this.player;
-    const carry = { charges: p.charges, roundProps: p.roundProps, hp: p.hp, selected: p.selected };
+    const carry = { charges: p.charges, roundProps: p.roundProps, hp: p.hp, selected: p.selected, reverie: p.reverie, armor: p.armor };
     this.state = 'transition';
     setTimeout(() => {
-      this.depth++;
-      this.loadLayer(this.depth, carry);
-      this.transitioning = false;
+      // a whim between layers, then down
+      this.input.exitLock();
+      this.state = 'whims';
+      this.narrator.say('whim');
+      this.ui.showWhims((w) => {
+        w.apply(this.run.mods);
+        this.run.whims.push(w.id);
+        this.depth++;
+        this.loadLayer(this.depth, carry);
+        this.transitioning = false;
+        this.ui.toast(`Whim: ${w.name}`, 'good');
+      });
     }, 1300);
   }
 
@@ -271,6 +321,7 @@ class Game {
     this.state = 'waking';
     this.wakeT = 0;
     this.input.exitLock();
+    this.narrator.say(cause === 'lucid' ? 'lucidWake' : cause === 'victory' ? 'bossDown' : 'death', { priority: true, force: true });
     this.audio.stinger('wake');
     this.ui.fade(1, 2.2);
     const top = Object.entries(this.stats.propUse).sort((a, b) => b[1] - a[1])[0];
@@ -284,7 +335,8 @@ class Game {
     const lines = this.meta.vignette(stats);
     this.clearWorld();
     this.render.setLook(LOOKS.bedroom);
-    this.bedroom = buildBedroom(this, this.meta.memories);
+    this.bedroom = buildBedroom(this, this.meta.memories, { victory: stats.victory, found: this.meta.scraps });
+    this.bedroomVictory = !!stats.victory;
     this.scene.add(this.bedroom.group);
     this.state = 'bedroom';
     this.bedT = 0;
@@ -315,6 +367,7 @@ class Game {
   // ------------------------------------------------------------ menus
   bindMenus() {
     const back = () => {
+      if (this.returnTo) { const r = this.returnTo; this.returnTo = null; this.ui.show(r); return; }
       if (this.state === 'paused') this.ui.show('pause');
       else if (this.state === 'title') this.ui.show('title');
       else this.ui.hideScreens();
@@ -322,7 +375,10 @@ class Game {
     const click = (id, fn) => $(id).addEventListener('click', () => { this.audio.start(); this.audio.sfx('uiSelect'); fn(); });
     click('#btn-run', () => this.startRun());
     click('#btn-sandbox', () => this.startSandbox());
-    click('#btn-memories', () => { this.ui.renderMemories(); this.ui.show('memories'); });
+    click('#btn-journal', () => { this.ui.renderJournal(); this.ui.show('journal'); });
+    click('#btn-keepsakes', () => { this.ui.renderKeepsakes(); this.ui.show('keepsakes'); });
+    click('#btn-wake-journal', () => { this.returnTo = 'waking'; this.ui.renderJournal(); this.ui.show('journal'); });
+    click('#btn-wake-keepsakes', () => { this.returnTo = 'waking'; this.ui.renderKeepsakes(); this.ui.show('keepsakes'); });
     click('#btn-controls', () => this.ui.show('controls'));
     click('#btn-settings', () => this.ui.show('settings'));
     click('#btn-resume', () => this.resume());
@@ -357,7 +413,7 @@ class Game {
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); });
     // sandbox panel
     const spawns = [['Sleepwalker', () => this.spawnEnemy(this.spawnPoint(), {})], ['Golconda man', () => this.spawnEnemy(this.spawnPoint().setY(this.spawnPoint().y + 14), { falling: true, gravity: 0.15, variant: 'golconda' })],
-      ...['Clock', 'Cloud', 'Mirror', 'Candle', 'Anvil', 'Bed', 'BowlerHat', 'Birdcage', 'Pomegranate', 'Wall', 'Column', 'Drawers', 'Platform'].map((n) => [n.replace('BowlerHat', 'Bowler hat'), () => this.sandboxSpawn(n)])];
+      ...['Clock', 'Cloud', 'Mirror', 'Candle', 'Anvil', 'Frame', 'Bed', 'BowlerHat', 'Birdcage', 'Pomegranate', 'Wall', 'Column', 'Drawers', 'Platform'].map((n) => [n.replace('BowlerHat', 'Bowler hat'), () => this.sandboxSpawn(n)])];
     const grid = $('#sb-spawns');
     grid.innerHTML = spawns.map(([n], i) => `<button data-i="${i}">${n}</button>`).join('');
     grid.addEventListener('click', (e) => { const i = e.target.dataset.i; if (i !== undefined) { spawns[+i][1](); this.audio.sfx('uiSelect'); } });
@@ -387,6 +443,31 @@ class Game {
       $('#set-quality').value = next;
       this.ui.toast(`Graphics lowered to ${next} to keep things smooth (Settings to change).`);
     } else this.qualityLocked = true;
+  }
+
+  // narrator hints and threshold lines (Portal-style onboarding)
+  storyTriggers(dt) {
+    if (this.state !== 'playing' || !this.player) return;
+    const pl = this.player, n = this.narrator;
+    this.layerT = (this.layerT || 0) + dt;
+    const L = this.lucidity.value;
+    const prev = this._prevLucid || 0;
+    for (const th of [50, 75, 90]) if (prev < th && L >= th && !this.sandbox) n.event('lucid' + th);
+    this._prevLucid = L;
+    if (this.sandbox) return;
+    if (this.depth === 0 && this.layerT > 7 && this.stats.takes === 0) n.event2('hintTake');
+    if (this.stats.takes > 0 && this.stats.gives === 0 && this.layerT > 12) n.event2('hintGive');
+    let near = false, stag = false;
+    for (const e of this.entities) {
+      if (e.kind !== 'enemy' || e.dead) continue;
+      if (e.obj.position.distanceTo(pl.pos) < 22) near = true;
+      if (e.staggered > 0 || (e.hp < e.maxHp * 0.2)) stag = true;
+      if (e.lunge && e.lunge.perilous) n.event('perilous');
+    }
+    if (near) n.event('enemiesNear');
+    if (stag) n.event('staggerSeen');
+    if (pl.reverie >= 33 && pl.hp < 65) n.event('reverieFull');
+    if (this.layerT > 70 && this.stats.gives < 2) n.event2('idleHint');
   }
 
   spawnPoint() {
@@ -442,7 +523,9 @@ class Game {
       }
       let ts = this.ui.wheelOpen ? 0.2 : 1;
       if (this.state === 'waking') { this.wakeT += rdt; ts = Math.max(0.15, 1 - this.wakeT); }
+      if (this.slowT > 0) { this.slowT -= rdt; ts = Math.min(ts, this.slowScale); }
       this.timeScale += (ts - this.timeScale) * Math.min(1, rdt * 10);
+      if (this.hitStopT > 0) { this.hitStopT -= rdt; this.timeScale = Math.min(this.timeScale, 0.04); }
       dt = rdt * this.timeScale;
       const pl = this.player;
       if (pl) pl.readInput(this.sbOpen ? { moveAxis: () => ({ x: 0, z: 0 }), hit: () => false, is: () => false } : input, dt);
@@ -456,9 +539,13 @@ class Game {
       for (const p of this.pickups) p.update(dt);
       this.pickups = this.pickups.filter((p) => !p.dead);
       this.projectiles.update(dt);
+      this.portals.update(dt);
       this.destruction.update(dt);
       this.level?.update(dt);
       this.lucidity.update(dt);
+      this.combatHUD.update(rdt);
+      this.narrator.update(rdt);
+      this.storyTriggers(dt);
       if (this.lucidity.value >= 100 && !this.sandbox && this.state === 'playing') this.endRun('lucid');
       // audio
       let near = 0;
@@ -466,7 +553,8 @@ class Game {
       this.audio.setIntensity(Math.min(1, near * 0.18 + (this.boss && !this.boss.dead ? 0.6 : 0)));
       this.audio.setLucidity(this.lucidity.display / 100);
       const cam = this.render.camera;
-      this.audio.setListener(cam.position, cam.getWorldDirection(new THREE.Vector3()));
+      const raw = pl && pl.camRaw;
+      this.audio.setListener(raw ? raw.pos : cam.position, raw ? new THREE.Vector3(0, 0, -1).applyQuaternion(raw.quat) : cam.getWorldDirection(new THREE.Vector3()));
       // post uniforms
       DREAM.uniforms.uLucid.value = this.lucidity.display / 100;
       const du = this.render.dream.uniforms;
@@ -491,8 +579,13 @@ class Game {
       this.bedT += rdt;
       const cam = this.render.camera;
       const k = Math.min(1, this.bedT / 20);
-      cam.position.set(1.6 - k * 0.6, 1.55, -2.6 + k * 0.8);
-      cam.lookAt(-0.6, 0.9, 1.6);
+      if (this.bedroom.easel && this.bedroomVictory) {
+        cam.position.set(1.2 - k * 0.5, 1.5, -1.6 + k * 1.2);
+        cam.lookAt(0.55, 1.25, 1.75);
+      } else {
+        cam.position.set(1.6 - k * 0.6, 1.55, -2.6 + k * 0.8);
+        cam.lookAt(-0.6, 0.9, 1.6);
+      }
       cam.fov = 50; cam.updateProjectionMatrix();
       if (this.bedroom.clock) this.bedroom.clock.rotation.z = Math.sin(this.bedT * 0.5) * 0.02;
       DREAM.uniforms.uLucid.value = 0;
@@ -505,7 +598,7 @@ class Game {
     this.render.update(dt, focus, this.time);
     this.audio.update(rdt);
     this.ui.update(rdt);
-    if (!this.noRender) this.render.render();
+    if (!this.noRender) { this.portals.beforeRender(); this.render.render(); }
     input.endFrame();
   }
 

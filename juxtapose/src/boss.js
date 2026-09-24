@@ -6,6 +6,7 @@ import { Entity } from './entities.js';
 import { RAPIER } from './physics.js';
 import { G, ALL, PROP_INFO } from './config.js';
 import { rnd } from './vfx.js';
+import { initPosture, updatePosture, addPosture } from './combat.js';
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -81,6 +82,12 @@ export class Unwatched extends Entity {
     this.intro = 2.5;
     this.dying = 0;
     this.hurtFlash = 0;
+    initPosture(this, 380);
+  }
+
+  onStagger() {
+    this.game.ui.toast('It kneels. Deathblow! (F)', 'good');
+    this.game.audio.sfx('bossRoar', { position: this.center(), gain: 0.7, pitch: 5 });
   }
 
   center(out = new THREE.Vector3()) { return out.set(this.obj.position.x, this.obj.position.y + this.eyeHeight + this.lift, this.obj.position.z); }
@@ -95,7 +102,7 @@ export class Unwatched extends Entity {
   unanchor() { /* it walks on its own legs */ }
   onMelted() { this.melt = 0.55; this.removeProp('melting'); this.damage(90, { type: 'melt', force: true }); }
 
-  get vulnerable() { return !this.watched || this.props.has('sleeping'); }
+  get vulnerable() { return !this.watched || this.props.has('sleeping') || this.staggered > 0; }
 
   damage(amount, opts = {}) {
     if (this.dead || this.dying) return;
@@ -161,6 +168,7 @@ export class Unwatched extends Entity {
       if (nt <= 0) { this.propT.delete(p); this.removeProp(p); } else this.propT.set(p, nt);
     }
     this.checkWatched(dt);
+    updatePosture(this, dt);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 4);
     const pos = this.obj.position;
     if (this.dying) { this.updateDeath(dt); return; }
@@ -168,9 +176,11 @@ export class Unwatched extends Entity {
 
     // lift from floating / weight from heavy
     const floating = this.props.has('floating') && !this.props.has('heavy');
-    this.lift += ((floating ? 7 : 0) - this.lift) * Math.min(1, dt * (floating ? 0.5 : 2));
+    const staggered = this.staggered > 0;
+    const liftTarget = staggered ? -(this.eyeHeight - 2.4) : floating ? 7 : 0;
+    this.lift += (liftTarget - this.lift) * Math.min(1, dt * (floating ? 0.5 : staggered ? 5 : 2));
     const asleep = this.props.has('sleeping');
-    const canAct = !this.watched && !asleep && !floating && this.intro <= 0;
+    const canAct = !this.watched && !asleep && !floating && !staggered && this.intro <= 0;
     const toP = pl ? pl.pos.clone().sub(pos).setY(0) : new THREE.Vector3();
     const dist = toP.length();
 
@@ -219,7 +229,7 @@ export class Unwatched extends Entity {
     this.blinkT -= dt;
     if (this.blinkT <= 0) { this.blinkT = this.phaseIdx >= 2 ? 99 : rnd(3, 7); this.blink = 1.001; }
     if (this.blink > 0) this.blink = Math.max(0, this.blink - dt * 4);
-    const close = asleep ? 1 : this.blink > 0 ? Math.sin(this.blink * Math.PI) : 0;
+    const close = asleep ? 1 : staggered ? 0.6 : this.blink > 0 ? Math.sin(this.blink * Math.PI) : 0;
     if (this.lidTop) this.lidTop.quaternion.copy(this.rest.UW_LidTop.q).multiply(_q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), close * 0.42));
     if (this.lidBot) this.lidBot.quaternion.copy(this.rest.UW_LidBottom.q).multiply(_q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -close * 0.42));
     if (this.iris) {
@@ -251,6 +261,8 @@ export class Unwatched extends Entity {
     game.audio.sfx('enemyShoot', { position: origin, pitch: -7, gain: 1.2 });
     game.ui.echo(props);
   }
+
+  addPosture(n) { addPosture(this.game, this, n); }
 
   stomp() {
     const game = this.game;

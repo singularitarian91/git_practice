@@ -18,6 +18,9 @@ Conventions
   * materials: Principled BSDF with constant inputs; surface variation comes from
     a colour attribute "Col" (exported as COLOR_0, multiplies the base colour)
   * deterministic: each asset uses its own seeded RNG
+  * UVs exist only where the game needs them (Frame_Opening, Easel_Canvas);
+    glTF stores v flipped (v = 0 at the top), so textures need flipY = false
+  * alpha < 1 (FrameOpening, JarGlass) exports as alphaMode BLEND
 """
 import bpy
 import bmesh
@@ -30,6 +33,7 @@ import struct
 import time
 from mathutils import Vector as V, Matrix, noise
 from mathutils.kdtree import KDTree
+from mathutils.bvhtree import BVHTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJ = os.path.dirname(HERE)
@@ -98,8 +102,9 @@ def ratio(h_dark, h_base):
 MATS = {}
 
 
-def material(name, color, metal=0.0, rough=0.5, emit=None, strength=0.0, double=False):
-    """Principled BSDF with constant values; Base Color = constant * Col attribute."""
+def material(name, color, metal=0.0, rough=0.5, emit=None, strength=0.0, double=False, alpha=1.0):
+    """Principled BSDF with constant values; Base Color = constant * Col attribute.
+    alpha < 1 exports as glTF alphaMode BLEND."""
     if name in MATS:
         return MATS[name]
     m = bpy.data.materials.new(name)
@@ -122,6 +127,13 @@ def material(name, color, metal=0.0, rough=0.5, emit=None, strength=0.0, double=
     if emit is not None:
         b.inputs['Emission Color'].default_value = (*hexcol(emit), 1.0)
         b.inputs['Emission Strength'].default_value = strength
+    if alpha < 1.0:
+        b.inputs['Alpha'].default_value = alpha
+        for attr, val in (('blend_method', 'BLEND'), ('surface_render_method', 'BLENDED')):
+            try:
+                setattr(m, attr, val)
+            except (AttributeError, TypeError):
+                pass
     m.use_backface_culling = not double
     m.diffuse_color = (*lin, 1.0)
     m.metallic = metal
@@ -631,6 +643,7 @@ class MB:
     def __init__(self):
         self.bm = bmesh.new()
         self.col = self.bm.loops.layers.float_color.new('Col')
+        self.uvl = None                 # created on demand, so UV-less meshes stay UV-less
         self.mats = []
 
     def midx(self, mat):
@@ -638,9 +651,16 @@ class MB:
             self.mats.append(mat)
         return self.mats.index(mat)
 
-    def add(self, src, mat, tint=None, smooth=None, mats=None):
+    def add(self, src, mat, tint=None, smooth=None, mats=None, uv=None, vtint=None):
         """Append src (freed).  tint: rgb, or fn(co) -> rgb.  mats: list mapping
-        src material_index -> material (for multi-material parts)."""
+        src material_index -> material (for multi-material parts).  uv: fn(co) ->
+        (u, v) (adds a UV map to this mesh).  vtint: per-vertex rgb list in
+        src.verts index order."""
+        if uv is not None and self.uvl is None:
+            self.uvl = self.bm.loops.layers.uv.new('UVMap')
+        if vtint is not None:
+            src.verts.index_update()
+            vcols = {v: vtint[v.index] for v in src.verts}
         if mats:
             idxs = [self.midx(m) for m in mats]
         else:
@@ -654,14 +674,18 @@ class MB:
                 continue
             nf.material_index = idxs[min(f.material_index, len(idxs) - 1)] if idxs else idx
             nf.smooth = f.smooth if smooth is None else smooth
-            for lp in nf.loops:
-                if tint is None:
+            for lp, sv in zip(nf.loops, f.verts):
+                if vtint is not None:
+                    c = vcols[sv]
+                elif tint is None:
                     c = (1.0, 1.0, 1.0)
                 elif callable(tint):
                     c = tint(lp.vert.co)
                 else:
                     c = tint
                 lp[self.col] = (c[0], c[1], c[2], 1.0)
+                if uv is not None:
+                    lp[self.uvl].uv = uv(lp.vert.co)
         for e in src.edges:
             if not e.smooth:
                 ne = self.bm.edges.get((vmap[e.verts[0]], vmap[e.verts[1]]))
@@ -2650,6 +2674,528 @@ def build_unwatched(P):
 
 
 # ============================================================================
+# ROUND 2: Frame, PortalRing, CanvasScrap, NightLight, Easel
+# ============================================================================
+def bm_beam(p0, p1, w, d, bevel=0.004):
+    """Chamfered wooden beam from p0 to p1; w across (horizontal), d in depth."""
+    p0, p1 = V(p0), V(p1)
+    z = p1 - p0
+    L = z.length
+    z.normalize()
+    x = V((0, 1, 0)).cross(z)
+    if x.length < 1e-6:
+        x = V((1, 0, 0))
+    x.normalize()
+    y = z.cross(x)
+    bm = bm_box((w, d, L), bevel=bevel, segs=1)
+    M = Matrix(((x.x, y.x, z.x, 0), (x.y, y.y, z.y, 0), (x.z, y.z, z.z, 0), (0, 0, 0, 1)))
+    return xform(bm, Matrix.Translation((p0 + p1) / 2) @ M)
+
+
+def easel_stand(mb, wood, brass, H, tray_top, front_y, canvas_d, lean, feet_x=0.4, back_y=0.55,
+                mast_top=None, clamp_z=None):
+    """Studio A-frame easel.  The A-plane leans back by `lean` over its height;
+    the picture stands upright on a ledge in front of it with its front face at
+    y = front_y."""
+    def ay(z):
+        return lean * z / H
+
+    def lx(z):
+        return feet_x + (0.03 - feet_x) * z / (H - 0.02)
+    for sx in (-1, 1):
+        mb.add(bm_beam((sx * feet_x, 0.0, 0.0), (sx * 0.03, ay(H - 0.02), H - 0.02), 0.042, 0.03), wood)
+        mb.add(move(bm_lathe([(0, 0), (0.024, 0), (0.024, 0.035), (0, 0.035)], segs=10),
+                    (sx * (feet_x - 0.004), 0, 0)), brass)
+    zb = 0.32
+    mb.add(bm_beam((-lx(zb) - 0.01, ay(zb), zb), (lx(zb) + 0.01, ay(zb), zb), 0.04, 0.026), wood)
+    mt = mast_top or H
+    mb.add(bm_beam((0, ay(zb - 0.02), zb - 0.02), (0, ay(mt), mt), 0.05, 0.034), wood)
+    # ledge with a lip, bracketed back to the legs and the mast
+    y_lip = front_y - 0.07
+    y_back = front_y + canvas_d + 0.012
+    mb.add(bm_box_mm((-0.45, y_lip, tray_top - 0.03), (0.45, y_back, tray_top), bevel=0.005), wood)
+    mb.add(bm_box_mm((-0.45, y_lip - 0.012, tray_top - 0.03), (0.45, y_lip + 0.004, tray_top + 0.03),
+                     bevel=0.004), wood)
+    for xx in (-lx(tray_top), 0.0, lx(tray_top)):
+        mb.add(bm_beam((xx, y_back - 0.01, tray_top - 0.015), (xx, ay(tray_top) + 0.01, tray_top - 0.015),
+                       0.03, 0.028), wood)
+    knob = bm_lathe([(0, 0), (0.012, 0), (0.012, 0.012), (0.022, 0.016), (0.022, 0.026), (0, 0.03)], segs=14)
+    rot(knob, -math.pi / 2, 'X')
+    mb.add(move(knob, (0, ay(tray_top) + 0.017, tray_top - 0.015)), brass)
+    # back leg hinged under the apex
+    mb.add(bm_beam((0, ay(H) + 0.03, H - 0.09), (0, back_y, 0.0), 0.04, 0.028), wood)
+    mb.add(bm_box((0.09, 0.05, 0.075), center=(0, ay(H) + 0.005, H - 0.05), bevel=0.006), wood)
+    pin = bm_lathe([(0, -0.055), (0.009, -0.055), (0.009, 0.055), (0, 0.055)], segs=10)
+    rot(pin, math.pi / 2, 'Y')
+    mb.add(move(pin, (0, ay(H) + 0.03, H - 0.075)), brass)
+    mb.add(move(bm_lathe([(0, 0), (0.018, 0), (0.018, 0.03), (0, 0.03)], segs=10), (0, back_y, 0)), brass)
+    if clamp_z is not None:
+        # top clamp hung from the apex, pressing on the top of the picture
+        mb.add(bm_beam((0, ay(H - 0.09), H - 0.09), (0, ay(clamp_z) + 0.005, clamp_z + 0.03), 0.04, 0.03),
+               wood)
+        mb.add(bm_box_mm((-0.05, front_y - 0.022, clamp_z), (0.05, ay(clamp_z) + 0.02, clamp_z + 0.036),
+                         bevel=0.004), wood)
+        mb.add(bm_box_mm((-0.05, front_y - 0.022, clamp_z - 0.03), (0.05, front_y - 0.006, clamp_z + 0.036),
+                         bevel=0.003), wood)
+        k2 = bm_lathe([(0, 0), (0.01, 0), (0.01, 0.012), (0.02, 0.016), (0.02, 0.026), (0, 0.03)], segs=14)
+        mb.add(move(k2, (0, (front_y + ay(clamp_z)) / 2, clamp_z + 0.036)), brass)
+    for v in mb.bm.verts:                  # slanted leg ends: sit flat on the ground
+        if v.co.z < 0.0:
+            v.co.z = 0.0
+    return y_lip - 0.012
+
+
+def bm_mitred_frame(cx, cz, W, H, sec, y_back):
+    """Rectangular picture-frame moulding with mitred corners in the XZ plane.
+    sec: (u, v), u measured inward from the outer edge, v toward the front (-Y)."""
+    bm = bmesh.new()
+    rings = []
+    for (x, z) in ((cx - W / 2, cz - H / 2), (cx + W / 2, cz - H / 2), (cx + W / 2, cz + H / 2),
+                   (cx - W / 2, cz + H / 2)):
+        dx, dz = math.copysign(1.0, cx - x), math.copysign(1.0, cz - z)
+        rings.append([bm.verts.new((x + dx * u, y_back - v, z + dz * u)) for (u, v) in sec])
+    m = len(sec)
+    for i in range(4):
+        a, b = rings[i], rings[(i + 1) % 4]
+        for j in range(m):
+            j2 = (j + 1) % m
+            bm.faces.new([a[j], a[j2], b[j2], b[j]])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    set_smooth(bm)
+    return bm
+
+
+def bm_shell(R, rings=5, segs=16, depth=0.035, ribs=16, thick=0.014):
+    """Scallop-shell fan in local XY (opening toward +Y), domed toward +Z."""
+    bm = bmesh.new()
+    rows = []
+    for i in range(rings + 1):
+        rho = R * i / rings
+        row = []
+        for j in range(segs + 1):
+            psi = math.pi * j / segs
+            rr = rho * (1 + 0.08 * math.cos(ribs * psi) * (rho / R))
+            z = depth * (1 - (rho / R) ** 2) + 0.2 * depth * math.cos(ribs * psi) * (rho / R)
+            row.append(bm.verts.new((rr * math.cos(psi), rr * math.sin(psi), z)))
+            if i == 0:
+                break
+        rows.append(row)
+    for i in range(1, rings + 1):
+        for j in range(segs):
+            if i == 1:
+                bm.faces.new([rows[0][0], rows[1][j], rows[1][j + 1]])
+            else:
+                bm.faces.new([rows[i - 1][j], rows[i][j], rows[i][j + 1], rows[i - 1][j + 1]])
+    bm.normal_update()
+    if sum(f.normal.z for f in bm.faces) < 0:
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    set_smooth(bm)
+    return solidify(bm, thick)
+
+
+def bm_cscroll(r0, turns=1.25, n=14, thick=0.012, sides=6, phase=0.0, flip=1):
+    """Flat C-scroll (spiral tube) in the local XZ plane, centred on the origin."""
+    pts, rad = [], []
+    for k in range(n):
+        s = k / (n - 1)
+        r = r0 * (1 - 0.7 * s)
+        a = phase + flip * turns * TAU * s
+        pts.append((r * math.cos(a), 0.0, r * math.sin(a)))
+        rad.append(thick * (1 - 0.55 * s))
+    return bm_tube(pts, rad, sides=sides)
+
+
+def gilt_tint(front_y, depth):
+    """Gilding: bright on the high points, reddish bole in the recesses."""
+    bole = (0.6, 0.44, 0.36)
+
+    def f(co):
+        v = front_y + depth - co.y       # height above the back plane
+        t = smoothstep(0.35 * depth, 0.85 * depth, v)
+        return mix3(bole, (1.0, 1.0, 1.0), t)
+    return f
+
+
+def recenter(mbs, pivots, ref=None):
+    """Centre the XY bounding box of `ref` (default: all builders) on the origin
+    and move every builder and pivot by the same offset."""
+    ref = ref or mbs
+    xs = [v.co.x for m in ref for v in m.bm.verts]
+    ys = [v.co.y for m in ref for v in m.bm.verts]
+    off = V((-(max(xs) + min(xs)) / 2, -(max(ys) + min(ys)) / 2, 0.0))
+    for m in mbs:
+        move(m.bm, off)
+    return [V(p) + off for p in pivots]
+
+
+FRAME_SEC = [(0.0, 0.0), (0.1, 0.0), (0.1, 0.018), (0.095, 0.028), (0.087, 0.031), (0.079, 0.04),
+             (0.068, 0.045), (0.057, 0.041), (0.05, 0.033), (0.041, 0.039), (0.03, 0.05), (0.018, 0.048),
+             (0.009, 0.041), (0.003, 0.031), (0.0, 0.016)]
+
+
+def build_frame(P):
+    """Magritte's La condition humaine: an easel holding an empty gilt frame."""
+    gilt, brass = P['gilt'], P['brass']
+    wood = material('EaselWood', '#a8763f', 0.0, 0.55)
+    glow = material('FrameOpening', '#bddcf6', 0.0, 0.2, emit='#bddcf6', strength=0.6, alpha=0.35,
+                    double=True)
+    H, tray_top, fy = 1.9, 0.75, -0.1
+    FW, FH, FD = 0.8, 1.0, 0.05
+    cz = tray_top + FH / 2
+    mb = MB()
+    easel_stand(mb, wood, brass, H, tray_top, fy, FD, lean=0.06, back_y=0.52, mast_top=tray_top - 0.02,
+                clamp_z=tray_top + FH)
+    mb.add(bm_mitred_frame(0.0, cz, FW, FH, FRAME_SEC, fy + FD), gilt, tint=gilt_tint(fy, FD))
+    tint = gilt_tint(fy - 0.03, FD)
+    for (sx, sz) in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+        cx_, cz_ = sx * (FW / 2 - 0.05), cz + sz * (FH / 2 - 0.05)
+        base = math.atan2(-sz, -sx)
+        for k in range(3):
+            a = base + (k - 1) * 0.75
+            leaf = bm_ico(1.0, 1, sc=(0.042, 0.011, 0.015))
+            rot(leaf, -a, 'Y')
+            mb.add(move(leaf, (cx_ - 0.018 * math.cos(a), fy - 0.004, cz_ - 0.018 * math.sin(a))), gilt,
+                   tint=tint)
+        sc = bm_cscroll(0.03, turns=1.2, thick=0.008, phase=base + math.pi, flip=sx * sz)
+        mb.add(move(sc, (cx_, fy - 0.006, cz_)), gilt, tint=tint)
+    for sx in (-1, 1):
+        sh = bm_shell(0.055, rings=4, segs=12, depth=0.02, ribs=12, thick=0.01)
+        rot(sh, -sx * math.pi / 2, 'Z')
+        xform(sh, Matrix.Translation(V((sx * (FW / 2 - 0.03), fy - 0.002, cz))) @
+              Matrix.Rotation(math.radians(90), 4, 'X'))
+        mb.add(sh, gilt, tint=tint)
+    # the see-through opening (shimmer quad), 0.6 x 0.8, UVs 0..1
+    x0, x1 = -FW / 2 + 0.1, FW / 2 - 0.1
+    z0, z1 = cz - FH / 2 + 0.1, cz + FH / 2 - 0.1
+    yq = fy + FD * 0.5
+    q = bmesh.new()
+    q.faces.new([q.verts.new((x0, yq, z0)), q.verts.new((x1, yq, z0)), q.verts.new((x1, yq, z1)),
+                 q.verts.new((x0, yq, z1))])
+    ob_ = MB()
+    ob_.add(q, glow, smooth=False, uv=lambda co: ((co.x - x0) / (x1 - x0), (co.z - z0) / (z1 - z0)))
+    (piv,) = recenter([mb, ob_], [(0.0, yq, cz)])
+    finish(mb, 'Frame', sharp=40, weighted=True, vfn=ao_fn(h=0.25, amt=0.25))
+    finish(ob_, 'Frame_Opening', pivot=piv, parent='Frame', sharp=None)
+
+
+PORTAL_SEC = [(-0.13, -0.04), (0.0, -0.04), (0.0, -0.006), (-0.008, 0.012), (-0.02, 0.018), (-0.031, 0.03),
+              (-0.043, 0.034), (-0.054, 0.027), (-0.066, 0.02), (-0.08, 0.03), (-0.095, 0.04), (-0.11, 0.037),
+              (-0.123, 0.024), (-0.13, 0.006)]
+
+
+def build_portal_ring(P):
+    """Rococo gilt oval frame drawn around a portal; open 1.2 x 2.0 ellipse."""
+    gold = material('PortalGilt', '#e6b54e', 1.0, 0.25)
+    a, b = 0.6, 1.0
+    N = 72
+    pts, rad = [], []
+    for i in range(N):
+        t = TAU * i / N
+        pts.append((a * math.cos(t), 0.0, b * math.sin(t)))
+        bump = (0.5 + 0.5 * math.cos(10 * t)) ** 1.5
+        rad.append((1.0 + 0.22 * bump, 1.0 + 0.12 * bump))
+    mb = MB()
+    tint = gilt_tint(-0.04, 0.08)
+    mb.add(bm_tube(pts, rad, closed=True, section=PORTAL_SEC, fixed_b=(0, -1, 0)), gold, tint=tint)
+    Mf = Matrix.Rotation(math.radians(90), 4, 'X')        # local z -> -Y, local y -> +Z
+    crest = bm_shell(0.15, rings=5, segs=14, depth=0.04, ribs=14, thick=0.016)
+    xform(crest, Matrix.Translation(V((0, -0.038, b + 0.085))) @ Mf)
+    mb.add(crest, gold, tint=tint)
+    mb.add(bm_ico(0.022, 1, center=(0, -0.045, b + 0.255)), gold)
+    drop = bm_shell(0.09, rings=4, segs=12, depth=0.03, ribs=12, thick=0.014)
+    rot(drop, math.pi, 'Z')
+    xform(drop, Matrix.Translation(V((0, -0.038, -b - 0.075))) @ Mf)
+    mb.add(drop, gold, tint=tint)
+    for sx in (-1, 1):
+        sc = bm_cscroll(0.06, turns=1.3, thick=0.015, phase=0.0 if sx > 0 else math.pi, flip=-sx)
+        mb.add(move(sc, (sx * 0.175, -0.042, b + 0.07)), gold, tint=tint)
+        sc = bm_cscroll(0.065, turns=1.3, thick=0.016, phase=math.pi / 2, flip=sx)
+        mb.add(move(sc, (sx * (a + 0.16), -0.03, 0.0)), gold, tint=tint)
+        for tz in (0.55, -0.55):
+            t = math.asin(tz)
+            px, pz = sx * a * math.cos(t) * 1.13, b * math.sin(t) * 1.08
+            leaf = bm_ico(1.0, 1, sc=(0.05, 0.014, 0.022))
+            rot(leaf, -math.atan2(pz, px) - sx * 0.5, 'Y')
+            mb.add(move(leaf, (px, -0.05, pz)), gold, tint=tint)
+    finish(mb, 'PortalRing', sharp=45, vfn=lambda co, n, f: grey(1.0 - 0.3 * smoothstep(0.2, 1.0, n.y)))
+
+
+def build_canvas_scrap(P):
+    """A torn corner of L'Homme au Chapeau: sky, sand and a sliver of bowler hat."""
+    paint = material('CanvasPaint', '#ffffff', 0.0, 0.62)
+    linen = material('Linen', '#d8cbaf', 0.0, 0.95)
+    brass = P['brass']
+    rng = random.Random(1958)
+    NU, NV = 20, 14
+    W, H, TH = 0.45, 0.32, 0.0025
+
+    def en(s, k, amp=1.0):
+        return amp * (0.011 * noise.noise(V((s * 5.0, k * 3.1, 0.5))) +
+                      0.006 * noise.noise(V((s * 17.0, k * 1.7, 2.5))))
+
+    def L(t):
+        return -W / 2 + en(t, 1)
+
+    def R(t):
+        return W / 2 + en(t, 2) - 0.07 * smoothstep(0.32, 0.0, t)
+
+    def B(s):
+        return -H / 2 + en(s, 3) + 0.06 * smoothstep(0.72, 1.0, s)
+
+    def T(s):
+        return H / 2 + en(s, 4, 1.4)
+    grid = []
+    for i in range(NU + 1):
+        s = i / NU
+        col = []
+        for j in range(NV + 1):
+            t = j / NV
+            x = lerp(L(t), R(t), s)
+            z = lerp(B(s), T(s), t)
+            if i in (0, NU) or j in (0, NV):         # frayed, fibrous tear
+                jx = rng.uniform(-0.004, 0.004)
+                jz = rng.uniform(-0.004, 0.004)
+                x += jx if i in (0, NU) else jx * 0.3
+                z += jz if j in (0, NV) else jz * 0.3
+            y = 0.016 * (2 * s - 1) ** 2 + 0.03 * smoothstep(0.55, 1.0, s) * smoothstep(0.5, 1.0, t) \
+                + 0.012 * smoothstep(0.3, 0.0, t) * smoothstep(0.4, 0.0, s)
+            col.append(V((x, y, z)))
+        grid.append(col)
+    xs = [p.x for c in grid for p in c]
+    zs = [p.z for c in grid for p in c]
+    ys = [p.y for c in grid for p in c]
+    off = V((-(max(xs) + min(xs)) / 2, -(max(ys) + min(ys)) / 2 - TH / 2, -(max(zs) + min(zs)) / 2))
+    grid = [[p + off for p in c] for c in grid]
+    # the painted image (linear colours)
+    sky_hi, sky_lo = hexcol('#5f8fcc'), hexcol('#c3d8ec')
+    sand_hi, sand_lo = hexcol('#dcab5c'), hexcol('#a8773c')
+    black = hexcol('#141318')
+
+    def painted(p, s, t):
+        hz = -0.02 + 0.012 * math.sin(p.x * 9.0)
+        if p.z > hz:
+            c = mix3(sky_lo, sky_hi, smoothstep(hz, H / 2, p.z))
+            k = 1.0 + 0.16 * noise.noise(V((p.x * 7.0, p.z * 34.0, 1.0))) + \
+                0.08 * noise.noise(V((p.x * 23.0, p.z * 9.0, 4.0)))
+            c = mix3(c, hexcol('#e9eef2'), 0.35 * max(0.0, noise.noise(V((p.x * 5.0, p.z * 11.0, 7.0)))))
+        else:
+            c = mix3(sand_hi, sand_lo, smoothstep(hz, -H / 2, p.z))
+            k = 1.0 + 0.2 * noise.noise(V(((p.x + p.z) * 26.0, (p.x - p.z) * 5.0, 3.0)))
+        c = mix3(c, sand_hi, 0.6 * smoothstep(0.012, 0.0, abs(p.z - hz)))
+        hx, hzc = 0.165, 0.035
+        dome = ((p.x - hx) / 0.08) ** 2 + ((p.z - hzc) / 0.085) ** 2
+        brim = ((p.x - hx) / 0.13) ** 2 + ((p.z - hzc + 0.004) / 0.016) ** 2
+        hat = max(smoothstep(1.1, 0.9, dome) * smoothstep(hzc - 0.01, hzc, p.z), smoothstep(1.12, 0.88, brim))
+        c = mix3(c, black, 0.97 * hat)
+        return (min(1.0, c[0] * k), min(1.0, c[1] * k), min(1.0, c[2] * k))
+    front = bmesh.new()
+    fv = [[front.verts.new(p) for p in c] for c in grid]
+    for i in range(NU):
+        for j in range(NV):
+            front.faces.new([fv[i][j], fv[i + 1][j], fv[i + 1][j + 1], fv[i][j + 1]])
+    set_smooth(front)
+    cols = [painted(grid[i][j], i / NU, j / NV) for i in range(NU + 1) for j in range(NV + 1)]
+    back = bmesh.new()
+    bv = [[back.verts.new(p + V((0, TH, 0))) for p in c] for c in grid]
+    for i in range(NU):
+        for j in range(NV):
+            back.faces.new([bv[i][j], bv[i][j + 1], bv[i + 1][j + 1], bv[i + 1][j]])
+    ring = [(i, 0) for i in range(NU)] + [(NU, j) for j in range(NV)] + \
+           [(i, NV) for i in range(NU, 0, -1)] + [(0, j) for j in range(NV, 0, -1)]
+    rim = [(back.verts.new(grid[i][j]), bv[i][j]) for (i, j) in ring]
+    for k in range(len(rim)):
+        a0, a1 = rim[k]
+        b0, b1 = rim[(k + 1) % len(rim)]
+        back.faces.new([a0, b0, b1, a1])
+    set_smooth(back)
+    mb = MB()
+    mb.add(front, paint, vtint=cols)
+    mb.add(back, linen, tint=lambda co: grey(0.9 + 0.1 * noise.noise(co * 60.0)))
+    corner = grid[2][NV - 2]
+    head = bm_lathe([(0, 0), (0.011, 0), (0.0105, 0.0015), (0.008, 0.0035), (0, 0.0045)], segs=16)
+    rot(head, math.pi / 2, 'X')
+    mb.add(move(head, corner + V((0, -0.0004, 0))), brass)
+    pin = bm_lathe([(0, 0.0), (0.0016, 0.0), (0.0012, 0.018), (0, 0.021)], segs=6)
+    rot(pin, -math.pi / 2, 'X')
+    mb.add(move(pin, corner), brass)
+    finish(mb, 'CanvasScrap', sharp=60)
+
+
+def build_night_light(P):
+    """The narrator: Odile's window candle, floating in a squat preserving jar."""
+    glass = material('JarGlass', '#d9efe7', 0.0, 0.05, alpha=0.3)
+    tin = material('Tin', '#aeaea8', 0.9, 0.38)
+    wire = material('Wire', '#77736b', 0.85, 0.42)
+    wax = material('Wax', '#f3e9d0', 0.0, 0.42)                       # shared with Candle
+    flame = material('Flame', '#ffbe5a', 0.0, 0.5, emit='#ff8f24', strength=5.0)
+    wick = material('Wick', '#2a2018', 0.0, 0.9)
+    rng = random.Random(1961)
+    mb = MB()
+    jar = bm_lathe([(0, -0.095), (0.066, -0.095), (0.08, -0.091), (0.0855, -0.078), (0.087, -0.03),
+                    (0.086, 0.03), (0.081, 0.05), (0.07, 0.064), (0.0625, 0.071), (0.0625, 0.092),
+                    (0.0605, 0.096), (0.0575, 0.094), (0.0575, 0.072), (0.065, 0.064), (0.077, 0.049),
+                    (0.0825, 0.03), (0.0835, -0.03), (0.0825, -0.076), (0.078, -0.087), (0.064, -0.0905),
+                    (0, -0.0905)], segs=48)
+    mb.add(jar, glass, tint=lambda co: grey(1.0 - 0.1 * smoothstep(-0.07, -0.095, co.z)))
+
+    def lid_v(t, r, z):
+        rr = r
+        if r > 0.068 and 0.081 < z < 0.102:
+            rr = r * (1 + 0.016 * math.cos(48 * t))
+        x, y, zz = rr * math.cos(t), rr * math.sin(t), z
+        if z > 0.104:
+            zz -= 0.0045 * math.exp(-((x - 0.022) ** 2 + (y + 0.024) ** 2) / 0.013 ** 2)
+        return (x, y, zz)
+    lid = bm_lathe([(0, 0.099), (0.059, 0.099), (0.0605, 0.095), (0.0605, 0.08), (0.0665, 0.0775),
+                    (0.0688, 0.08), (0.0688, 0.1025), (0.0668, 0.1065), (0.06, 0.1085), (0.04, 0.1095),
+                    (0.018, 0.1098), (0, 0.11)], segs=64, vfun=lid_v)
+    mb.add(lid, tin, tint=lambda co: grey(1.0 - 0.3 * max(0.0, fbm(co * 70.0, 2))) if co.z > 0.1 else
+           (0.92, 0.9, 0.86))
+    # neck wire with two ears and a bail arching over the lid (tipped back a little)
+    mb.add(bm_tube([(0.0645 * math.cos(TAU * k / 40), 0.0645 * math.sin(TAU * k / 40), 0.0725)
+                    for k in range(40)], 0.0022, sides=6, closed=True, fixed_b=(0, 0, 1)), wire)
+    for sx in (-1, 1):
+        mb.add(bm_tube([(sx * (0.0715 + 0.0065 * math.cos(TAU * k / 16)), 0, 0.0725 + 0.0065 *
+                         math.sin(TAU * k / 16)) for k in range(16)], 0.002, sides=6, closed=True,
+                       fixed_b=(0, 1, 0)), wire)
+    bail = [(0.0715 * math.cos(math.pi * k / 20), 0.0, 0.0725 + 0.09 * math.sin(math.pi * k / 20))
+            for k in range(21)]
+    bail_bm = bm_tube(bail, 0.0024, sides=6)
+    rot(bail_bm, math.radians(-14), 'X', center=(0, 0, 0.0725))
+    mb.add(bail_bm, wire)
+    # half-melted stub, pooled on the floor of the jar
+    def stub_v(t, r, z):
+        rr, zz = r, z
+        if z < -0.081:
+            rr = r * (1 + 0.16 * math.sin(3 * t + 0.4) + 0.07 * math.sin(5 * t + 1.1))
+        if z > -0.046:
+            zz = z + 0.007 * math.sin(t + 0.6) + 0.003 * math.sin(3 * t + 1.0)
+        return (rr * math.cos(t), rr * math.sin(t), zz)
+    stub = bm_lathe([(0, -0.0903), (0.05, -0.0903), (0.058, -0.0885), (0.053, -0.085), (0.036, -0.082),
+                     (0.029, -0.078), (0.028, -0.06), (0.0285, -0.044), (0.0265, -0.039), (0.018, -0.037),
+                     (0.007, -0.041), (0, -0.042)], segs=28, vfun=stub_v)
+    mb.add(stub, wax)
+    for k in range(4):
+        th = TAU * k / 4 + rng.uniform(-0.4, 0.4)
+        L = rng.uniform(0.018, 0.04)
+        pts = [((0.029) * math.cos(th), 0.029 * math.sin(th), -0.04 - L * i / 6) for i in range(7)]
+        mb.add(bm_tube(pts, [0.0035, 0.004, 0.0042, 0.0045, 0.005, 0.0055, 0.0], sides=6), wax)
+    mb.add(bm_tube([(0, 0, -0.042), (0, 0, -0.034), (0.0015, 0, -0.029)], [0.0016, 0.0015, 0.001], sides=5),
+           wick)
+    finish(mb, 'NightLight', sharp=50, vfn=lambda co, n, f: grey(1.0 - 0.15 * smoothstep(0.0, -1.0, n.z)))
+    fb = MB()
+    base = V((0.0015, 0.0, -0.0305))
+    fl = bm_lathe([(0, 0), (0.006, 0.003), (0.011, 0.013), (0.0125, 0.025), (0.011, 0.036),
+                   (0.0075, 0.047), (0.0035, 0.056), (0, 0.063)], segs=18, sy=0.85)
+    fb.add(move(fl, base), flame)
+    finish(fb, 'NightLight_Flame', pivot=base, parent='NightLight', sharp=None)
+
+
+def drape_box(nu, nv, u0, u1, v0, v1, x0, x1, y0, y1, top, rho, amp, seed, freq=10.0, flare=0.0, skew=0.0,
+              back_amp=1.0):
+    """Cloth thrown over the rectangle [x0,x1] x [y0,y1] at height `top`,
+    hanging on every side.  Grid (u, v) are flat-sheet coordinates.  flare
+    swings the front (-Y) hem outward, skew lifts one side of the hem and
+    back_amp scales the folds of the flap hanging behind (+Y)."""
+    bm = bm_grid(nu, nv, u0, u1, v0, v1)
+    ph = seed * 1.7
+    arc = math.pi * rho / 2
+    for v in bm.verts:
+        u, w = v.co.x, v.co.y
+        bx, by = clamp(u, x0, x1), clamp(w, y0, y1)
+        ex, ey = abs(u - bx), abs(w - by)
+        e = math.hypot(ex, ey)
+        if e <= 1e-9:
+            v.co = V((u, w, top))
+            continue
+        d = V(((u - bx) / e, (w - by) / e, 0.0))
+        if e < arc:
+            ang = e / rho
+            h, dz, hang = rho * math.sin(ang), rho * (1 - math.cos(ang)), 0.0
+        else:
+            h, dz, hang = rho, rho + (e - arc), e - arc
+        s = u if ey >= ex else w
+        fold = amp * smoothstep(0.0, 0.35, hang) * (0.55 * math.sin(freq * s + ph) +
+                                                    0.3 * math.sin(2.3 * freq * s + 2 * ph) +
+                                                    0.15 * math.sin(5.1 * freq * s + 3 * ph))
+        front = d.y < -0.5
+        if d.y > 0.5:
+            fold *= back_amp
+        out = h + fold * (1 + 0.6 * smoothstep(0.3, 1.0, hang)) + (flare * hang * hang if front else 0.0)
+        if flare and front:
+            # tension folds radiating from the two top corners of whatever it hangs over
+            for cx_ in (x0, x1):
+                dxc, dzc = bx - cx_, hang
+                dist = math.hypot(dxc, dzc)
+                ang = math.atan2(dzc, abs(dxc) + 1e-6)
+                out += 0.6 * amp * math.sin(9.0 * ang + ph) * smoothstep(0.05, 0.3, dist) * \
+                    (1.0 - smoothstep(0.45, 0.8, dist))
+        if flare:
+            out = max(out, 0.6 * h)        # never sink into the canvas it hangs over
+        hem = 0.02 * math.sin(7.0 * s + ph) * smoothstep(0.6, 1.0, hang)
+        v.co = V((bx, by, top - dz + skew * u * smoothstep(0.2, 1.0, hang) + hem)) + d * out
+    set_smooth(bm)
+    return bm
+
+
+def build_easel(P):
+    """The ending: the unfinished painting on its easel, under a dust sheet."""
+    wood = material('EaselWood', '#a8763f', 0.0, 0.55)
+    linen = material('Linen', '#d8cbaf', 0.0, 0.95)
+    painting = material('Painting', '#ffffff', 0.0, 0.8)
+    brass, sheet = P['brass'], P['sheet']
+    H, tray_top, cf, cd = 1.95, 0.74, -0.1, 0.025
+    CW, CH = 0.8, 1.0
+    mb = MB()
+    easel_stand(mb, wood, brass, H, tray_top, cf, cd, lean=0.03, back_y=0.6, mast_top=H - 0.08)
+    x0, x1, z0, z1 = -CW / 2, CW / 2, tray_top, tray_top + CH
+
+    def uvf(co):
+        return ((co.x - x0) / CW, (co.z - z0) / CH)
+    cb = MB()
+    q = bmesh.new()
+    q.faces.new([q.verts.new((x0, cf, z0)), q.verts.new((x1, cf, z0)), q.verts.new((x1, cf, z1)),
+                 q.verts.new((x0, cf, z1))])
+    cb.add(q, painting, smooth=False, uv=uvf)
+    sides = bm_box_mm((x0, cf, z0), (x1, cf + cd, z1), smooth=False)
+    sides.normal_update()
+    bmesh.ops.delete(sides, geom=[f for f in sides.faces if abs(f.normal.y) > 0.9], context='FACES_ONLY')
+    cb.add(sides, linen, uv=uvf)
+    bk = bmesh.new()
+    bk.faces.new([bk.verts.new((x0, cf + 0.003, z0)), bk.verts.new((x0, cf + 0.003, z1)),
+                  bk.verts.new((x1, cf + 0.003, z1)), bk.verts.new((x1, cf + 0.003, z0))])
+    cb.add(bk, linen, smooth=False, uv=uvf, tint=(0.85, 0.82, 0.78))
+    g, sw = 0.002, 0.045
+    for (a, b_) in (((x0 + g, z0 + g), (x1 - g, z0 + sw)), ((x0 + g, z1 - sw), (x1 - g, z1 - g)),
+                    ((x0 + g, z0 + sw), (x0 + sw, z1 - sw)), ((x1 - sw, z0 + sw), (x1 - g, z1 - sw)),
+                    ((-0.02, z0 + sw), (0.02, z1 - sw))):
+        cb.add(bm_box_mm((a[0], cf + 0.004, a[1]), (b_[0], cf + cd - 0.001, b_[1]), bevel=0.002, segs=1),
+               wood, uv=uvf, tint=(0.8, 0.75, 0.7))
+    sb = MB()
+    rho = 0.03
+    Lf = rho * math.pi / 2 + 1.02          # front hang: bellies out over the ledge lip
+    Lb = rho * math.pi / 2 + 0.42          # shorter flap behind the canvas
+    Ls = rho * math.pi / 2 + 0.3           # sides
+    cloth = drape_box(40, 58, x0 - Ls - 0.05, x1 + Ls, cf - Lf, cf + cd + Lb, x0 - 0.004, x1 + 0.004,
+                      cf - 0.004, cf + cd + 0.004, z1 + 0.004, rho, 0.034, 5, freq=9.0, flare=0.14,
+                      skew=0.045, back_amp=0.35)
+    ledge = [v.co for v in cloth.verts if v.co.z < tray_top + 0.04 and abs(v.co.x) < 0.46 and
+             cf - 0.087 < v.co.y < cf + cd + 0.02]
+    assert not ledge, 'dust sheet intersects the ledge (%d verts)' % len(ledge)
+    cloth_tree = BVHTree.FromBMesh(cloth)
+    for part, label in ((mb.bm, 'easel'), (cb.bm, 'canvas')):
+        hits = cloth_tree.overlap(BVHTree.FromBMesh(part))
+        assert not hits, 'dust sheet intersects the %s (%d triangle pairs)' % (label, len(hits))
+    sb.add(cloth, sheet)
+    pivots = recenter([mb, cb, sb], [(0, cf, (z0 + z1) / 2), (0, cf + cd / 2, z1)], ref=[mb])
+    finish(mb, 'Easel', sharp=40, weighted=True, vfn=ao_fn(h=0.25, amt=0.25))
+    finish(cb, 'Easel_Canvas', pivot=pivots[0], parent='Easel', sharp=40)
+    finish(sb, 'Easel_Sheet', pivot=pivots[1], parent='Easel', sharp=None,
+           vfn=lambda co, n, f: grey(1.0 - 0.18 * smoothstep(0.2, -0.9, n.z) - 0.1 * (1 - abs(n.z)) *
+                                     max(0.0, -n.y)))
+
+
+# ============================================================================
 # build / export / verify
 # ============================================================================
 BUILDERS = [
@@ -2661,6 +3207,8 @@ BUILDERS = [
     ('Door', build_door), ('Rocks', build_rocks), ('Platform', build_platform), ('RailPost', build_railpost),
     ('Train', build_train), ('Apple', build_apple), ('Sleepwalker', build_sleepwalker),
     ('Unwatched', build_unwatched),
+    ('Frame', build_frame), ('PortalRing', build_portal_ring), ('CanvasScrap', build_canvas_scrap),
+    ('NightLight', build_night_light), ('Easel', build_easel),
 ]
 
 # (name, parent, expected world pivot or None)
@@ -2687,16 +3235,26 @@ CONTRACT = [
     ('UW_Iris', 'UW_Body', (0, 0, 6.5)), ('UW_LidTop', 'UW_Body', (0, 0, 6.5)),
     ('UW_LidBottom', 'UW_Body', (0, 0, 6.5)),
 ] + [('UW_Leg%d' % i, 'UW_Body', None) for i in range(4)] + \
-    [('UW_Leg%d_Lower' % i, 'UW_Leg%d' % i, None) for i in range(4)]
+    [('UW_Leg%d_Lower' % i, 'UW_Leg%d' % i, None) for i in range(4)] + [
+    ('Frame', None, (0, 0, 0)), ('Frame_Opening', 'Frame', None), ('PortalRing', None, (0, 0, 0)),
+    ('CanvasScrap', None, (0, 0, 0)), ('NightLight', None, (0, 0, 0)),
+    ('NightLight_Flame', 'NightLight', None), ('Easel', None, (0, 0, 0)), ('Easel_Canvas', 'Easel', None),
+    ('Easel_Sheet', 'Easel', None)]
+
+# round-2 checks: blended materials, UV'd meshes (node, material -> expected UV range), triangle caps
+BLEND_MATERIALS = ['FrameOpening', 'JarGlass']
+UV_CHECKS = [('Frame_Opening', 'FrameOpening'), ('Easel_Canvas', 'Painting')]
+TRI_CAPS = {'PortalRing': 4000, 'CanvasScrap': 1500}
 
 REQUIRED_MATERIALS = ['MirrorGlass', 'Flame', 'Seeds', 'WallInterior', 'StoneInterior', 'WoodInterior',
-                      'EnemyCore', 'Mannequin', 'Sheet', 'EyeWhite', 'Flesh', 'BossLeg', 'Iris', 'DoorLight']
+                      'EnemyCore', 'Mannequin', 'Sheet', 'EyeWhite', 'Flesh', 'BossLeg', 'Iris', 'DoorLight',
+                      'FrameOpening', 'PortalGilt', 'JarGlass', 'Painting']
 
 
 def export(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     bpy.ops.export_scene.gltf(filepath=path, export_format='GLB', export_yup=True, export_apply=True,
-                              export_texcoords=False, export_normals=True, export_cameras=False,
+                              export_texcoords=True, export_normals=True, export_cameras=False,
                               export_lights=False, export_vertex_color='MATERIAL',
                               export_animations=False, export_extras=False)
 
@@ -2705,6 +3263,19 @@ def read_glb_json(path):
     data = open(path, 'rb').read()
     ln = struct.unpack('<I', data[12:16])[0]
     return json.loads(data[20:20 + ln]), len(data)
+
+
+def read_accessor(path, js, idx):
+    """Float VEC2/VEC3 accessor -> list of tuples (for UV range checks)."""
+    data = open(path, 'rb').read()
+    ln = struct.unpack('<I', data[12:16])[0]
+    bin_start = 20 + ln + 8
+    acc = js['accessors'][idx]
+    bv = js['bufferViews'][acc['bufferView']]
+    n = {'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'SCALAR': 1}[acc['type']]
+    stride = bv.get('byteStride', 4 * n)
+    off = bin_start + bv.get('byteOffset', 0) + acc.get('byteOffset', 0)
+    return [struct.unpack_from('<%df' % n, data, off + i * stride) for i in range(acc['count'])]
 
 
 def world_bbox(ob):
@@ -2738,6 +3309,32 @@ def verify(path):
         per_mesh[m['name']] = t
         tris += t
     mats = [m['name'] for m in js.get('materials', [])]
+    round2_errors = []
+    for m in js.get('materials', []):
+        if m['name'] in BLEND_MATERIALS:
+            print('   %-12s alphaMode=%s alpha=%.2f doubleSided=%s' % (
+                m['name'], m.get('alphaMode'), m['pbrMetallicRoughness'].get('baseColorFactor', [1] * 4)[3],
+                m.get('doubleSided', False)))
+            if m.get('alphaMode') != 'BLEND':
+                round2_errors.append('%s is not alpha-blended' % m['name'])
+    uv_meshes = sorted({m['name'] for m in js['meshes'] for pr in m['primitives'] if 'TEXCOORD_0' in pr['attributes']})
+    print('meshes with TEXCOORD_0:', uv_meshes)
+    for node_name, mat_name in UV_CHECKS:
+        nd = next((n for n in js['nodes'] if n.get('name') == node_name), None)
+        if nd is None:
+            continue
+        for pr in js['meshes'][nd['mesh']]['primitives']:
+            if js['materials'][pr['material']]['name'] != mat_name:
+                continue
+            if 'TEXCOORD_0' not in pr['attributes']:
+                round2_errors.append('%s has no UVs' % node_name)
+                continue
+            uvs = read_accessor(path, js, pr['attributes']['TEXCOORD_0'])
+            us, vs = [u for u, v in uvs], [v for u, v in uvs]
+            print('   %-14s %-12s UV u[%.3f..%.3f] v[%.3f..%.3f] (glTF: v=0 at the top edge)' % (
+                node_name, mat_name, min(us), max(us), min(vs), max(vs)))
+            if abs(min(us)) > 1e-4 or abs(max(us) - 1) > 1e-4 or abs(min(vs)) > 1e-4 or abs(max(vs) - 1) > 1e-4:
+                round2_errors.append('%s UVs do not span 0..1' % node_name)
     print('file size: %.2f MB   triangles: %d   meshes: %d   nodes: %d   materials: %d' % (
         size / 1e6, tris, len(js['meshes']), len(js['nodes']), len(mats)))
     print('meshes without COLOR_0:', sorted(set(no_col)) or 'none')
@@ -2793,6 +3390,13 @@ def verify(path):
         t = tuple(round(x, 3) for x in o.matrix_world.translation)
         print('%-20s %-18s %8.3f %8.3f %8.3f   %s  z[%.3f..%.3f]' % (o.name, o.parent.name if o.parent else '-',
               d.x, d.y, d.z, t, mn.z, mx.z))
+    for nm, cap in TRI_CAPS.items():
+        o = obs.get(nm)
+        if o is not None:
+            t = sum(node_tris.get(h.name, 0) for h in [o] + list(o.children_recursive))
+            if t >= cap:
+                errors.append('%s has %d triangles (cap %d)' % (nm, t, cap))
+    errors += round2_errors
     print('\nCONTRACT CHECK: %s' % ('PASS' if not errors else 'FAIL'))
     for e in errors:
         print('  ' + e)

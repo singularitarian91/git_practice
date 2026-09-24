@@ -1,6 +1,6 @@
 // Shared constants, tuning and the property catalogue.
 
-export const PROPS = ['melting', 'floating', 'reflecting', 'burning', 'heavy', 'sleeping', 'multiplying', 'hollow', 'bursting'];
+export const PROPS = ['melting', 'floating', 'reflecting', 'burning', 'heavy', 'framed', 'sleeping', 'multiplying', 'hollow', 'bursting'];
 
 // colour (CSS + three), the object you take it from, one-line description of what it does per target kind
 export const PROP_INFO = {
@@ -28,6 +28,11 @@ export const PROP_INFO = {
     color: '#9aa3b5', label: 'Heavy', source: 'Anvil',
     blurb: 'Weighs as much as an anvil.',
     target: 'Plummets, crushes and smashes. Cancels floating.', self: 'Earth-shaking ground pounds, dashes smash walls.', rounds: 'Rounds knock things flying and crack walls.',
+  },
+  framed: {
+    color: '#8fe36b', label: 'Framed', source: 'Empty frame',
+    blurb: 'Becomes a window onto somewhere else.',
+    target: 'Frame two surfaces; step into one, come out of the other. Speed is kept.', self: 'Marks a return point. Use it again to step back through.', rounds: 'Every shot hangs a portal where it lands.',
   },
   sleeping: {
     color: '#a58bff', label: 'Sleeping', source: 'Bed',
@@ -58,6 +63,7 @@ export const PROP_ICON = {
   reflecting: '<path d="M12 2l7 10-7 10-7-10z"/><path d="M9 9l3-3M9 13l5-5"/>',
   burning: '<path d="M12 22c4 0 7-3 7-7 0-5-5-7-5-12-3 2-4 5-4 7-1-1-2-2-2-4-2 2-3 5-3 9 0 4 3 7 7 7z"/><path d="M12 22c-2 0-3-1.5-3-3.5S12 14 12 14s3 2.5 3 4.5-1 3.5-3 3.5z"/>',
   heavy: '<path d="M3 9h14l4-3v3l-4 3H6z"/><path d="M8 12v5h8v-5M5 20h14"/>',
+  framed: '<ellipse cx="12" cy="12" rx="6.5" ry="9"/><ellipse cx="12" cy="12" rx="3.8" ry="6"/><path d="M12 1.5v1.5"/>',
   sleeping: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/><path d="M15 3h4l-4 4h4"/>',
   multiplying: '<circle cx="8" cy="10" r="4"/><circle cx="16" cy="10" r="4"/><circle cx="12" cy="16" r="4"/>',
   hollow: '<circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/><circle cx="12" cy="12" r="3"/>',

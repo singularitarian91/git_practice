@@ -192,6 +192,7 @@ export const CATALOG = {
   BowlerHat: { innate: ['multiplying'], hp: 15, density: 0.5, flammable: true, dust: '#333' },
   Birdcage: { innate: ['hollow'], hp: 40, density: 0.6, dust: '#d6a84e' },
   Pomegranate: { innate: ['bursting'], hp: 10, density: 0.8, meltColor: '#b3263b', dust: '#ff6a8a' },
+  Frame: { innate: ['framed'], hp: 50, anchored: true, dust: '#d6a84e' },
   Drawers: { hp: 45, density: 1.2, flammable: true, fracture: 'Drawers_Fractured', dust: '#8b5a2b' },
   Wall: { kind: 'wall', anchored: true, hp: 160, fracture: 'Wall_Fractured', group: G.WALL, dust: '#e8d5b0', meltColor: '#d9c29a' },
   Column: { kind: 'wall', anchored: true, hp: 120, fracture: 'Column_Fractured', group: G.WALL, dust: '#efe3c8', meltColor: '#e2d3b4' },
@@ -283,6 +284,53 @@ export class Pickup {
       this.game.vfx.propertyBurst(this.obj.position, 'floating', 0.5);
       this.dead = true;
       this.obj.parent?.remove(this.obj);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Canvas scraps: torn pieces of the painting, hidden behind parkour and combos.
+// A shaft of warm light marks each one.
+// ---------------------------------------------------------------------------
+export class ScrapPickup {
+  constructor(game, pos, scrap) {
+    this.game = game; this.scrap = scrap; this.dead = false;
+    this.obj = new THREE.Group();
+    this.obj.position.copy(pos);
+    this.base = pos.clone();
+    let piece;
+    if (game.assets.has('CanvasScrap')) piece = game.assets.clone('CanvasScrap');
+    else piece = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.32), new THREE.MeshStandardMaterial({ color: 0xd9cdb2, side: THREE.DoubleSide }));
+    piece.scale.setScalar(1.7);
+    this.piece = piece;
+    this.obj.add(piece);
+    const beamMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd27a'), transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.55, 9, 16, 1, true), beamMat);
+    beam.position.y = 4.2;
+    this.beam = beam;
+    this.obj.add(beam);
+    game.scene.add(this.obj);
+    this.t = Math.random() * 6;
+  }
+  update(dt) {
+    const game = this.game;
+    this.t += dt;
+    this.obj.position.y = this.base.y + Math.sin(this.t * 1.6) * 0.1;
+    this.piece.rotation.y += dt * 0.9;
+    this.piece.rotation.z = Math.sin(this.t * 1.1) * 0.15;
+    this.beam.material.opacity = 0.14 + Math.sin(this.t * 2.3) * 0.05;
+    if (Math.random() < dt * 10) game.vfx.add.spawn({ x: this.obj.position.x + (Math.random() - 0.5) * 0.6, y: this.obj.position.y - 0.3, z: this.obj.position.z + (Math.random() - 0.5) * 0.6, vy: 0.9, color: new THREE.Color('#ffd27a').multiplyScalar(3), alpha: 0.9, alpha1: 0, size: 0.06, life: 1.4 });
+    const p = game.player;
+    if (p && !p.dead && p.pos.clone().setY(p.pos.y + 0.9).distanceTo(this.obj.position) < 1.5) {
+      this.dead = true;
+      this.obj.parent?.remove(this.obj);
+      if (game.meta.addScrap(this.scrap.id)) {
+        game.ui.loreCard(this.scrap);
+        game.narrator.say('scrap');
+        game.audio.sfx('lore');
+        game.vfx.propertyBurst(this.obj.position, 'multiplying', 1.2);
+        game.stats.scraps = (game.stats.scraps || 0) + 1;
+      }
     }
   }
 }

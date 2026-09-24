@@ -139,7 +139,7 @@ export class Destruction {
   // Explosion: visuals, sound, impulses, damage, destruction, carried properties
   explode(pos, o = {}) {
     const game = this.game;
-    const R = o.radius || 4;
+    const R = (o.radius || 4) * (game.run?.mods.explosion ?? 1);
     const dmg = o.damage ?? 60;
     game.vfx.explosion(pos, R, { implode: o.implode });
     game.audio.sfx('explosion', { position: pos, gain: Math.min(2, R / 3.5) });

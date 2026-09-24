@@ -148,6 +148,7 @@ const PROPERTIES = {
   burning: { degree: 1, oct: 0 }, // 9th — crackly saw
   heavy: { degree: 0, oct: -1 }, // root, low — square
   sleeping: { degree: 5, oct: 0 }, // 6th — muted pluck
+  framed: { degree: 3, oct: 1 }, // 4th, high — a hollow glass "window" ping
   multiplying: { degree: 3, oct: 0 }, // 11th — triple-echo blip
   hollow: { degree: 0, oct: 0 }, // root — wood block
   bursting: { degree: 4, oct: 1 }, // 5th, high — noisy rising pop
@@ -156,7 +157,7 @@ const PROPERTIES = {
 /** Property names double as sfx names (the world reacting to a property being applied). */
 const PROPERTY_SFX = {
   melting: 'melt', floating: 'float', reflecting: 'reflect', burning: 'burn', heavy: 'heavy',
-  sleeping: 'sleep', multiplying: 'multiply', hollow: 'hollow', bursting: 'burst',
+  sleeping: 'sleep', multiplying: 'multiply', hollow: 'hollow', bursting: 'burst', framed: 'portal',
 };
 
 /** Rate limits: max concurrent voices of that name, min seconds between triggers, steal priority. */
@@ -185,6 +186,12 @@ const SFX_LIMITS = {
   slide: { max: 2, gap: 0.1, prio: 1 },
   reloadSpin: { max: 1, gap: 0.05, prio: 2 },
   land: { max: 3, gap: 0.05, prio: 1 },
+  slash: { max: 3, gap: 0.04, prio: 2 },
+  slashHit: { max: 4, gap: 0.02, prio: 2 },
+  deflect: { max: 3, gap: 0.03, prio: 3 },
+  guardHit: { max: 3, gap: 0.04, prio: 2 },
+  babble: { max: 2, gap: 0.035, prio: 0 },
+  portal: { max: 3, gap: 0.05, prio: 2 },
 };
 const DEFAULT_LIMIT = { max: 6, gap: 0.01, prio: 1 };
 const MELODIC = new Set(['fire', 'give', 'take', 'infuse']); // advance the weapon melody
@@ -1893,6 +1900,10 @@ export class DreamAudio {
         v.tone('triangle', f, t, peak * 1.1, 0.005, 0.38, { dest: lp });
         break;
       }
+      case 'framed':
+        v.fm(f, t, peak * 0.8, 0.002, 0.7, { ratio: 1.5, index: 1.8 });
+        v.tone('sine', f * 1.5, t + 0.05, peak * 0.4, 0.004, 0.5);
+        break;
       case 'multiplying':
         [0, 0.085, 0.17].forEach((dt, i) => v.tone('sine', f, t + dt, peak * [1, 0.55, 0.3][i], 0.002, 0.09));
         break;
@@ -2382,6 +2393,93 @@ const SFX = {
     v.noiseHit('white', t, 0.3, 0.0005, 0.03, { type: 'bandpass', f: 1800, Q: 1 });
     v.tone('sine', 70, t, 0.4, 0.002, 0.3, { to: 45 });
     v.send(0.3);
+  },
+
+
+  // ── Combat v2 ──────────────────────────────────────────────────────────────
+  slash(e, v, t) {
+    // Blade whoosh: band-passed noise sweeping down + a thin metallic swish.
+    v.noiseHit('pink', t, 0.5, 0.01, 0.16, { type: 'bandpass', f: 4200, to: 900, Q: 1.4 });
+    v.noiseHit('white', t + 0.02, 0.18, 0.004, 0.08, { type: 'highpass', f: 6000 });
+    v.fm(rand(2400, 2900), t + 0.03, 0.04, 0.002, 0.18, { ratio: 1.41, index: 0.8 });
+  },
+  slashHit(e, v, t) {
+    // Meaty porcelain thunk.
+    v.tone('sine', 190, t, 0.5, 0.002, 0.12, { to: 70 });
+    v.noiseHit('brown', t, 0.4, 0.001, 0.07, { type: 'lowpass', f: 1200 });
+    v.fm(rand(3000, 3800), t, 0.14, 0.0008, 0.09, { ratio: 2.41, index: 1.4 });
+  },
+  deflect(e, v, t) {
+    // The clang: bright inharmonic ring + spark crackle, pitched to the chord.
+    const f = mtof(e._ct(0, 1) + 12);
+    v.fm(f, t, 0.5, 0.0005, 1.1, { ratio: 2.76, index: 3.2 });
+    v.fm(f * 1.5, t, 0.22, 0.0005, 0.8, { ratio: 3.9, index: 2 });
+    v.tone('sine', f * 4.2, t, 0.08, 0.0005, 0.4);
+    v.noiseHit('white', t, 0.5, 0.0003, 0.05, { type: 'highpass', f: 5000 });
+    const times2 = [0.01, 0.03, 0.05, 0.08].map((x) => t + x);
+    v.pulses('white', times2, times2.map(() => rand(0.1, 0.25)), 0.004, { f: 7000, Q: 2 });
+    v.send(0.35);
+  },
+  guardHit(e, v, t) {
+    // Blocked, not deflected: duller clank.
+    v.fm(rand(700, 900), t, 0.3, 0.001, 0.25, { ratio: 1.9, index: 2 });
+    v.noiseHit('pink', t, 0.35, 0.001, 0.08, { type: 'bandpass', f: 1500, Q: 1 });
+    v.tone('sine', 110, t, 0.3, 0.002, 0.1, { to: 60 });
+  },
+  posture(e, v, t) {
+    // Posture broken: a struck gong with a falling tail.
+    const f0 = mtof(e._ct(0, -1));
+    v.fm(f0, t, 0.5, 0.002, 2.0, { ratio: 1.4, index: 3 });
+    v.tone('sine', f0 * 2.02, t, 0.2, 0.002, 1.4, { to: f0 * 1.9 });
+    v.noiseHit('white', t, 0.3, 0.001, 0.2, { type: 'bandpass', f: 3000, to: 900, Q: 2 });
+    v.send(0.45);
+  },
+  perilous(e, v, t) {
+    // Warning: a low minor-second stab and a high bell.
+    const r = e._ct(0, -2);
+    for (const iv of [0, 1]) v.tone('sawtooth', mtof(r + iv), t, 0.12, 0.004, 0.35, { dest: v.f('lowpass', 900, 1) });
+    v.fm(mtof(r + 36), t, 0.12, 0.001, 0.5, { ratio: 3.5, index: 2 });
+  },
+  deathblow(e, v, t) {
+    // Heavy impact, a rip, and a deep boom with a bright chord bloom.
+    v.tone('sine', 110, t, 0.9, 0.002, 0.35, { to: 38 });
+    v.noiseHit('brown', t, 0.7, 0.002, 0.3, { type: 'lowpass', f: 700 });
+    v.noiseHit('white', t + 0.12, 0.35, 0.02, 0.18, { type: 'bandpass', f: 2500, to: 600, Q: 1.5 });
+    const r = e._ct(0, 0);
+    [0, 7, 12, 16].forEach((iv, i) => v.fm(mtof(r + iv + 12), t + 0.2 + i * 0.03, 0.08, 0.004, 1.2, { ratio: 2, index: 1 }));
+    v.send(0.5);
+  },
+  pogo(e, v, t) {
+    // Springy clink off something's head.
+    v.fm(1800, t, 0.25, 0.0008, 0.18, { ratio: 1.5, index: 2 });
+    v.tone('triangle', 420, t, 0.2, 0.002, 0.18, { to: 900 });
+  },
+  focus(e, v, t) {
+    // Breath-like swell resolving into a warm chord.
+    v.noiseHit('pink', t, 0.25, 0.5, 0.4, { type: 'bandpass', f: 600, to: 1800, Q: 1 });
+    const r = e._ct(0, 0);
+    [0, 4, 7, 11].forEach((iv, i) => v.tone('sine', mtof(r + iv + 12), t + 0.5 + i * 0.05, 0.08, 0.02, 1.2));
+    v.send(0.5);
+  },
+  lore(e, v, t) {
+    // A page turned + a music-box figure.
+    v.noiseHit('pink', t, 0.3, 0.01, 0.12, { type: 'highpass', f: 2500 });
+    const r = e._ct(0, 1);
+    [0, 7, 4, 12, 11].forEach((iv, i) => v.fm(mtof(r + iv + 12), t + 0.1 + i * 0.13, 0.08, 0.002, 0.6, { ratio: 3, index: 1.2 }));
+    v.send(0.4);
+  },
+  babble(e, v, t, x) {
+    // The Night-Light's voice: a tiny formant syllable (pitch via opts.pitch).
+    const f = 520 * Math.pow(2, x.pitch / 12) * rand(0.94, 1.06);
+    const bp = v.f('bandpass', rand(900, 1600), 3);
+    v.tone('triangle', f, t, 0.12, 0.006, 0.07, { to: f * rand(0.9, 1.1), dest: bp });
+    v.tone('sine', f * 2, t, 0.03, 0.004, 0.05);
+  },
+  portal(e, v, t) {
+    // Passing through a frame: a rushing whoosh with a glass shimmer.
+    v.noiseHit('pink', t, 0.5, 0.02, 0.4, { type: 'bandpass', f: 400, to: 3000, Q: 1 });
+    v.fm(mtof(e._ct(0, 1) + 24), t + 0.05, 0.08, 0.004, 0.8, { ratio: 1.5, index: 2 });
+    v.send(0.4);
   },
 
   pickup(e, v, t) {

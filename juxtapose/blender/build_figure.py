@@ -81,6 +81,7 @@ mat('Glass', '#dff6ff', rough=0.05, alpha=0.35)
 mat('GunVial', '#9ffcff', rough=0.2, emit='#6ff0ff', strength=4.0)
 mat('GunGlow', '#9ffcff', rough=0.3, emit='#6ff0ff', strength=3.0)
 mat('Dark', '#0b0b0e', rough=0.8)
+mat('Steel', '#c9ced6', metal=1.0, rough=0.18)
 
 
 # --------------------------------------------------------------------------
@@ -266,6 +267,7 @@ BONES = [
     ('gunCylinder', 'gun', tuple(G(0, -0.062, 0.072))),
     ('gunBreak', 'gun', tuple(G(0, -0.1, 0.045))),
     ('gunVial', 'gun', tuple(G(0, -0.035, 0.104))),
+    ('gunBlade', 'gunBreak', tuple(G(0, -0.392, 0.024))),
     ('muzzleTake', 'gunBreak', tuple(G(0, -0.37, 0.104))),
     ('muzzleGive', 'gunBreak', tuple(G(0, -0.395, 0.05))),
 ]
@@ -409,6 +411,38 @@ box(brk, gl((0, -0.22, 0.077)), (0.008 * S, 0.17 * S, 0.02 * S), 'Brass', 0.002,
 box(brk, gl((0, -0.29, 0.127)), (0.005 * S, 0.012 * S, 0.02 * S), 'Brass', 0.001,
     rot=Matrix.Rotation(math.radians(90), 4, 'X'))
 
+# the palette-knife bayonet: hinged under the give barrel's muzzle, modelled deployed
+blade = part('Gun_Blade', 'gunBlade')
+cylinder(blade, gl((-0.012, -0.392, 0.024)), gl((0.012, -0.392, 0.024)), 0.009 * S, 'Brass', 12)
+box(blade, gl((0, -0.415, 0.02)), (0.012 * S, 0.05 * S, 0.014 * S), 'Brass', 0.003, rot=Matrix.Rotation(math.radians(90), 4, 'X'))
+# cranked neck then a long flexible trowel blade with a rounded tip
+box(blade, gl((0, -0.445, 0.012)), (0.006 * S, 0.03 * S, 0.01 * S), 'Iron', 0.002, rot=Matrix.Rotation(math.radians(90 + 20), 4, 'X'))
+bb = bmesh.new()
+outline = []
+L0, L1 = 0.46, 0.76
+for k in range(0, 13):
+    t = k / 12
+    y = -(L0 + (L1 - L0) * t)
+    w = 0.012 + 0.022 * max(0.0, math.sin(math.pi * min(1.0, t * 1.15))) ** 0.8
+    if t > 0.85:
+        w *= max(0.0, math.cos((t - 0.85) / 0.15 * math.pi / 2)) ** 0.5
+    w = max(w, 0.002)
+    outline.append((y, w))
+top, bot = [], []
+for y, w in outline:
+    top.append(bb.verts.new(G(-w, y, 0.004)))
+    bot.append(bb.verts.new(G(-w, y, -0.001)))
+for y, w in reversed(outline):
+    top.append(bb.verts.new(G(w, y, 0.004)))
+    bot.append(bb.verts.new(G(w, y, -0.001)))
+n = len(top)
+bb.faces.new(top)
+bb.faces.new(list(reversed(bot)))
+for i in range(n):
+    bb.faces.new((top[i], top[(i + 1) % n], bot[(i + 1) % n], bot[i]))
+bmesh.ops.recalc_face_normals(bb, faces=bb.faces)
+blade.merge(bb, 'Steel', smooth=False)
+
 vial = part('Gun_Vial', 'gunVial')
 lathe(vial, gl((0, -0.035, 0.104)), gl((0, -0.035, 0.18)),
       [(0, 0.0), (0.02, 0.016 * S), (0.1, 0.019 * S), (0.85, 0.019 * S), (0.95, 0.014 * S), (1, 0)], 'Glass', 18)
@@ -499,7 +533,7 @@ KEYED = [n for n, _, _ in BONES if n not in FA.PROCEDURAL_BONES]
 def apply_pose(pose):
     for n in KEYED:
         pb = arm.pose.bones[n]
-        rx, ry, rz = pose.get(n, (0, 0, 0))
+        rx, ry, rz = pose.get(n, FA.DEFAULTS.get(n, (0, 0, 0)))
         pb.rotation_quaternion = Euler((math.radians(rx), math.radians(ry), math.radians(rz)), 'XYZ').to_quaternion()
         pb.location = pose.get(n + '@loc', (0, 0, 0))
 
@@ -549,7 +583,10 @@ for pb in arm.pose.bones:
 # --------------------------------------------------------------------------
 if '--preview' in sys.argv:
     import preview_util
-    if '--gun' in sys.argv:
+    if '--combat' in sys.argv:
+        preview_util.render_pose_sheet(arm, FA, apply_pose, os.path.join(ROOT, 'docs', 'previews'), FPS,
+                                       cols=6, tag='combat', poses=FA.PREVIEW_COMBAT)
+    elif '--gun' in sys.argv:
         preview_util.render_pose_sheet(arm, FA, apply_pose, os.path.join(ROOT, 'docs', 'previews'), FPS,
                                        cols=4, tag='gun', poses=FA.PREVIEW_GUN, focus='gun')
     else:
@@ -572,3 +609,11 @@ bpy.ops.export_scene.gltf(
     export_rest_position_armature=True, export_skins=True,
 )
 print('exported', OUT, os.path.getsize(OUT) // 1024, 'KB')
+
+# --------------------------------------------------------------------------
+# Character sheet (optional): hero portrait, turnaround, moveset, gun
+# --------------------------------------------------------------------------
+if '--sheet' in sys.argv:
+    import character_sheet
+    parts = os.environ.get('SHEET_PARTS', '').split(',') if os.environ.get('SHEET_PARTS') else None
+    character_sheet.render_character_sheet(arm, FA, apply_pose, os.path.join(ROOT, 'docs', 'character'), parts)

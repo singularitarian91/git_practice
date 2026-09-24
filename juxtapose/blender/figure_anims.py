@@ -17,7 +17,9 @@ import math
 
 PROCEDURAL_BONES = {'root', 'scarf1', 'scarf2', 'scarf3', 'appleFace', 'muzzleTake', 'muzzleGive'}
 UPPER = ['chest', 'neck', 'head', 'upperarmL', 'forearmL', 'handL', 'upperarmR', 'forearmR', 'handR',
-         'gun', 'gunHammer', 'gunCylinder', 'gunBreak', 'gunVial']
+         'gun', 'gunHammer', 'gunCylinder', 'gunBreak', 'gunVial', 'gunBlade']
+# bones whose neutral pose isn't the rest pose: the bayonet is folded back under the barrel
+DEFAULTS = {'gunBlade': (178, 0, 0)}
 LOWER = ['hips', 'spine', 'thighL', 'shinL', 'footL', 'thighR', 'shinR', 'footR']
 
 TAU = 2 * math.pi
@@ -678,6 +680,215 @@ def Infuse(t):
     return p
 
 
+# ---------------------------------------------------------------------------
+# Melee, deflect, deathblow, focus (v2 combat)
+# The palette-knife bayonet unfolds from under the give barrel for these.
+# ---------------------------------------------------------------------------
+def blade_open(p, t, a=0.0, b=0.08):
+    p['gunBlade'] = (178 * (1 - seg(t, a, b)), 0, 0)
+
+
+def lerp3(a, b, k):
+    return tuple(x + (y - x) * k for x, y in zip(a, b))
+
+
+def Slash1(t):
+    """Forehand: wind up to the right, sweep across to the left."""
+    p = AimIdle(0)
+    blade_open(p, t)
+    wind = seg(t, 0.0, 0.2)
+    hit = seg(t, 0.2, 0.46)
+    back = seg(t, 0.62, 1.0)
+    ua = lerp3(lerp3((-86, -16, -4), (-78, -58, -12), wind), (-96, 72, 4), hit)
+    ua = lerp3(ua, (-88, 30, 0), back * 0.5)
+    p['upperarmR'] = ua
+    p['forearmR'] = lerp3(lerp3((-4, 0, 0), (-32, 0, 0), wind), (-4, 0, 0), hit)
+    p['handR'] = (-6 * hit, 0, 0)
+    p['chest'] = lerp3(lerp3((3, 18, 0), (2, -30, 0), wind), (6, 40, -4), hit)
+    p['head'] = lerp3((2, -10, 0), (4, -24, 0), hit)
+    p['upperarmL'] = lerp3((-58, -48, 8), (-18, 10, 42), hit)
+    p['forearmL'] = lerp3((-52, 0, 0), (-38, 0, 0), hit)
+    return p
+
+
+def Slash2(t):
+    """Backhand: from across the body, rising out to the right."""
+    p = AimIdle(0)
+    p['gunBlade'] = (0, 0, 0)
+    wind = seg(t, 0.0, 0.18)
+    hit = seg(t, 0.18, 0.44)
+    p['upperarmR'] = lerp3(lerp3((-96, 72, 4), (-66, 82, 14), wind), (-106, -62, -14), hit)
+    p['forearmR'] = lerp3(lerp3((-4, 0, 0), (-66, 0, 0), wind), (-6, 0, 0), hit)
+    p['handR'] = (0, 0, 0)
+    p['chest'] = lerp3(lerp3((6, 40, -4), (4, 44, 0), wind), (4, -34, 4), hit)
+    p['head'] = lerp3((4, -24, 0), (2, 20, 0), hit)
+    p['upperarmL'] = lerp3((-18, 10, 42), (-10, -10, 55), hit)
+    p['forearmL'] = (-35, 0, 0)
+    return p
+
+
+def Slash3(t):
+    """Two-handed overhead chop: the finisher of the combo."""
+    p = AimIdle(0)
+    p['gunBlade'] = (0, 0, 0)
+    up = seg(t, 0.0, 0.3)
+    chop = seg(t, 0.36, 0.56)
+    rec = seg(t, 0.7, 1.0)
+    p['upperarmR'] = lerp3(lerp3((-106, -62, -14), (-172, 8, 0), up), (-38, 6, 0), chop)
+    p['upperarmR'] = lerp3(p['upperarmR'], (-80, -10, 0), rec * 0.6)
+    p['forearmR'] = lerp3(lerp3((-6, 0, 0), (-48, 0, 0), up), (-8, 0, 0), chop)
+    p['upperarmL'] = lerp3(lerp3((-10, -10, 55), (-160, -30, 0), up), (-44, -32, 0), chop)
+    p['forearmL'] = lerp3(lerp3((-35, 0, 0), (-50, 0, 0), up), (-18, 0, 0), chop)
+    p['chest'] = lerp3(lerp3((4, -34, 4), (-14, 8, 0), up), (24, 6, 0), chop)
+    p['head'] = lerp3((2, 0, 0), (-12, 0, 0), chop)
+    return p
+
+
+def DownStrike(t):
+    """Airborne pogo strike: blade straight down beneath the feet."""
+    p = {}
+    k = seg(t, 0.0, 0.18)
+    p['gunBlade'] = (178 * (1 - seg(t, 0.0, 0.1)), 0, 0)
+    add(p, 'hips', 22 * k, 0, 0)
+    addloc(p, 'hips', 0, 0.12 * k, 0)
+    add(p, 'spine', 14 * k, 0, 0)
+    add(p, 'chest', 10 * k, 0, 0)
+    add(p, 'head', 22 * k, 0, 0)
+    for s, sg in (('L', 1), ('R', -1)):
+        add(p, 'thigh' + s, -72 * k, 0, sg * 12 * k)
+        add(p, 'shin' + s, 104 * k)
+        add(p, 'foot' + s, 20 * k)
+    add(p, 'upperarmR', -46 * k, 0, -8 * k)
+    add(p, 'forearmR', 0)
+    add(p, 'upperarmL', -30 * k, 0, 72 * k)
+    add(p, 'forearmL', -20 * k)
+    return p
+
+
+def _guard(p, w=1.0):
+    p['gunBlade'] = (0, 0, 0)
+    p['upperarmR'] = lerp3(p.get('upperarmR', (0, 0, 0)), (-62, 34, 0), w)
+    p['forearmR'] = lerp3(p.get('forearmR', (0, 0, 0)), (-98, 0, 0), w)
+    p['handR'] = lerp3(p.get('handR', (0, 0, 0)), (0, 0, 28), w)
+    p['upperarmL'] = lerp3(p.get('upperarmL', (0, 0, 0)), (-74, -44, 0), w)
+    p['forearmL'] = lerp3(p.get('forearmL', (0, 0, 0)), (-78, 0, 0), w)
+    p['chest'] = lerp3(p.get('chest', (0, 0, 0)), (6, 22, 0), w)
+    p['head'] = lerp3(p.get('head', (0, 0, 0)), (6, -14, 0), w)
+
+
+def Deflect(t):
+    """Snap the gun up across the face: the perfect-deflect window."""
+    p = AimIdle(0)
+    _guard(p, seg(t, 0.0, 0.25))
+    k = bump(t, 0.25, 0.4, 1.0)
+    add(p, 'upperarmR', 8 * k, 0, 0)
+    add(p, 'chest', -5 * k, 0, 0)
+    return p
+
+
+def Guard(t):
+    p = AimIdle(0)
+    _guard(p)
+    add(p, 'chest', 1.2 * sin(TAU * t), 0, 0)
+    add(p, 'upperarmR', 1.5 * sin(TAU * t + 1), 0, 0)
+    return p
+
+
+def DeflectHit(t):
+    """Something struck the guard: arms driven back, then recover."""
+    p = AimIdle(0)
+    _guard(p)
+    k = _kick(t, 0.28, 0.03, 12)
+    add(p, 'upperarmR', 22 * k, -10 * k, 0)
+    add(p, 'forearmR', 16 * k)
+    add(p, 'upperarmL', 18 * k, 8 * k, 0)
+    add(p, 'chest', -12 * k, -8 * k, 0)
+    add(p, 'head', -10 * k, 0, 0)
+    return p
+
+
+def Deathblow(t):
+    """Lunge, drive the blade in, twist, rip it back out."""
+    p = {}
+    p['gunBlade'] = (0, 0, 0)
+    lunge = seg(t, 0.0, 0.2)
+    twist = seg(t, 0.32, 0.48)
+    rip = seg(t, 0.48, 0.66)
+    rec = seg(t, 0.78, 1.0)
+    L = lunge * (1 - rec)
+    addloc(p, 'hips', 0, -0.26 * L, 0.05 * L)
+    add(p, 'hips', 10 * L, 12 * L, 0)
+    add(p, 'thighL', -66 * L, 0, 6 * L)
+    add(p, 'shinL', 72 * L)
+    add(p, 'footL', -6 * L)
+    add(p, 'thighR', 34 * L, 0, -4 * L)
+    add(p, 'shinR', 18 * L)
+    add(p, 'footR', 24 * L)
+    add(p, 'spine', 14 * L, 0, 0)
+    ua = lerp3((-18, 0, -9), (-90, 4, 0), lunge)
+    ua = lerp3(ua, (-44, -34, -6), rip)
+    p['upperarmR'] = lerp3(ua, (-18, 0, -9), rec)
+    fa = lerp3((-38, 12, 0), (0, 0, 0), lunge)
+    fa = lerp3(fa, (-64, 0, 0), rip)
+    p['forearmR'] = lerp3(fa, (-38, 12, 0), rec)
+    p['handR'] = (0, 88 * twist * (1 - rec), 0)
+    p['chest'] = lerp3(lerp3((0, 0, 0), (8, 30, 0), lunge), (4, -22, 0), rip)
+    p['chest'] = lerp3(p['chest'], (2, 6, 0), rec)
+    p['upperarmL'] = lerp3(lerp3((4, 0, 8), (-84, -24, 0), lunge), (-96, 4, 0), rip)
+    p['upperarmL'] = lerp3(p['upperarmL'], (4, 0, 8), rec)
+    p['forearmL'] = lerp3((-18, 0, 0), (-8, 0, 0), lunge)
+    p['head'] = lerp3((0, 0, 0), (-6, -20, 0), lunge)
+    q = {}
+    stand(q)
+    return blend(p, blend(p, q, 0), 0) if rec < 1 else blend(p, q, 1)
+
+
+def Focus(t):
+    """Kneel, blade planted, the apple cupped in the left hand: healing."""
+    p = {}
+    ph = TAU * t
+    b = sin(ph) * 0.5 + 0.5
+    p['gunBlade'] = (0, 0, 0)
+    addloc(p, 'hips', 0, -0.46 - 0.01 * b, 0)
+    add(p, 'thighL', -92, 0, 8)
+    add(p, 'shinL', 92)
+    add(p, 'footL', -2)
+    add(p, 'thighR', 12, 0, -6)
+    add(p, 'shinR', 104)
+    add(p, 'footR', 44)
+    add(p, 'spine', 14 + 2 * b, 0, 0)
+    add(p, 'chest', 8 + 2 * b, 0, 0)
+    add(p, 'neck', 10, 0, 0)
+    add(p, 'head', 18 - 3 * b, 0, 0)
+    add(p, 'upperarmL', -58, -22, 6)
+    add(p, 'forearmL', -96, 0, 0)
+    add(p, 'handL', 0, 0, 30)
+    add(p, 'upperarmR', -8, 0, -18)
+    add(p, 'forearmR', -24, 0, 0)
+    add(p, 'handR', 30, 0, 0)
+    return p
+
+
+def Stagger(t):
+    """Knocked off balance by a crushing blow."""
+    p = {}
+    stand(p)
+    gun_low(p)
+    k = bump(t, 0.0, 0.18, 1.0)
+    addloc(p, 'hips', 0, -0.12 * k, -0.08 * k)
+    add(p, 'hips', -10 * k, 0, 6 * k)
+    add(p, 'spine', -18 * k, 0, 0)
+    add(p, 'chest', -14 * k, -12 * k, 0)
+    add(p, 'head', -22 * k, 10 * k, 0)
+    add(p, 'thighR', 30 * k, 0, 0)
+    add(p, 'shinR', 30 * k)
+    add(p, 'thighL', -18 * k, 0, 0)
+    add(p, 'shinL', 40 * k)
+    add(p, 'upperarmL', -40 * k, 0, 60 * k)
+    add(p, 'upperarmR', -30 * k, 0, -50 * k)
+    return p
+
+
 # name: (fn, seconds, loop)
 CLIPS = {
     'Idle': (Idle, 3.0, True),
@@ -712,6 +923,16 @@ CLIPS = {
     'Reload': (Reload, 1.1, False),
     'SwapProperty': (SwapProperty, 0.45, False),
     'Infuse': (Infuse, 0.7, False),
+    'Slash1': (Slash1, 0.36, False),
+    'Slash2': (Slash2, 0.36, False),
+    'Slash3': (Slash3, 0.52, False),
+    'DownStrike': (DownStrike, 0.5, True),
+    'Deflect': (Deflect, 0.3, False),
+    'Guard': (Guard, 1.2, True),
+    'DeflectHit': (DeflectHit, 0.28, False),
+    'Deathblow': (Deathblow, 0.9, False),
+    'Focus': (Focus, 1.4, True),
+    'Stagger': (Stagger, 0.6, False),
 }
 
 # poses rendered by --preview: (clip, t)
@@ -723,3 +944,6 @@ PREVIEW = [('Idle', 0.0), ('Run', 0.0), ('Run', 0.25), ('Run', 0.5), ('Sprint', 
 
 PREVIEW_GUN = [('AimIdle', 0.0), ('Reload', 0.3), ('Reload', 0.5), ('FireRound', 0.1),
                ('Take', 0.6), ('SwapProperty', 0.3), ('Give', 0.1), ('Infuse', 0.3)]
+
+PREVIEW_COMBAT = [('Slash1', 0.1), ('Slash1', 0.45), ('Slash2', 0.1), ('Slash2', 0.45), ('Slash3', 0.25), ('Slash3', 0.56),
+                  ('DownStrike', 0.5), ('Deflect', 0.3), ('Guard', 0.0), ('Deathblow', 0.25), ('Deathblow', 0.55), ('Focus', 0.2)]

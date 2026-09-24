@@ -5,6 +5,7 @@ import { RAPIER } from './physics.js';
 import { G, ALL, TUNE, LAYERS, PROPS } from './config.js';
 import { spawnEntity } from './entities.js';
 import { rnd } from './vfx.js';
+import { drawPainting } from './painting.js';
 
 // ---------------------------------------------------------------- noise
 function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
@@ -165,6 +166,7 @@ export class Level {
     this.bound = 118;
     this.deco = [];
     this.time = 0;
+    this.scrapSpots = [];
   }
 
   heightAt(x, z) {
@@ -274,6 +276,7 @@ export class Level {
       // drape a clock over the branch
       const branch = new THREE.Vector3(1.7, 2.15, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), -a).add(tree.obj.position);
       const clk = this.put('Clock', branch.x, branch.z, { y: branch.y - 0.35, rotY: -a + Math.PI / 2, anchored: true });
+      if (i === 0) this.groveBranch = new THREE.Vector3(branch.x, 0, branch.z);
       clk.melt = 0.3;
     }
     this.put('Candle', cx + 1, cz, {});
@@ -291,7 +294,8 @@ export class Level {
     };
     // two parallel walls (wall-run corridor) + a cap wall with a column colonnade
     for (let i = 0; i < 3; i++) { place(-3.2, -4 + i * 4.05, Math.PI / 2); place(3.2, -4 + i * 4.05, Math.PI / 2); }
-    place(0, 8.5, 0);
+    const cap = place(0, 8.5, 0);
+    this.ruinsTop = this.ruinsTop || cap.obj.position.clone().add(new THREE.Vector3(0, 3.9, 0));
     for (let i = 0; i < 4; i++) place(-7.5 + i * 5, -9, 0, 'Column');
     place(8, 2, 0, 'Column');
     this.put('Drawers', cx + q.set(0, 0, 3).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).x, cz + q.z, { rotY: rot });
@@ -320,6 +324,7 @@ export class Level {
       h += 1.35 + R() * 0.4;
     }
     const top = last.obj.position;
+    this.stairsTop = top.clone().add(new THREE.Vector3(0, 1.3, 0));
     this.put('Cloud', top.x + 3, top.z, { y: top.y + 1.5 });
     this.put('Pomegranate', top.x, top.z, { y: top.y + 0.02 });
     this.put('Cloud', cx, cz, { y: gy + 5.5 });
@@ -334,6 +339,7 @@ export class Level {
     q = p(-2.2, -1.5); this.put('Drawers', q.x, q.z, { rotY: rot + 0.3 });
     q = p(-2.2, -1.5); this.put('BowlerHat', q.x, q.z, { y: this.groundY(q.x, q.z) + 1.12 });
     q = p(1.8, -2.2); this.put('Candle', q.x, q.z, {});
+    q = p(3.6, -0.6); this.put('Frame', q.x, q.z, { rotY: rot + 0.4 });
     q = p(0, -4); this.put('Wall', q.x, q.z, { rotY: rot });
   }
 
@@ -344,6 +350,7 @@ export class Level {
       const x = cx + Math.cos(a) * 4, z = cz + Math.sin(a) * 4;
       this.put('Platform', x, z, { y: gy + 3.2, rotY: a });
       this.put('Anvil', x, z, { y: gy + 3.21, rotY: a });
+      if (i === 1) this.gardenTop = new THREE.Vector3(x + 0.9, gy + 4.3, z);
     }
     this.put('Cloud', cx, cz, { y: gy + 7 });
     this.put('BowlerHat', cx + 1, cz, {});
@@ -444,6 +451,7 @@ export class Level {
     this.scatterRocks(16, 48, 85);
     this.decoration('Train', new THREE.Vector3(60, this.heightAt(60, 95), 95), -0.4, 1.4);
     this.door = this.makeDoor(new THREE.Vector3(0, 0, 44), Math.PI);
+    for (const s of [this.stairsTop, this.ruinsTop, this.gardenTop]) if (s) this.scrapSpots.push(s);
     this.waves = [
       { n: 3, hp: 55 }, { n: 4, hp: 60 }, { n: 5, hp: 65 },
     ];
@@ -472,9 +480,13 @@ export class Level {
     // a statue-plinth of drawers and clocks in the centre
     this.put('Mirror', -4, -6, { rotY: 0.4 });
     this.put('Mirror', 5, -5, { rotY: -0.5 });
+    this.put('Frame', 0, -9, { rotY: 0 });
     const trainY = this.heightAt(0, 95);
     this.train = this.decoration('Train', new THREE.Vector3(-120, trainY, 92), Math.PI / 2, 1.6);
     this.door = this.makeDoor(new THREE.Vector3(0, 0, 50), Math.PI);
+    { const a = Math.PI / 4, gy = this.heightAt(Math.cos(a) * 44, Math.sin(a) * 44); this.scrapSpots.push(new THREE.Vector3(Math.cos(a) * 44, gy + 6.2, Math.sin(a) * 44)); }
+    if (this.stairsTop) this.scrapSpots.push(this.stairsTop);
+    this.scrapSpots.push(new THREE.Vector3(0, 3.6, 0).add(this.groveBranch || new THREE.Vector3(2, 0, 0)));
     this.waves = [
       { n: 4, hp: 60, rain: true }, { n: 6, hp: 65, rain: true }, { n: 7, hp: 70, rain: true },
     ];
@@ -514,7 +526,11 @@ export class Level {
     for (let i = 0; i <= 24; i++) { const a = (i / 24) * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * 27, 3.2 + Math.sin(a * 3) * 1.2, Math.sin(a) * 27)); }
     this.addRail(pts.slice(0, 13));
     this.addRail(pts.slice(12, 25));
+    this.put('Frame', -5, -22, { rotY: 0.3 });
+    this.put('Frame', 6, 22, { rotY: Math.PI });
     this.bossSpawn = new THREE.Vector3(0, 0, 8);
+    { const a = 0.8, d = 24; this.scrapSpots.push(new THREE.Vector3(Math.cos(a) * d, 5.4, Math.sin(a) * d)); }
+    { const a = (1 / 10) * Math.PI * 2, d = 31; this.scrapSpots.push(new THREE.Vector3(Math.cos(a) * d, 5.1, Math.sin(a) * d)); }
     this.waves = [];
     this.objectiveName = 'Look away';
   }
@@ -523,9 +539,9 @@ export class Level {
     this.spawn = new THREE.Vector3(0, 0.5, -14);
     this.spawnYaw = 0;
     // every property source in a labelled row
-    const names = ['Clock', 'Cloud', 'Mirror', 'Candle', 'Anvil', 'Bed', 'BowlerHat', 'Birdcage', 'Pomegranate'];
+    const names = ['Clock', 'Cloud', 'Mirror', 'Candle', 'Anvil', 'Frame', 'Bed', 'BowlerHat', 'Birdcage', 'Pomegranate'];
     names.forEach((n, i) => {
-      const x = -16 + i * 4;
+      const x = -18 + i * 4;
       if (n === 'Cloud') this.put(n, x, -6, { y: this.groundY(x, -6) + 2.5 });
       else this.put(n, x, -6, { rotY: Math.PI });
     });
@@ -648,7 +664,7 @@ export class Level {
 
 // ---------------------------------------------------------------- bedroom
 // The waking vignette: the dreamer's room, which fills in with each memory.
-export function buildBedroom(game, memories) {
+export function buildBedroom(game, memories, opts = {}) {
   const g = new THREE.Group();
   const A = game.assets;
   const wallMat = new THREE.MeshStandardMaterial({ color: '#e9dcc6', roughness: 0.92 });
@@ -677,6 +693,22 @@ export function buildBedroom(game, memories) {
   if (memories.has('station')) add('BowlerHat', 1.2, 1.12, 2.0, 1.2);
   if (memories.has('pomegranate')) add('Pomegranate', 1.2, 1.12, 2.25, 0, 0.7);
   if (memories.has('birdcage')) add('Birdcage', 2.5, 0, 0.6);
-  if (memories.has('easel')) { const e = add('RailPost', 2.2, 0, -2.2, 0.6, 1.1); }
-  return { group: g, clock };
+  // the painting, under its sheet, in the corner of the room
+  let easel = null;
+  if (A.has('Easel')) {
+    easel = add('Easel', 0.55, 0, 1.75, Math.PI - 0.35);
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 640;
+    drawPainting(cv, { found: opts.found || new Set(), finished: !!opts.victory, frame: false });
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false; tex.anisotropy = 8;
+    easel.traverse((m) => {
+      if (!m.isMesh) return;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      mats.forEach((mm, i) => {
+        if (mm.name === 'Painting') { const c = mm.clone(); c.map = tex; c.color.set('#ffffff'); c.needsUpdate = true; if (Array.isArray(m.material)) m.material[i] = c; else m.material = c; }
+      });
+    });
+    const sheet = easel.getObjectByName('Easel_Sheet');
+    if (sheet) sheet.visible = !opts.victory;
+  }
+  return { group: g, clock, easel };
 }

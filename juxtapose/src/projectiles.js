@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { G, ALL, TUNE, PROP_INFO, groups } from './config.js';
 import { roundImpact } from './properties.js';
 import { RAPIER } from './physics.js';
+import { addPosture } from './combat.js';
 
 const _d = new THREE.Vector3();
 const _r = new THREE.Vector3();
@@ -92,6 +93,7 @@ export class Projectiles {
 
   stepRound(p, dt) {
     const game = this.game;
+    if (game.portals && game.portals.passProjectile(p, dt)) return true;
     const len = p.vel.length() * dt;
     _d.copy(p.vel).normalize();
     let mask = ALL & ~G.PLAYER & ~G.GHOST;
@@ -115,6 +117,11 @@ export class Projectiles {
     const hit = game.physics.ray(p.pos, _d, len, mask);
     if (!hit) { p.pos.addScaledVector(p.vel, dt); return true; }
     const e = hit.entity;
+    if (p.props.has('framed') && game.portals) {
+      // framed rounds hang a portal wherever they land
+      game.portals.place({ point: hit.point, normal: hit.normal, entity: e, collider: hit.collider }, 'round');
+      return false;
+    }
     const mirror = e && (e.props.has('reflecting'));
     if ((p.props.has('reflecting') || mirror) && p.bounces < Math.max(p.maxBounces, mirror ? 8 : 0)) {
       if (e && !mirror) {
@@ -155,6 +162,7 @@ export class Projectiles {
 
   stepOrb(p, dt) {
     const game = this.game;
+    if (game.portals && game.portals.passProjectile(p, dt)) return true;
     const pl = game.player;
     if (p.owner === 'enemy' && p.homing && pl && !pl.dead && !pl.self.has('sleeping')) {
       const to = pl.pos.clone().setY(pl.pos.y + 1).sub(p.pos).normalize().multiplyScalar(p.vel.length());
@@ -168,7 +176,15 @@ export class Projectiles {
       const c = pl.pos.clone(); c.y += 0.9;
       const segDist = distPointSegment(c, p.pos, p.pos.clone().addScaledVector(_d, len));
       if (segDist < 0.55 + p.radius) {
-        if (pl.self.has('hollow')) { /* passes through */ }
+        const res = pl.self.has('reflecting') || pl.self.has('hollow') ? 'skip' : pl.incoming('orb', p.damage, p.pos.clone(), { type: 'orb', props: p.props, shooter: p.shooter });
+        if (res === 'deflect') {
+          pl.reflectOrb(p);
+          return true;
+        } else if (res === 'guard' || res === 'hit') {
+          game.vfx.impact(p.pos, _d.clone().negate(), p.color, res === 'guard' ? 0.6 : 1);
+          return false;
+        } else if (res === 'ignore') { /* passes through */ }
+        else if (pl.self.has('hollow')) { /* passes through */ }
         else if (pl.self.has('reflecting')) {
           p.owner = 'player';
           const target = p.shooter && !p.shooter.dead ? p.shooter.center() : p.pos.clone().sub(p.vel);
@@ -177,10 +193,6 @@ export class Projectiles {
           game.audio.sfx('reflect', { position: p.pos, quantize: 'loose' });
           game.vfx.impact(p.pos, _d.clone().negate(), '#e6f2ff', 1);
           return true;
-        } else {
-          pl.hurt(p.damage, { type: 'orb', from: p.pos.clone(), props: p.props });
-          game.vfx.impact(p.pos, _d.clone().negate(), p.color, 1);
-          return false;
         }
       }
     }
@@ -189,8 +201,8 @@ export class Projectiles {
     if (hit) {
       const e = hit.entity;
       if (p.owner === 'player' && e && (e.kind === 'enemy' || e.kind === 'boss')) {
-        if (e.kind === 'boss') e.damage(p.damage * 3, { type: 'reflected', point: hit.point, force: true });
-        else e.damage(p.damage * 2.5, { type: 'reflected', point: hit.point });
+        if (e.kind === 'boss') { e.damage(p.damage * 3, { type: 'reflected', point: hit.point, force: true }); e.addPosture(p.deflected ? 28 : 15); }
+        else { e.damage(p.damage * 2.5, { type: 'reflected', point: hit.point }); addPosture(game, e, p.deflected ? 30 : 18); }
         game.vfx.impact(hit.point, hit.normal, p.color, 1.2);
         return false;
       }

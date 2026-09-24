@@ -5,9 +5,9 @@
 import * as THREE from 'three';
 
 const UPPER = new Set(['chest', 'neck', 'head', 'upperarmL', 'forearmL', 'handL', 'upperarmR', 'forearmR', 'handR',
-  'gun', 'gunHammer', 'gunCylinder', 'gunBreak', 'gunVial']);
+  'gun', 'gunHammer', 'gunCylinder', 'gunBreak', 'gunVial', 'gunBlade']);
 const LOWER = new Set(['hips', 'spine', 'thighL', 'shinL', 'footL', 'thighR', 'shinR', 'footR']);
-const LOCO = new Set(['Idle', 'Run', 'Sprint', 'StrafeL', 'StrafeR', 'RunBack', 'WallRunL', 'WallRunR', 'Grind', 'Slide', 'Fall', 'PoundFall']);
+const LOCO = new Set(['Idle', 'Run', 'Sprint', 'StrafeL', 'StrafeR', 'RunBack', 'WallRunL', 'WallRunR', 'Grind', 'Slide', 'Fall', 'PoundFall', 'DownStrike', 'Focus', 'Guard']);
 
 function splitClip(clip, set, suffix) {
   const tracks = clip.tracks.filter((t) => {
@@ -117,6 +117,12 @@ export class FigureAnimator {
     this._restoreUpper(0.12);
   }
 
+  setGuard(on) {
+    if (this.guard === on) return;
+    this.guard = on;
+    if (!this.overlay && !this.baseLock) this._restoreUpper(0.1);
+  }
+
   setAim(on) {
     if (this.aim === on) return;
     this.aim = on;
@@ -124,9 +130,9 @@ export class FigureAnimator {
   }
 
   _restoreUpper(fade) {
-    const target = this.aim ? this.upper.AimIdle : this.upper[this.base];
+    const target = this.guard ? this.upper.Guard : this.aim ? this.upper.AimIdle : this.upper[this.base];
     if (!target) return;
-    const once = !LOCO.has(this.base) && !this.aim;
+    const once = !LOCO.has(this.base) && !this.aim && !this.guard;
     target.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
     target.clampWhenFinished = once;
     this._switch('up', target, fade, this.aim ? null : this.curLower);

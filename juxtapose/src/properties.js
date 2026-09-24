@@ -28,6 +28,7 @@ export class Lucidity {
   reset() { this.value = 0; this.display = 0; this.idle = 0; this.seenPairs.clear(); this.total = 0; this.warned = false; }
   gain(v, reason) {
     if (v <= 0) return;
+    v *= this.game.run?.mods.lucidGain ?? 1;
     this.value = Math.min(this.cap, this.value + v);
     this.total += v;
     this.idle = 0;
@@ -294,6 +295,8 @@ export function giveTo(game, target, prop) {
   game.lucidity.gain(v, reason);
   game.stats.gives++;
   game.recordCombo(prop);
+  game.narrator?.event('firstGive');
+  if (target.props.size > 1) game.narrator?.event('firstStack');
   if (prop === 'multiplying') multiply(game, target);
   return true;
 }
@@ -313,6 +316,7 @@ export function takeFrom(game, target) {
   const wasInnate = target.innate.has(p);
   target.removeProp(p, { taken: true });
   if (wasInnate) { target.innate.delete(p); target.regrow.set(p, game.time + 22); }
+  game.narrator?.event('firstTake');
   if (target.kind === 'boss' && game.boss) game.boss.onTaken(p);
   return p;
 }
