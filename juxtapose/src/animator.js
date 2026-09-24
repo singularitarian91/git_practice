@@ -18,6 +18,7 @@ function splitClip(clip, set, suffix) {
 }
 
 const _q = new THREE.Quaternion();
+const _rq = new THREE.Quaternion(), _pq = new THREE.Quaternion(), _sq = new THREE.Quaternion(), _e2 = new THREE.Euler();
 const _e = new THREE.Euler();
 const X = new THREE.Vector3(1, 0, 0);
 
@@ -187,22 +188,34 @@ export class FigureAnimator {
       const bone = b['scarf' + (i + 1)];
       if (bone) bone.quaternion.setFromEuler(_e.set(-this.scarf[i] * 1.2, 0, Math.sin(this.time * 5 + i) * 0.06 * (1 + Math.abs(v.x) * 0.1)));
     }
-    // the oversize coat: hem panels and sleeve drapes trail on damped springs, lower
-    // segments lagging the upper ones, so the cloth flows behind a run and settles after
+    // the oversize coat: hem panels and sleeve bags hang along the body's vertical
+    // (gravity), trail behind motion on damped springs, and clear the thighs as they swing
     if (!this.coat) {
       this.coat = [];
-      for (const n of ['coatBackL1', 'coatBackL2', 'coatBackR1', 'coatBackR2', 'coatSideL1', 'coatSideR1', 'sleeveL1', 'sleeveR1']) {
+      for (const n of ['coatBackL1', 'coatBackR1', 'coatBackL2', 'coatBackR2', 'coatSideL1', 'coatSideR1', 'sleeveL1', 'sleeveR1']) {
         const o = b[n];
-        if (o) this.coat.push({ o, rest: o.quaternion.clone(), x: 0, vx: 0, z: 0, vz: 0, lag: /2$/.test(n) ? 1.6 : 1, side: /L/.test(n) ? 1 : -1, sleeve: /sleeve/.test(n), ph: this.coat.length * 1.3 });
+        if (!o) continue;
+        const L = /L\d$/.test(n);
+        this.coat.push({ o, n, sign: L ? 1 : -1, thigh: b[L ? 'thighL' : 'thighR'], kind: n.replace(/[LR]\d$/, '') + n.slice(-1), x: 0, vx: 0, z: 0, vz: 0 });
       }
+      this.coatByName = Object.fromEntries(this.coat.map((c) => [c.n, c]));
     }
+    const trail = THREE.MathUtils.clamp(v.z * 0.12 - v.y * 0.03, -0.2, 1.3); // localVel.z is forward here
+    const flutter = Math.min(1, Math.hypot(v.x, v.z) * 0.1);
+    this.root.getWorldQuaternion(_rq);
     for (const c of this.coat) {
-      const tx = THREE.MathUtils.clamp(v.z * 0.06 * c.lag - v.y * 0.03, -0.35, 0.9) + Math.sin(this.time * 3 + c.ph) * 0.03;
-      const tz = THREE.MathUtils.clamp(-v.x * 0.05 * c.lag, -0.5, 0.5) * (c.sleeve ? 0.6 : 1);
-      const k = c.lag > 1 ? 34 : 48, d = 6;
-      c.vx += ((tx - c.x) * k - c.vx * d) * dt; c.x += c.vx * dt;
-      c.vz += ((tz - c.z) * k - c.vz * d) * dt; c.z += c.vz * dt;
-      c.o.quaternion.copy(c.rest).multiply(_q.setFromEuler(_e.set(c.x, 0, c.z)));
+      let tx = 0, tz = 0, grav = 1;
+      const th = c.thigh ? _e2.setFromQuaternion(c.thigh.quaternion) : null;
+      if (c.kind === 'coatBack1') tx = Math.max(trail, 0.85 * Math.max(0, th ? th.x : 0));
+      else if (c.kind === 'coatSide1') { tx = 0.7 * trail; tz = c.sign * (0.07 + Math.max(0, c.sign * (th ? th.z : 0)) + v.x * 0.05); }
+      else if (c.kind === 'coatBack2') { grav = 0; tx = 0.3 * (this.coatByName[c.n.replace('2', '1')]?.x || 0) + 0.15 * trail; }
+      else { grav = 0.35; tx = 0.5 * trail; }
+      tx += Math.sin(this.time * 6 + c.sign + (grav ? 0 : 1)) * 0.04 * flutter;
+      c.vx += ((tx - c.x) * 40 - c.vx * 7) * dt; c.x += c.vx * dt;
+      c.vz += ((tz - c.z) * 40 - c.vz * 7) * dt; c.z += c.vz * dt;
+      _sq.setFromEuler(_e.set(c.x, 0, c.z));
+      if (grav > 0) { c.o.parent.getWorldQuaternion(_pq).invert().multiply(_rq); c.o.quaternion.identity().slerp(_pq, grav).multiply(_sq); }
+      else c.o.quaternion.copy(_sq);
     }
     // the apple hovers in front of the face
     if (b.appleFace) {
