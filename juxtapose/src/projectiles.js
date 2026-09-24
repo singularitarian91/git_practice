@@ -123,18 +123,21 @@ export class Projectiles {
     let mask = ALL & ~G.PLAYER & ~G.GHOST;
     game.vfx.trail(p.pos, p.color, p.props.size ? 0.11 : 0.07, 0.12);
     if (p.props.has('hollow')) {
-      // pierce: damage everything along the segment, never stop
-      const r = new RAPIER.Ray(p.pos, _d);
-      game.physics.world.intersectionsWithRay(r, len, true, (hit) => {
+      // pierce: damage everything along the segment, never stop. Hits are collected
+      // during the query and applied after it: a kill inside it removes bodies while
+      // Rapier is still walking them, which locks the physics world for good.
+      const r = new RAPIER.Ray(p.pos, _d), hits = [];
+      game.physics.world.intersectionsWithRay(r, len, true, (hit) => { hits.push(hit); return true; },
+        undefined, groups(ALL, G.ENEMY | G.PROP | G.WALL | G.WORLD | G.DEBRIS));
+      hits.sort((a, b) => a.timeOfImpact - b.timeOfImpact);
+      for (const hit of hits) {
         const e = game.physics.ownerOf(hit.collider);
-        if (e && !p.pierced.has(e.id)) {
-          p.pierced.add(e.id);
-          const pt = p.pos.clone().addScaledVector(_d, hit.timeOfImpact);
-          if (e.kind === 'boss') e.hitByRound(p, { point: pt, normal: _d.clone().negate(), entity: e });
-          else roundImpact(game, p, { point: pt, normal: _d.clone().negate(), entity: e });
-        }
-        return true;
-      }, undefined, groups(ALL, G.ENEMY | G.PROP | G.WALL | G.WORLD | G.DEBRIS));
+        if (!e || e.dead || p.pierced.has(e.id)) continue;
+        p.pierced.add(e.id);
+        const pt = p.pos.clone().addScaledVector(_d, hit.timeOfImpact);
+        if (e.kind === 'boss') e.hitByRound(p, { point: pt, normal: _d.clone().negate(), entity: e });
+        else roundImpact(game, p, { point: pt, normal: _d.clone().negate(), entity: e });
+      }
       p.pos.addScaledVector(p.vel, dt);
       return true;
     }
@@ -166,9 +169,10 @@ export class Projectiles {
       roundImpact(game, p, hit);
       if (!e) game.vfx.impact(hit.point, hit.normal, '#e0c79a', 0.6);
     }
-    if (hit.collider && hit.collider.parent() && hit.collider.parent().isDynamic() && !e) {
-      hit.collider.parent().applyImpulseAtPoint(_d.clone().multiplyScalar(0.6), hit.point, true);
-    }
+    // nudge loose things the round struck, unless the round just broke or killed them:
+    // touching a body that has left the world panics Rapier and locks it for good
+    const b = !e && hit.collider ? hit.collider.parent() : null;
+    if (game.physics.live(b) && b.isDynamic()) b.applyImpulseAtPoint(_d.clone().multiplyScalar(0.6), hit.point, true);
     return false;
   }
 

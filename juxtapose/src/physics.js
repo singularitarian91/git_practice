@@ -26,6 +26,8 @@ export class Physics {
     this.alpha = 0;
   }
 
+  // is this body still in the world? (a JS handle outlives the body it names)
+  live(body) { return !!body && this.world.getRigidBody(body.handle) === body; }
   setOwner(collider, entity) { this.owner.set(collider.handle, entity); }
   ownerOf(collider) { return collider ? this.owner.get(collider.handle) : null; }
 
@@ -38,13 +40,17 @@ export class Physics {
       this.world.step(this.events);
       this.acc -= this.step;
       n++;
-      this.events.drainContactForceEvents((e) => {
-        const c1 = this.world.getCollider(e.collider1());
-        const c2 = this.world.getCollider(e.collider2());
+      // collect, then dispatch: handlers break and kill things (removing bodies), and
+      // nothing may throw or touch the world while Rapier is inside the drain
+      const ev = this._ev || (this._ev = []);
+      ev.length = 0;
+      this.events.drainContactForceEvents((e) => { ev.push(e.collider1(), e.collider2(), e.maxForceMagnitude()); });
+      for (let k = 0; k < ev.length; k += 3) {
+        const c1 = this.world.getCollider(ev[k]), c2 = this.world.getCollider(ev[k + 1]);
+        if (!c1 || !c2) continue; // removed by an earlier handler
         const a = this.ownerOf(c1), b = this.ownerOf(c2);
-        const f = e.maxForceMagnitude();
-        for (const h of this.forceHandlers) h(a, b, f, c1, c2);
-      });
+        for (const h of this.forceHandlers) h(a, b, ev[k + 2], c1, c2);
+      }
     }
     if (this.acc > this.step) this.acc = 0;
     this.alpha = this.acc / this.step;

@@ -227,16 +227,19 @@ export class Portals {
     this.dummy.needsUpdate = true;
     // Kinematic character controller filter: true = collide. While the player is
     // lined up with a linked portal, the surface it hangs on stops existing for
-    // them. Called from inside Rapier, so it touches no Rapier objects.
+    // them. Called from inside Rapier, so it touches no Rapier objects, and it must
+    // never throw: an exception unwinding through Rapier leaves the world locked.
     this.playerPredicate = (collider) => {
-      if (!this.linked) return true;
-      const h = collider.handle;
-      const A = this.slots[0], B = this.slots[1];
-      if (h !== A.handle && h !== B.handle) return true;
-      const pl = this.game.player;
-      if (!pl) return true;
-      if (h === A.handle && this.linedUp(A, pl)) return false;
-      if (h === B.handle && this.linedUp(B, pl)) return false;
+      try {
+        if (!this.linked || !collider) return true;
+        const h = collider.handle;
+        const A = this.slots[0], B = this.slots[1];
+        if (!A || !B || (h !== A.handle && h !== B.handle)) return true;
+        const pl = this.game.player;
+        if (!pl) return true;
+        if (h === A.handle && this.linedUp(A, pl)) return false;
+        if (h === B.handle && this.linedUp(B, pl)) return false;
+      } catch (e) { /* fall through: collide as normal */ }
       return true;
     };
   }

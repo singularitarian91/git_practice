@@ -732,9 +732,11 @@ class Game {
     this.last = t;
     try { this.tick(rdt); this.tickErrors = 0; } catch (err) {
       console.error(err);
-      // a frame that keeps throwing freezes the picture; say so instead of dying quietly
+      // a frame that keeps throwing freezes the picture; say so instead of dying quietly,
+      // and report the first error of the streak: later ones are usually its fallout
       this.tickErrors = (this.tickErrors || 0) + 1;
-      if (this.tickErrors === 3) this.showError(err);
+      if (this.tickErrors === 1) this.firstTickError = err;
+      if (this.tickErrors === 3) this.showError(this.firstTickError || err);
       try { if (!this.noRender) this.render.render(); } catch (e) { /* the renderer itself is down */ }
     }
   }
