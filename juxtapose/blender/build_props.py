@@ -18,9 +18,33 @@ Conventions
   * materials: Principled BSDF with constant inputs; surface variation comes from
     a colour attribute "Col" (exported as COLOR_0, multiplies the base colour)
   * deterministic: each asset uses its own seeded RNG
-  * UVs exist only where the game needs them (Frame_Opening, Easel_Canvas);
-    glTF stores v flipped (v = 0 at the top), so textures need flipY = false
+  * UVs exist only where the game needs them (Frame_Opening, Easel_Canvas, and
+    the textured kit below); glTF stores v flipped (v = 0 at the top), so
+    textures need flipY = false
   * alpha < 1 (FrameOpening, JarGlass) exports as alphaMode BLEND
+
+Textured kit (Wall, Column, Rocks, Platform, DeadTree, Arch, RailPost, Door,
+Drawers, Bed, Train and the fracture templates)
+  * materials named TX_<name> are white placeholders: the game gives them the
+    shared baked PBR set assets/tex/<name>_* (texlib.py) with repeat 1 / tile.
+    No texture is embedded; render_previews.py wires the same maps in for the
+    contact sheets.
+  * UVs are world metres (1 UV unit = 1 m): per-face box projection, turned
+    and swept parts get arc-length x circumference (oak grain along U);
+    sandstone blocks are mapped inside single blocks of the texture's ashlar
+  * COLOR_0 = tint x procedural grime x Cycles-baked ambient occlusion
+    (bake_ao: AO to vertex colours, each asset baked alone, on a ground plane
+    where it stands on one)
+  * fracture templates are cut from the solid's own closed parts (Voronoi or
+    hand-placed planes, clip + cap), so pieces match what was broken; cut faces
+    get the inside material; chunk volumes sum to the solid's
+
+Triangle budgets (perf pass; per root incl. children, enforced by verify via
+TRI_CAPS): Pomegranate, BowlerHat, Candle 1.2k; Clock, RailPost 2k; Birdcage,
+Mirror, Drawers 3k; Platform 3.5k; Bed, DeadTree, Column, Wall 6k; each Rock
+1.5k; Train 8k; every fracture chunk <= 300 (decimated to CHUNK_TRIS).  Detail
+comes from the textures and baked AO: fewer ring segments, collapse decimation
+(decimate_bm / finish(..., decimate=N)) where a shape needs its silhouette.
 """
 import bpy
 import bmesh
@@ -88,12 +112,6 @@ def srgb2lin(c):
 def hexcol(h):
     h = h.lstrip('#')
     return tuple(srgb2lin(int(h[i:i + 2], 16) / 255.0) for i in (0, 2, 4))
-
-
-def ratio(h_dark, h_base):
-    """Linear-space multiplier that turns base colour h_base into h_dark."""
-    a, b = hexcol(h_dark), hexcol(h_base)
-    return tuple(min(1.0, a[i] / max(b[i], 1e-6)) for i in range(3))
 
 
 # ----------------------------------------------------------------------------
@@ -465,35 +483,23 @@ def subsurf(bm, levels=1):
     return apply_mod(bm, 'SUBSURF', levels=levels, render_levels=levels)
 
 
+def tri_count(bm):
+    return sum(len(f.verts) - 2 for f in bm.faces)
+
+
+def decimate_bm(bm, target):
+    """Collapse-decimate a bmesh to about `target` triangles (UVs, colours and
+    face attributes ride along).  Returns a new bmesh; no-op when already under."""
+    n = tri_count(bm)
+    if n <= target:
+        return bm
+    bmesh.ops.triangulate(bm, faces=bm.faces)
+    return apply_mod(bm, 'DECIMATE', decimate_type='COLLAPSE', ratio=max(0.01, target / n),
+                     use_collapse_triangulate=True)
+
+
 def solidify(bm, thickness, offset=-1.0):
     return apply_mod(bm, 'SOLIDIFY', thickness=thickness, offset=offset, use_even_offset=True)
-
-
-def bm_skin(verts, edges, radii, levels=2, root=0):
-    me = bpy.data.meshes.new('_skin')
-    me.from_pydata([tuple(v) for v in verts], edges, [])
-    ob = bpy.data.objects.new('_skin', me)
-    bpy.context.scene.collection.objects.link(ob)
-    md = ob.modifiers.new('skin', 'SKIN')
-    md.branch_smoothing = 0.6
-    md.use_smooth_shade = True
-    layer = me.skin_vertices[0].data
-    for i, r in enumerate(radii):
-        layer[i].radius = (r, r) if isinstance(r, (int, float)) else r
-        layer[i].use_root = (i == root)
-    if levels:
-        ss = ob.modifiers.new('ss', 'SUBSURF')
-        ss.levels = levels
-        ss.render_levels = levels
-    dg = bpy.context.evaluated_depsgraph_get()
-    me2 = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
-    out = bmesh.new()
-    out.from_mesh(me2)
-    bpy.data.objects.remove(ob)
-    bpy.data.meshes.remove(me)
-    bpy.data.meshes.remove(me2)
-    set_smooth(out, True)
-    return out
 
 
 def bm_volume_centroid(bm):
@@ -651,13 +657,27 @@ class MB:
             self.mats.append(mat)
         return self.mats.index(mat)
 
-    def add(self, src, mat, tint=None, smooth=None, mats=None, uv=None, vtint=None):
+    def decimate(self, target):
+        """Collapse-decimate everything added so far to about `target` tris."""
+        if tri_count(self.bm) <= target:
+            return self
+        self.bm = decimate_bm(self.bm, target)
+        self.col = self.bm.loops.layers.float_color.get('Col') or self.bm.loops.layers.float_color.new('Col')
+        self.uvl = self.bm.loops.layers.uv.get('UVMap') if self.uvl is not None else None
+        return self
+
+    def add(self, src, mat, tint=None, smooth=None, mats=None, uv=None, vtint=None, uvf=None, ftag=None):
         """Append src (freed).  tint: rgb, or fn(co) -> rgb.  mats: list mapping
         src material_index -> material (for multi-material parts).  uv: fn(co) ->
         (u, v) (adds a UV map to this mesh).  vtint: per-vertex rgb list in
-        src.verts index order."""
-        if uv is not None and self.uvl is None:
+        src.verts index order.  uvf: per-face UV projection fn(co, face_normal,
+        face_centre, src_face) -> (u, v), or 'src' to copy src's own UV layer
+        (textured TX_ parts: UVs in metres).  ftag: int stored on every new face
+        in the 'tag' face layer (part ids for fracturing), or 'src' to copy it."""
+        if (uv is not None or uvf is not None) and self.uvl is None:
             self.uvl = self.bm.loops.layers.uv.new('UVMap')
+        if uvf is not None or ftag is not None:
+            return self._add_tx(src, mat, tint, smooth, mats, uvf, ftag)
         if vtint is not None:
             src.verts.index_update()
             vcols = {v: vtint[v.index] for v in src.verts}
@@ -694,6 +714,55 @@ class MB:
         src.free()
         return self
 
+    def _add_tx(self, src, mat, tint, smooth, mats, uvf, ftag):
+        """add() for textured parts: per-face UV projection, source UV / colour /
+        tag layers carried over."""
+        tagl = self.bm.faces.layers.int.get('tag') or self.bm.faces.layers.int.new('tag')
+        s_uv = src.loops.layers.uv.get('UVMap')
+        s_col = src.loops.layers.float_color.get('Col')
+        s_tag = src.faces.layers.int.get('tag')
+        src.normal_update()
+        if mats:
+            idxs = [self.midx(m) for m in mats]
+        else:
+            idxs = None
+            idx = self.midx(mat)
+        vmap = {v: self.bm.verts.new(v.co) for v in src.verts}
+        for f in src.faces:
+            try:
+                nf = self.bm.faces.new([vmap[v] for v in f.verts])
+            except ValueError:
+                continue
+            nf.material_index = idxs[min(f.material_index, len(idxs) - 1)] if idxs else idx
+            nf.smooth = f.smooth if smooth is None else smooth
+            if ftag == 'src':
+                nf[tagl] = f[s_tag] if s_tag else 0
+            elif ftag is not None:
+                nf[tagl] = ftag
+            fn, fc = f.normal.copy(), f.calc_center_median()
+            for lp, sl in zip(nf.loops, f.loops):
+                co = sl.vert.co
+                if tint == 'src' and s_col:
+                    c = sl[s_col]
+                elif tint is None:
+                    c = (1.0, 1.0, 1.0)
+                elif callable(tint):
+                    c = tint(co)
+                else:
+                    c = tint
+                lp[self.col] = (c[0], c[1], c[2], 1.0)
+                if uvf == 'src':
+                    lp[self.uvl].uv = sl[s_uv].uv if s_uv else (0.0, 0.0)
+                elif uvf is not None:
+                    lp[self.uvl].uv = uvf(co, fn, fc, f)
+        for e in src.edges:
+            if not e.smooth:
+                ne = self.bm.edges.get((vmap[e.verts[0]], vmap[e.verts[1]]))
+                if ne:
+                    ne.smooth = False
+        src.free()
+        return self
+
 
 PIV = {}          # world-space pivot of every object we create
 COLL = None
@@ -718,8 +787,11 @@ def link(ob, parent, pivot):
     PIV[ob.name] = pivot.copy()
 
 
-def finish(mb, name, pivot=(0, 0, 0), parent=None, sharp=40.0, vfn=None, weighted=False):
-    """Turn the builder into an object whose origin is `pivot` (world space)."""
+def finish(mb, name, pivot=(0, 0, 0), parent=None, sharp=40.0, vfn=None, weighted=False, decimate=None):
+    """Turn the builder into an object whose origin is `pivot` (world space).
+    decimate: collapse to about that many triangles first (triangle budgets)."""
+    if decimate:
+        mb.decimate(decimate)
     bm = mb.bm
     loose = [v for v in bm.verts if not v.link_faces]
     if loose:
@@ -788,6 +860,892 @@ def ao_fn(z0=0.0, h=0.35, amt=0.3, down=0.25):
 
 
 # ============================================================================
+# TEXTURED KIT: shared-library materials, metre-space UVs, baked AO, fracturing
+# of detailed closed parts.
+#
+# Any material named TX_<name> gets the baked PBR set assets/tex/<name>_* at
+# runtime (repeat = 1 / tile), so these materials stay plain placeholders here:
+# white base colour times the Col attribute (COLOR_0), which carries Cycles-baked
+# ambient occlusion, grime and any tint.  Textures are never embedded.  UVs are
+# in world metres (1 UV unit = 1 m) so texel density matches everywhere: box
+# projection for masonry and furniture, arc-length/circumference for turned and
+# swept parts (grain runs along U for oak).
+# ============================================================================
+def tx(name):
+    return material('TX_' + name, '#ffffff', 0.0, 0.8)
+
+
+def _dom(n):
+    ax = 0 if abs(n.x) >= abs(n.y) else 1
+    return 2 if abs(n.z) >= abs(n[ax]) else ax
+
+
+def uv_box(off=(0.0, 0.0), grain=None, M=None, org=(0, 0, 0)):
+    """Per-face box projection in metres, oriented so side faces read upright
+    (V = world up) and nothing is mirrored when seen from outside.  grain: 'z'
+    turns U vertical on side faces (oak grain up a stile), 'y' makes U follow
+    world Y on top faces.  M: 3x3 rotation into the projection frame (dipping
+    strata).  off: UV offset (per-part texture variety)."""
+    o = V(org)
+
+    def f(co, n, c, face=None):
+        p = co - o
+        nn = n
+        if M is not None:
+            p = M @ p
+            nn = M @ n
+        ax = _dom(nn)
+        if ax == 2:
+            u, v = p.x, (p.y if nn.z > 0 else -p.y)
+            if grain == 'y':
+                u, v = p.y, -p.x if nn.z > 0 else p.x
+        elif ax == 0:
+            u, v = (p.y if nn.x > 0 else -p.y), p.z
+        else:
+            u, v = (-p.x if nn.y > 0 else p.x), p.z
+        if grain == 'z' and ax != 2:
+            u, v = v, -u
+        return (u + off[0], v + off[1])
+    return f
+
+
+def uv_cyl(cx=0.0, cy=0.0, rref=None, off=(0.0, 0.0), axial_u=False, cap_box=0.75):
+    """Cylindrical metres mapping about a vertical axis through (cx, cy):
+    U = angle * radius (around), V = z.  axial_u swaps them (grain along the
+    axis).  Faces facing mostly up/down get a planar top projection."""
+    def f(co, n, c, face=None):
+        if abs(n.z) > cap_box:
+            return (co.x + off[0], co.y + off[1])
+        ac = math.atan2(c.y - cy, c.x - cx)
+        a = math.atan2(co.y - cy, co.x - cx)
+        while a - ac > math.pi:
+            a -= TAU
+        while a - ac < -math.pi:
+            a += TAU
+        r = rref if rref else math.hypot(co.x - cx, co.y - cy)
+        u, v = a * r, co.z
+        if axial_u:
+            u, v = v, -u
+        return (u + off[0], v + off[1])
+    return f
+
+
+def bm_split_islands(bm):
+    """Connected components of a bmesh -> list of new bmeshes (layers kept)."""
+    bm.verts.ensure_lookup_table()
+    seen = set()
+    out = []
+    for f0 in bm.faces:
+        if f0.index in seen:
+            continue
+        stack = [f0]
+        comp = set()
+        while stack:
+            f = stack.pop()
+            if f.index in comp:
+                continue
+            comp.add(f.index)
+            for e in f.edges:
+                for g in e.link_faces:
+                    if g.index not in comp:
+                        stack.append(g)
+        seen |= comp
+        c = bm.copy()
+        c.faces.ensure_lookup_table()
+        kill = [g for g in c.faces if g.index not in comp]
+        bmesh.ops.delete(c, geom=kill, context='FACES')
+        out.append(c)
+    return out
+
+
+def bm_is_closed(bm):
+    return all(len(e.link_faces) == 2 for e in bm.edges)
+
+
+def clip_closed(bm, n, d, cap_mat, cap_uvf=None, cap_tint=None, cap_tag=-1, eps=1e-6):
+    """Keep the part of a closed bmesh with n.p <= d and cap the cut with new
+    faces (material cap_mat, tag cap_tag, UVs from cap_uvf, colour cap_tint(co)).
+    Returns the list of cap faces (an empty mesh when nothing is left)."""
+    n = V(n).normalized()
+    if not bm.verts:
+        return []
+    s = [n.dot(v.co) - d for v in bm.verts]
+    if max(s) <= eps:
+        return []
+    if min(s) >= -eps:
+        bm.clear()
+        return []
+    bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], dist=1e-5,
+                           plane_co=n * d, plane_no=n, clear_outer=True)
+    bnd = [e for e in bm.edges if e.is_boundary]
+    if not bnd:
+        return []
+    res = bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=False, edges=bnd, normal=n)
+    caps = [f for f in res['geom'] if isinstance(f, bmesh.types.BMFace)]
+    uvl = bm.loops.layers.uv.get('UVMap')
+    col = bm.loops.layers.float_color.get('Col')
+    tagl = bm.faces.layers.int.get('tag')
+    for f in caps:
+        f.normal_update()
+        if f.normal.dot(n) < 0:
+            f.normal_flip()
+        f.material_index = cap_mat
+        f.smooth = False
+        if tagl is not None:
+            f[tagl] = cap_tag
+        c = f.calc_center_median()
+        for lp in f.loops:
+            if uvl is not None and cap_uvf is not None:
+                lp[uvl].uv = cap_uvf(lp.vert.co, f.normal, c, f)
+            if col is not None:
+                t = cap_tint(lp.vert.co) if cap_tint else (1.0, 1.0, 1.0)
+                lp[col] = (t[0], t[1], t[2], 1.0)
+        for e in f.edges:
+            e.smooth = False
+    return caps
+
+
+def part_bm(src, mat_index=0, uvf=None, tint=None, tag=0, smooth=None):
+    """Give a raw bmesh the kit layers (Col, UVMap, tag) in place."""
+    col = src.loops.layers.float_color.get('Col') or src.loops.layers.float_color.new('Col')
+    uvl = src.loops.layers.uv.get('UVMap') or src.loops.layers.uv.new('UVMap')
+    tagl = src.faces.layers.int.get('tag') or src.faces.layers.int.new('tag')
+    src.normal_update()
+    for f in src.faces:
+        if mat_index is not None:
+            f.material_index = mat_index if isinstance(mat_index, int) else mat_index(f)
+        f[tagl] = tag
+        if smooth is not None:
+            f.smooth = smooth
+        fn, fc = f.normal.copy(), f.calc_center_median()
+        for lp in f.loops:
+            co = lp.vert.co
+            if uvf is not None:
+                lp[uvl].uv = uvf(co, fn, fc, f)
+            c = (tint(co) if callable(tint) else tint) if tint is not None else (1.0, 1.0, 1.0)
+            lp[col] = (c[0], c[1], c[2], 1.0)
+    return src
+
+
+def shade_parts(parts, fn):
+    """Multiply every loop colour of the parts by fn(co, face normal) -> rgb
+    (normal-dependent grime: crusts under ledges, dust on tops)."""
+    for p in parts:
+        col = p.loops.layers.float_color['Col']
+        p.normal_update()
+        for f in p.faces:
+            for lp in f.loops:
+                k = fn(lp.vert.co, f.normal if not f.smooth else lp.vert.normal)
+                c = lp[col]
+                lp[col] = (c[0] * k[0], c[1] * k[1], c[2] * k[2], 1.0)
+    return parts
+
+
+def voronoi_cells(seeds, mn, mx):
+    """Voronoi cells of seeds inside the box mn..mx -> [(Convex, [(n, d), ...])],
+    the (n, d) being the bisector planes that actually bound the cell."""
+    box = Convex.box(mn, mx)
+    cells = []
+    for i, s in enumerate(seeds):
+        c = box
+        planes = {}
+        for j, t in enumerate(seeds):
+            if i == j or c is None:
+                continue
+            nrm = (t - s).normalized()
+            d = nrm.dot((s + t) / 2)
+            c2 = c.clip(nrm, d, 'p%d' % j)
+            if c2 is not c:
+                planes[j] = (nrm, d)
+            c = c2
+        if c is None:
+            continue
+        used = {t for _, t in c.faces}
+        pl = [planes[j] for j in planes if 'p%d' % j in used]
+        cells.append((c, pl))
+    return cells
+
+
+def bake_ao(ob, dist=0.6, samples=96, strength=1.0, gamma=1.0, ground=None, keep=(), floor_k=0.0):
+    """Cycles ambient-occlusion bake into the object's vertices, multiplied into
+    its Col attribute.  Only ob (and objects in keep) occlude; ground: z of an
+    optional ground plane (props that stand on something).  Returns
+    [(world position, ao)] per vertex for transfer onto fracture chunks."""
+    sc = bpy.context.scene
+    sc.render.engine = 'CYCLES'
+    sc.cycles.device = 'CPU'
+    sc.cycles.samples = samples
+    sc.cycles.seed = 7
+    if sc.world is None:
+        sc.world = bpy.data.worlds.new('BakeWorld')
+    sc.world.light_settings.distance = dist
+    hidden = {}
+    for o in sc.objects:
+        hidden[o.name] = o.hide_render
+        o.hide_render = not (o is ob or o in keep)
+    gob = None
+    if ground is not None:
+        gme = bpy.data.meshes.new('_bake_ground')
+        s = 50.0
+        gme.from_pydata([(-s, -s, ground), (s, -s, ground), (s, s, ground), (-s, s, ground)], [], [(0, 1, 2, 3)])
+        gob = bpy.data.objects.new('_bake_ground', gme)
+        sc.collection.objects.link(gob)
+    me = ob.data
+    attr = me.color_attributes.new('_ao', 'FLOAT_COLOR', 'POINT')
+    me.color_attributes.active_color = attr
+    for o in sc.objects:
+        o.select_set(False)
+    bpy.context.view_layer.objects.active = ob
+    ob.select_set(True)
+    bpy.ops.object.bake(type='AO', target='VERTEX_COLORS')
+    import numpy as np
+    nv = len(me.vertices)
+    buf = np.zeros(nv * 4, dtype=np.float32)
+    me.color_attributes['_ao'].data.foreach_get('color', buf)
+    ao = buf.reshape(nv, 4)[:, 0].copy()
+    ao = np.clip(ao, 0.0, 1.0) ** gamma
+    ao = 1.0 - strength * (1.0 - ao)
+    ao = np.maximum(ao, floor_k)
+    col = me.color_attributes['Col']
+    nl = len(me.loops)
+    cb = np.zeros(nl * 4, dtype=np.float32)
+    col.data.foreach_get('color', cb)
+    cb = cb.reshape(nl, 4)
+    lv = np.zeros(nl, dtype=np.int32)
+    me.loops.foreach_get('vertex_index', lv)
+    cb[:, :3] *= ao[lv][:, None]
+    col.data.foreach_set('color', cb.ravel())
+    me.color_attributes.remove(me.color_attributes['_ao'])
+    me.color_attributes.active_color_name = 'Col'
+    me.color_attributes.render_color_index = me.color_attributes.find('Col')
+    if gob is not None:
+        bpy.data.objects.remove(gob)
+        bpy.data.meshes.remove(gme)
+    for o in sc.objects:
+        o.hide_render = hidden.get(o.name, False)
+        o.select_set(False)
+    M = ob.matrix_world
+    return [(M @ v.co, float(ao[i])) for i, v in enumerate(me.vertices)]
+
+
+def ao_lookup(samples):
+    kd = KDTree(len(samples))
+    for i, (p, a) in enumerate(samples):
+        kd.insert(p, i)
+    kd.balance()
+
+    def f(co, k=4):
+        hits = kd.find_n(co, k)
+        wsum, s = 0.0, 0.0
+        for (p, i, d) in hits:
+            w = 1.0 / (d + 0.01)
+            wsum += w
+            s += w * samples[i][1]
+        return s / wsum if wsum else 1.0
+    return f
+
+
+def cut_cells(parts, cells, mats, cap_mat, cap_uvf, cap_tint):
+    """Cut every closed part by every convex cell (clip + cap).  parts: bmeshes
+    with Col / UVMap / tag layers; cells: [(Convex, [(n, d), ...])].  Returns
+    [(MB, centroid, volume)] for the non-empty cells."""
+    boxes = []
+    for p in parts:
+        xs = [v.co for v in p.verts]
+        boxes.append((V((min(c.x for c in xs), min(c.y for c in xs), min(c.z for c in xs))),
+                      V((max(c.x for c in xs), max(c.y for c in xs), max(c.z for c in xs)))))
+    chunks = []
+    for (cell, planes) in cells:
+        pts = [q for pts_, _ in cell.faces for q in pts_]
+        cmn = V((min(q.x for q in pts), min(q.y for q in pts), min(q.z for q in pts)))
+        cmx = V((max(q.x for q in pts), max(q.y for q in pts), max(q.z for q in pts)))
+        mb = MB()
+        got = False
+        for p, (bmn, bmx) in zip(parts, boxes):
+            if any(bmx[i] < cmn[i] - 1e-4 or bmn[i] > cmx[i] + 1e-4 for i in range(3)):
+                continue
+            c = p.copy()
+            for (nrm, d) in planes:
+                clip_closed(c, nrm, d, cap_mat, cap_uvf, cap_tint)
+                if not c.verts:
+                    break
+            if c.verts and c.faces:
+                got = True
+                mb.add(c, None, mats=mats, tint='src', uvf='src', ftag='src')
+            else:
+                c.free()
+        if got:
+            chunks.append(mb)
+    info = []
+    for mb in chunks:
+        cen, vol = bm_volume_centroid(mb.bm)
+        info.append((mb, cen, vol))
+    return info
+
+
+def make_chunks(parent, prefix, info, impact, ao=None, sharp=35, max_verts=1500):
+    """Finish cut cells as <prefix>_Chunk_NN children of parent, ordered from
+    the impact point outwards.  ao: ao_lookup of the solid, carried onto the
+    original surfaces (cut faces, tag < 0, keep their own tint)."""
+    info = sorted(info, key=lambda x: (x[1] - V(impact)).length)
+    total, vmax = 0.0, 0
+    for k, (mb, cen, vol) in enumerate(info):
+        mb.decimate(CHUNK_TRIS)
+        cen, vol = bm_volume_centroid(mb.bm)
+        tagl = mb.bm.faces.layers.int.get('tag')
+
+        def vfn(co, n, f, tagl=tagl):
+            if ao is None or (tagl is not None and f[tagl] < 0):
+                return (1.0, 1.0, 1.0)
+            a = ao(co)
+            return (a, a, a)
+        ob = finish(mb, '%s_Chunk_%02d' % (prefix, k), pivot=cen, parent=parent, sharp=sharp, vfn=vfn)
+        nv = len(ob.data.vertices)
+        assert nv <= max_verts, (ob.name, nv)
+        total += vol
+        vmax = max(vmax, nv)
+    return len(info), total, vmax
+
+
+def parts_volume(parts):
+    return sum(bm_volume_centroid(p)[1] for p in parts)
+
+
+def _bool_eval(bm, cutter, op='DIFFERENCE', solver='EXACT'):
+    me = bpy.data.meshes.new('_bool')
+    bm.to_mesh(me)
+    ob = bpy.data.objects.new('_bool', me)
+    bpy.context.scene.collection.objects.link(ob)
+    cm = bpy.data.meshes.new('_cut')
+    cutter.to_mesh(cm)
+    co = bpy.data.objects.new('_cut', cm)
+    bpy.context.scene.collection.objects.link(co)
+    co.hide_render = True
+    md = ob.modifiers.new('b', 'BOOLEAN')
+    md.operation = op
+    md.solver = solver
+    md.object = co
+    dg = bpy.context.evaluated_depsgraph_get()
+    me2 = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    out = bmesh.new()
+    out.from_mesh(me2)
+    for o, m in ((ob, me), (co, cm)):
+        bpy.data.objects.remove(o)
+        bpy.data.meshes.remove(m)
+    bpy.data.meshes.remove(me2)
+    return out
+
+
+def bm_append(dst, src):
+    """Append src's geometry (positions and faces only) to dst."""
+    vmap = {v: dst.verts.new(v.co) for v in src.verts}
+    for f in src.faces:
+        try:
+            dst.faces.new([vmap[v] for v in f.verts])
+        except ValueError:
+            pass
+    return dst
+
+
+def bool_diff(bm, cutters, solver='EXACT', name='part'):
+    """bm minus the closed cutter bmeshes (which must not overlap each other):
+    one EXACT boolean against all of them joined; if that result is not a clean
+    closed solid of plausible volume, fall back to one cutter at a time,
+    skipping (and reporting) any that fail.  Returns a new bmesh (layers are not
+    kept)."""
+    vol = bm_volume_centroid(bm)[1]
+    for c in cutters:
+        bmesh.ops.triangulate(c, faces=[f for f in c.faces if len(f.verts) > 4])
+    vcs = [bm_volume_centroid(c)[1] for c in cutters]
+
+    def ok(out, v0, vc):
+        if not out.faces or not bm_is_closed(out):
+            return False, 0.0
+        v2 = bm_volume_centroid(out)[1]
+        return (v0 - vc * 1.05 - 1e-6 <= v2 <= v0 + 1e-6), v2
+    allc = bmesh.new()
+    for c in cutters:
+        bm_append(allc, c)
+    out = _bool_eval(bm, allc, 'DIFFERENCE', solver)
+    allc.free()
+    good, v2 = ok(out, vol, sum(vcs))
+    if good:
+        bm.free()
+        for c in cutters:
+            c.free()
+        return out
+    out.free()
+    skipped = 0
+    for c, vc in zip(cutters, vcs):
+        out = _bool_eval(bm, c, 'DIFFERENCE', solver)
+        c.free()
+        good, v2 = ok(out, vol, vc)
+        if good:
+            bm.free()
+            bm, vol = out, v2
+        else:
+            out.free()
+            skipped += 1
+    if skipped:
+        print('  %s: skipped %d of %d boolean cutters' % (name, skipped, len(cutters)))
+    return bm
+
+
+def prism_y(poly_xz, y0, y1):
+    """Extrude an (x, z) outline along +Y from y0 to y1 (closed bmesh)."""
+    bm = bm_prism([(x, z) for (x, z) in poly_xz], y0, y1)
+    # bm_prism extrudes along Z: swap (x, y, z) -> (x, z, y), keeping faces outward
+    xform(bm, Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1))))
+    bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    return bm
+
+
+def prism_x(poly_yz, x0, x1):
+    bm = bm_prism([(y, z) for (y, z) in poly_yz], x0, x1)
+    xform(bm, Matrix(((0, 0, 1, 0), (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 1))))
+    return bm
+
+
+def rough_rock(radius, rng, sc=(1, 1, 1), subdiv=1, amp=0.25, flat=0.0, seed_off=None):
+    """A small angular stone: icosphere, noise-displaced, optionally flattened
+    at the bottom so it can sit on something."""
+    bm = bm_ico(radius, subdiv, sc=sc, smooth=False)
+    off = seed_off or V((rng.uniform(0, 90), rng.uniform(0, 90), rng.uniform(0, 90)))
+    for v in bm.verts:
+        d = v.co.normalized() if v.co.length > 1e-9 else V((0, 0, 1))
+        g = noise.noise(v.co * (2.2 / radius) + off)
+        v.co += d * radius * amp * g
+        if flat and v.co.z < -radius * flat:
+            v.co.z = -radius * flat
+    return bm
+
+
+def contour_loops(fn, x0, x1, z0, z1, step):
+    """Marching squares: closed outlines [(x, z), ...] (CCW) of the regions where
+    fn(x, z) > 0 over the rectangle; everything outside counts as negative, so
+    regions touching the border close along it."""
+    nx = int(math.ceil((x1 - x0) / step))
+    nz = int(math.ceil((z1 - z0) / step))
+    val = {}
+    for i in range(-1, nx + 2):
+        for j in range(-1, nz + 2):
+            if i < 0 or j < 0 or i > nx or j > nz:
+                val[i, j] = -1.0
+            else:
+                w = fn(x0 + i * step, z0 + j * step)
+                val[i, j] = w if abs(w) > 1e-9 else 1e-9
+
+    def P(i, j):
+        return (x0 + i * step, z0 + j * step)
+
+    def cross(a, b):
+        (ia, ja), (ib, jb) = a, b
+        va, vb = val[a], val[b]
+        t = va / (va - vb)
+        pa, pb = P(ia, ja), P(ib, jb)
+        return (lerp(pa[0], pb[0], t), lerp(pa[1], pb[1], t))
+    nxt = {}
+    pos = {}
+    for i in range(-1, nx + 1):
+        for j in range(-1, nz + 1):
+            A, Bq, Cq, D = (i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)
+            s = [val[A] > 0, val[Bq] > 0, val[Cq] > 0, val[D] > 0]
+            if all(s) or not any(s):
+                continue
+            # cell edges in counter-clockwise order (start, end corners); a
+            # contour segment runs from a '+ -> -' crossing to a '- -> +' one,
+            # which keeps the positive region on its left
+            edges = [(('h', i, j), A, Bq), (('v', i + 1, j), Bq, Cq), (('h', i, j + 1), Cq, D), (('v', i, j), D, A)]
+            ex = [e for e in edges if (val[e[1]] > 0) != (val[e[2]] > 0)]
+            for (k, a, b) in ex:
+                pos[k] = cross(a, b)
+            out_ = {k: val[a] > 0 for (k, a, b) in ex}      # True: + -> -
+            if len(ex) == 2:
+                pairs = [(ex[0][0], ex[1][0])]
+            else:
+                cen = (val[A] + val[Bq] + val[Cq] + val[D]) / 4.0
+                e0, e1, e2, e3 = [e[0] for e in edges]
+                if s[0]:          # a and c positive
+                    pairs = [(e0, e1), (e2, e3)] if cen > 0 else [(e3, e0), (e1, e2)]
+                else:             # b and d positive
+                    pairs = [(e3, e0), (e1, e2)] if cen > 0 else [(e0, e1), (e2, e3)]
+            for (ka, kb) in pairs:
+                if out_[ka]:
+                    nxt[ka] = kb
+                else:
+                    nxt[kb] = ka
+    loops = []
+    seen = set()
+    for k0 in list(nxt):
+        if k0 in seen:
+            continue
+        loop = []
+        k = k0
+        while k not in seen and k in nxt:
+            seen.add(k)
+            loop.append(pos[k])
+            k = nxt[k]
+        if len(loop) >= 3:
+            loops.append(loop)
+    return loops
+
+
+def simplify_loop(pts, tol, max_seg=None):
+    """Douglas-Peucker for a closed loop (keeps the two farthest-apart points)."""
+    n = len(pts)
+    if n < 4:
+        return pts
+    i0 = 0
+    i1 = max(range(n), key=lambda i: (pts[i][0] - pts[0][0]) ** 2 + (pts[i][1] - pts[0][1]) ** 2)
+
+    def dp(seq):
+        if len(seq) < 3:
+            return seq
+        (ax, az), (bx, bz) = seq[0], seq[-1]
+        dx, dz = bx - ax, bz - az
+        L = math.hypot(dx, dz)
+        best, bi = -1.0, 0
+        for k in range(1, len(seq) - 1):
+            px, pz = seq[k]
+            if L < 1e-12:
+                d = math.hypot(px - ax, pz - az)
+            else:
+                d = abs((px - ax) * dz - (pz - az) * dx) / L
+            if d > best:
+                best, bi = d, k
+        if best > tol or (max_seg and L > max_seg):
+            left = dp(seq[:bi + 1])
+            return left[:-1] + dp(seq[bi:])
+        return [seq[0], seq[-1]]
+    a = dp(pts[i0:i1 + 1])
+    b = dp(pts[i1:] + [pts[0]])
+    return a[:-1] + b[:-1]
+
+
+def poly_simple(q):
+    n = len(q)
+
+    def seg_x(p1, p2, p3, p4):
+        d = (p2[0] - p1[0]) * (p4[1] - p3[1]) - (p2[1] - p1[1]) * (p4[0] - p3[0])
+        if abs(d) < 1e-14:
+            return False
+        t = ((p3[0] - p1[0]) * (p4[1] - p3[1]) - (p3[1] - p1[1]) * (p4[0] - p3[0])) / d
+        u = ((p3[0] - p1[0]) * (p2[1] - p1[1]) - (p3[1] - p1[1]) * (p2[0] - p1[0])) / d
+        return 1e-9 < t < 1 - 1e-9 and 1e-9 < u < 1 - 1e-9
+    for i in range(n):
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue
+            if seg_x(q[i], q[(i + 1) % n], q[j], q[(j + 1) % n]):
+                return False
+    return True
+
+
+def simplify_safe(pts, tol, max_seg=None):
+    """simplify_loop that never returns a self-intersecting outline."""
+    for t in (tol, tol * 0.5, tol * 0.25):
+        q = simplify_loop(pts, t, max_seg)
+        if len(q) >= 3 and poly_simple(q):
+            return q
+    return pts if poly_simple(pts) else None
+
+
+def loop_area(pts):
+    return 0.5 * sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1]
+                     for i in range(len(pts)))
+
+
+def solidity_check(bm, name):
+    if not bm_is_closed(bm):
+        nb = sum(1 for e in bm.edges if len(e.link_faces) != 2)
+        print('  WARNING %s: %d non-manifold edges' % (name, nb))
+
+
+SOLIDS = {}       # name -> (closed parts, ao lookup) for the fracture builders
+CHUNK_TRIS = 290  # triangle cap per fracture chunk (debris frame budget)
+
+
+# ----------------------------------------------------------------------------
+# Wall: a ruined stretch of Catalan wall (collider 4 x 3 x 0.5, centred y 1.5)
+# ----------------------------------------------------------------------------
+def wall_mats():
+    return [tx('stucco'), tx('stone')]
+
+
+def wall_profile():
+    """z of the rubble core top and of the render's upper edge along x."""
+    rng = random.Random(4417)
+    jag = [rng.uniform(-1, 1) for _ in range(64)]
+
+    def jn(x):
+        t = clamp((x + 2.0) / 4.0, 0.0, 1.0) * 63
+        i = int(clamp(math.floor(t), 0, 62))
+        f = t - i
+        return lerp(jag[i], jag[i + 1], f)
+
+    def core(x):
+        if x > 1.02:                     # the ruined east end
+            t = (x - 1.02) / 0.98
+            base = 2.86 - 0.16 * math.sin(math.pi * min(1.0, t * 0.8)) ** 0.7 - 0.05 * t
+            return min(2.93, base + 0.045 * jn(x) + 0.03 * math.sin(x * 23.0))
+        if x < -1.78:                    # a corner stone gone at the west end
+            t = (-1.78 - x) / 0.22
+            return 2.86 - 0.09 * smoothstep(0.0, 0.6, t) + 0.02 * jn(x)
+        return 2.86
+
+    def render(x):
+        c = core(x)
+        if x > 0.98 or x < -1.74:
+            return c - 0.07 - 0.1 * abs(jn(x * 1.7 + 0.3)) - 0.05 * smoothstep(1.3, 1.9, x)
+        return 2.86
+    return core, render
+
+
+def wall_parts():
+    """Closed parts of the Wall (material 0 = TX_stucco, 1 = TX_stone), each with
+    Col / UVMap / tag layers.  Tags: 1 core, 2 render, 3 plinth, 4 coping,
+    5 rubble."""
+    rng = random.Random(1917)
+    core_z, render_z = wall_profile()
+    uvb = uv_box()
+    parts = []
+    off = V((3.7, 1.3, 8.1))
+
+    def ruin(x):
+        return max(smoothstep(0.9, 1.15, x), smoothstep(-1.66, -1.8, x))
+
+    def damp(co):
+        # rising damp: an irregular tide line ~0.7-1.1 m up, darker below
+        tide = 0.9 + 0.3 * fbm(V((co.x * 0.9, 0.0, 3.3)) + off, 3)
+        return smoothstep(tide, tide - 0.55, co.z)
+
+    def streak(co):
+        s_ = max(0.0, noise.noise(V((co.x * 3.1, 1.7, 0.0)) + off)) * 1.8
+        s_ += 0.5 * max(0.0, noise.noise(V((co.x * 7.3, 4.1, 0.0)) + off))
+        s_ *= smoothstep(1.0, 2.8, co.z)
+        return min(1.0, s_)
+
+    # ---- where the render has flaked off: marching-squares outlines of a
+    # fractal mask, strongest in the rising-damp band, at the ruined top and at
+    # the corners; the threshold is solved for a target coverage per face
+    def mask_fn(side):
+        so = V((0.0, 0.0, 17.0 * side))
+
+        def m(x, z):
+            g = fbm(V((x * 1.25, z * 1.25, 0.0)) + off + so, 4)
+            g += 0.3 * noise.noise(V((x * 5.0, z * 5.0, 3.0)) + off + so)
+            g += 0.12 * noise.noise(V((x * 12.0, z * 12.0, 9.0)) + off + so)
+            band = 0.62 * smoothstep(1.2, 0.55, z + 0.3 * fbm(V((x * 1.1, 0.0, side)) + off, 2))
+            top = 0.7 * ruin(x) * smoothstep(0.35, 0.0, render_z(x) - z)
+            ends = 0.18 * smoothstep(1.75, 2.05, abs(x))
+            return g + band + top + ends
+        return m
+    outlines = {}
+    cutters = []
+    for side, target in ((-1, 0.3), (1, 0.26)):
+        m = mask_fn(side)
+        samp = [m(x, z) for x in [-1.98 + 0.08 * i for i in range(50)] for z in [0.5 + 0.08 * j for j in range(30)]
+                if z < render_z(x)]
+        samp.sort()
+        thr = samp[int(len(samp) * (1.0 - target))]
+        for _ in range(30):
+            loops = contour_loops(lambda x, z: m(x, z) - thr, -2.16, 2.16, 0.36, 3.0, 0.045)
+            # a flaked region that closes around unflaked render (an island)
+            # would cut the island away with it: raise the threshold until
+            # only small islands remain
+            if min([loop_area(q) for q in loops] + [0.0]) > -0.03:
+                break
+            thr += 0.02
+        keep = []
+        for lp_ in loops:
+            if loop_area(lp_) < 0.006:           # specks, and the islands inside holes
+                continue
+            q = simplify_safe(lp_, 0.04, 0.24)
+            if q and abs(loop_area(q)) > 0.005:
+                keep.append(q)
+        outlines[side] = keep
+        y0, y1 = (-0.3, -0.206) if side < 0 else (0.206, 0.3)
+        for q in keep:
+            cutters.append(prism_y(q, y0, y1))
+    edge_pts = {}
+    for side, loops in outlines.items():
+        pts = []
+        for q in loops:
+            for i in range(len(q)):
+                (ax, az), (bx, bz) = q[i], q[(i + 1) % len(q)]
+                k = max(1, int(math.hypot(bx - ax, bz - az) / 0.02))
+                pts += [(lerp(ax, bx, t / k), lerp(az, bz, t / k)) for t in range(k)]
+        kd = KDTree(max(1, len(pts)))
+        for i, (x, z) in enumerate(pts):
+            kd.insert((x, 0.0, z), i)
+        kd.balance()
+        edge_pts[side] = kd
+
+    def edge_d(co):
+        side = -1 if co.y < 0 else 1
+        hit = edge_pts[side].find((co.x, 0.0, co.z))
+        return hit[2] if hit[0] is not None else 9.0
+
+    def render_tint(co):
+        k = 1.0 - 0.1 * max(0.0, fbm(co * 1.1 + off, 3)) * 2.0
+        k *= 1.0 - 0.06 * noise.noise(co * 4.0 + off)
+        d = damp(co)
+        s_ = streak(co)
+        # warm lime-wash cream (the kit's old wall colour), patchy, stained
+        r, g, b = 1.0, 0.9, 0.71
+        r, g, b = mix3((r, g, b), (0.92, 0.79, 0.57), min(1.0, 1.1 * max(0.0, fbm(co * 0.6 + off * 2.0, 2))))
+        r, g, b = mix3((r, g, b), (0.6, 0.5, 0.35), 0.72 * d)
+        r, g, b = mix3((r, g, b), (0.52, 0.47, 0.4), 0.55 * s_)
+        e = smoothstep(0.12, 0.0, edge_d(co)) if abs(co.y) > 0.2 else 0.0
+        r, g, b = mix3((r, g, b), (0.62, 0.55, 0.45), 0.5 * e)
+        return (r * k, g * k, b * k)
+
+    def stone_tint(co):
+        k = 1.0 - 0.12 * max(0.0, fbm(co * 2.0 + off * 1.3, 3)) * 2.0
+        d = damp(co) * 0.7 + 0.3 * (1.0 - smoothstep(0.0, 0.3, co.z))
+        c = mix3((k, k * 0.97, k * 0.93), (0.6 * k, 0.57 * k, 0.49 * k), d)
+        if 0.2 < abs(co.y) < 0.26 and co.z > 0.45:
+            e = smoothstep(0.12, 0.0, edge_d(co))
+            c = mix3(c, (c[0] * 0.72, c[1] * 0.7, c[2] * 0.66), e)
+        return c
+
+    # ---- plinth (socol): battered rubble base with a sloped wash on top
+    secs = [rrect(0, 0, 2.0, 0.285, 0.035, 0.0, n=1), rrect(0, 0, 1.998, 0.272, 0.03, 0.46, n=1),
+            rrect(0, 0, 1.99, 0.246, 0.02, 0.52, n=1)]
+    pl = bm_loft(secs, smooth=False)
+    bmesh.ops.triangulate(pl, faces=[f for f in pl.faces if len(f.verts) > 4])
+    grid_cut(pl, 0, [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5])
+    grid_cut(pl, 2, [0.2])
+    for v in pl.verts:
+        if 0.01 < v.co.z < 0.45 and abs(v.co.y) > 0.2:
+            v.co.y += math.copysign(0.008 * fbm(v.co * 3.0 + off, 2), v.co.y)
+    parts.append(part_bm(pl, 1, uvb, stone_tint, tag=3, smooth=True))
+
+    # ---- rubble core, visible where the render has flaked and at the ruined top
+    xs = sorted(set([-1.978, -1.9, -1.82, -1.74, -1.4, -0.9, -0.4, 0.1, 0.6, 0.98] +
+                    [round(1.06 + 0.115 * k, 4) for k in range(9)] + [1.978]))
+    zrows = [0.36, 1.2, 2.0]
+    cb = bmesh.new()
+    Y = 0.236
+    cols = []
+    for x in xs:
+        zt = core_z(x)
+        col_ = []
+        for side in (-1, 1):
+            ring = []
+            for z in zrows + [zt]:
+                zz = min(z, zt)
+                d = 0.006 * fbm(V((x * 2.5, side * 3.0, zz * 2.5)) + off, 2)
+                ring.append(cb.verts.new((x, side * (Y + d), zz)))
+            col_.append(ring)
+        ridge = cb.verts.new((x, 0.02 * noise.noise(V((x * 4.0, 5.0, 1.0))),
+                              zt + 0.03 + 0.025 * abs(noise.noise(V((x * 6.0, 2.0, 7.0))))))
+        cols.append((col_, ridge))
+    for i in range(len(xs) - 1):
+        (fa, ra), (fb, rb_) = cols[i], cols[i + 1]
+        for s_ in range(2):
+            A, Bc = fa[s_], fb[s_]
+            for j in range(len(A) - 1):
+                q = [A[j], Bc[j], Bc[j + 1], A[j + 1]]
+                cb.faces.new(q if s_ == 0 else list(reversed(q)))
+        cb.faces.new([fa[0][-1], fb[0][-1], rb_, ra])
+        cb.faces.new([ra, rb_, fb[1][-1], fa[1][-1]])
+        cb.faces.new([fa[0][0], fa[1][0], fb[1][0], fb[0][0]])
+    for (col_, ridge), sgn in ((cols[0], -1), (cols[-1], 1)):
+        A, Bc = col_
+        ring = A + [ridge] + list(reversed(Bc))
+        cb.faces.new(ring if sgn < 0 else list(reversed(ring)))
+    bmesh.ops.recalc_face_normals(cb, faces=cb.faces)
+    bmesh.ops.triangulate(cb, faces=[f for f in cb.faces if len(f.verts) > 4])
+    solidity_check(cb, 'wall core')
+    parts.append(part_bm(cb, 1, uvb, stone_tint, tag=1, smooth=True))
+
+    # ---- lime render: a closed ring (front, ends, back) with chamfered corners,
+    # ~2 cm thick, flaked through along the outlines above
+    c = 0.035
+    RX, RY, IX, IY = 2.0, 0.25, 1.972, 0.231
+    loop = []                                      # (outer xy, inner xy)
+    fx = sorted(set([-RX + c, -1.87, -1.74, -1.4, -0.9, -0.4, 0.1, 0.6, 0.98, 1.2, 1.4, 1.6, 1.8, RX - c]))
+    for x in fx:
+        loop.append(((x, -RY), (clamp(x, -IX, IX), -IY)))
+    for y in (-RY + c, 0.0, RY - c):
+        loop.append(((RX, y), (IX, clamp(y, -IY, IY))))
+    for x in reversed(fx):
+        loop.append(((x, RY), (clamp(x, -IX, IX), IY)))
+    for y in (RY - c, 0.0, -RY + c):
+        loop.append(((-RX, y), (-IX, clamp(y, -IY, IY))))
+    rb = bmesh.new()
+    NR = 4
+    z0 = 0.5
+    rings = []
+    for (o, i_) in loop:
+        zt = render_z(o[0])
+        outer = []
+        for j in range(NR + 1):
+            z = lerp(z0, zt, (j / NR) ** 0.85)
+            b = 0.006 * fbm(V((o[0] * 1.3, o[1] * 4.0, z * 1.3)) + off * 0.7, 2)
+            dx = math.copysign(b, o[0]) if abs(o[0]) >= RX - 1e-6 else 0.0
+            dy = math.copysign(b, o[1]) if abs(o[1]) >= RY - 1e-6 else 0.0
+            outer.append(rb.verts.new((o[0] + dx, o[1] + dy, z)))
+        inner = [rb.verts.new((i_[0], i_[1], z0 + 0.004)), rb.verts.new((i_[0], i_[1], zt - 0.004))]
+        rings.append((outer, inner))
+    n = len(rings)
+    for k in range(n):
+        (oa, ia), (ob_, ib) = rings[k], rings[(k + 1) % n]
+        for j in range(NR):
+            rb.faces.new([oa[j], ob_[j], ob_[j + 1], oa[j + 1]])
+        rb.faces.new([ia[0], ia[1], ib[1], ib[0]])
+        rb.faces.new([oa[NR], ob_[NR], ib[1], ia[1]])
+        rb.faces.new([ia[0], ib[0], ob_[0], oa[0]])
+    bmesh.ops.recalc_face_normals(rb, faces=rb.faces)
+    rb.normal_update()
+    if sum((f.calc_center_median() - V((0, 0, 1.5))).dot(f.normal) for f in rb.faces) < 0:
+        bmesh.ops.reverse_faces(rb, faces=rb.faces)
+    solidity_check(rb, 'wall render (before holes)')
+    rb = bool_diff(rb, cutters, name='wall render')
+    solidity_check(rb, 'wall render')
+    parts.append(part_bm(rb, 0, uvb, render_tint, tag=2, smooth=True))
+
+    # ---- coping: chamfered stone slabs over the sound part of the wall
+    for i, (x0, x1) in enumerate(((-1.78, -0.73), (-0.71, 0.3), (0.32, 1.05))):
+        s_ = bm_box_mm((x0, -0.3, 2.86), (x1, 0.3, 3.0), bevel=0.016, segs=1, smooth=False)
+        if i == 2:                          # the last one broke off at a slant
+            for v in s_.verts:
+                if v.co.x > 0.9:
+                    v.co.x -= 0.1 * (v.co.y + 0.3) / 0.6 + 0.02 * (v.co.z - 2.86) / 0.14
+        a = math.radians(rng.uniform(-0.6, 0.6))
+        rot(s_, a, 'Z', ((x0 + x1) / 2, 0, 2.93))
+        for v in s_.verts:
+            if v.co.z > 2.99:
+                v.co.z = 3.0 - 0.006 * abs(noise.noise(v.co * 5.0 + off))
+        grid_cut(s_, 0, [(x0 + x1) / 2])
+        parts.append(part_bm(s_, 1, uv_box(off=(rng.uniform(0, 2), rng.uniform(0, 2))),
+                             lambda co: grey(0.9 - 0.1 * max(0.0, fbm(co * 3.0 + off, 2))), tag=4))
+
+    # ---- loose rubble on the ruined top
+    for (x, sz) in ((1.3, 0.11), (1.72, 0.095), (-1.9, 0.07)):
+        zt = core_z(x)
+        st = rough_rock(sz, rng, sc=(1.2, 0.9, 0.62), subdiv=1, amp=0.22, flat=0.35)
+        move(st, (x, rng.uniform(-0.08, 0.08), zt - 0.015))
+        for v in st.verts:
+            v.co.z = min(v.co.z, 2.985)
+        parts.append(part_bm(st, 1, uv_box(off=(rng.uniform(0, 2), 0.0)), stone_tint, tag=5, smooth=False))
+    return parts
+
+
+def build_wall(P):
+    mats = wall_mats()
+    parts = wall_parts()
+    mb = MB()
+    for p in parts:
+        mb.add(p.copy(), None, mats=mats, tint='src', uvf='src', ftag='src')
+    ob = finish(mb, 'Wall', sharp=40)
+    ao = bake_ao(ob, dist=0.7, samples=160, strength=0.85, ground=0.0)
+    SOLIDS['Wall'] = (parts, ao_lookup(ao))
+    print('  Wall: %d parts, volume %.4f' % (len(parts), parts_volume(parts)))
+
+
+# ============================================================================
 # PROPERTY-SOURCE PROPS
 # ============================================================================
 def build_clock(P):
@@ -802,19 +1760,19 @@ def build_clock(P):
     case = bm_lathe([(0, -0.042), (0.12, -0.041), (0.24, -0.037), (0.33, -0.030),
                      (0.39, -0.021), (0.425, -0.011), (0.443, 0.0), (0.45, 0.012),
                      (0.447, 0.025), (0.439, 0.035), (0.427, 0.042), (0.414, 0.045),
-                     (0.404, 0.042), (0.399, 0.034), (0.398, 0.021)], segs=96, cap=False)
+                     (0.404, 0.042), (0.399, 0.034), (0.398, 0.021)], segs=30, cap=False)
     mb.add(xform(case, Mw), gold)
     disc = bm_lathe([(0.405, 0.021), (0.36, 0.021), (0.27, 0.021), (0.14, 0.021), (0, 0.021)],
-                    segs=96, cap=False)
+                    segs=30, cap=False)
 
     def face_tint(co):
         d = (co - C).length / 0.405
         k = 1.0 - 0.10 * smoothstep(0.55, 1.0, d) - 0.05 * max(0.0, fbm(co * 5.0 + V((3, 1, 2))))
         return (k, k * 0.985, k * 0.95)
     mb.add(xform(disc, Mw), face, tint=face_tint)
-    ring = bm_lathe([(0.381, 0.0217), (0.373, 0.0217)], segs=96, cap=False)
+    ring = bm_lathe([(0.381, 0.0217), (0.373, 0.0217)], segs=30, cap=False)
     mb.add(xform(ring, Mw), ink)
-    ring2 = bm_lathe([(0.262, 0.0217), (0.258, 0.0217)], segs=96, cap=False)
+    ring2 = bm_lathe([(0.262, 0.0217), (0.258, 0.0217)], segs=30, cap=False)
     mb.add(xform(ring2, Mw), ink)
     for k in range(60):
         a = math.pi / 2 - k * TAU / 60
@@ -823,21 +1781,24 @@ def build_clock(P):
             r0, r1, w = (0.285, 0.37, 0.032) if big else (0.305, 0.37, 0.014)
         else:
             r0, r1, w = (0.366, 0.386, 0.004)
-        t = bm_box((r1 - r0, w, 0.0045), center=((r0 + r1) / 2, 0, 0.0237), smooth=False)
+        if k % 15 == 0:                 # quarter marks keep their thickness
+            t = bm_box((r1 - r0, w, 0.0045), center=((r0 + r1) / 2, 0, 0.0237), smooth=False)
+        else:                           # the rest are flat inked marks on the dial
+            t = bm_grid(1, 1, r0, r1, -w / 2, w / 2, z=0.0237 + 0.00225)
         rot(t, a, 'Z')
         mb.add(xform(t, Mw), ink)
     # crown / winder with a bow ring
-    stem = bm_lathe([(0, 0.425), (0.021, 0.425), (0.021, 0.47), (0.03, 0.476), (0, 0.48)], segs=24)
+    stem = bm_lathe([(0, 0.425), (0.021, 0.425), (0.021, 0.47), (0.03, 0.476), (0, 0.48)], segs=10)
     mb.add(xform(stem, Mup), gold)
 
     def knurl(t, r, z):
-        rr = r * (1.0 + 0.06 * math.cos(24 * t)) if 0.487 < z < 0.521 else r
+        rr = r * (1.0 + 0.06 * math.cos(6 * t)) if 0.487 < z < 0.521 else r
         return (rr * math.cos(t), rr * math.sin(t), z)
     knob = bm_lathe([(0, 0.476), (0.036, 0.478), (0.044, 0.485), (0.047, 0.494), (0.047, 0.514),
-                     (0.044, 0.522), (0.034, 0.528), (0, 0.531)], segs=48, vfun=knurl)
+                     (0.044, 0.522), (0.034, 0.528), (0, 0.531)], segs=12, vfun=knurl)
     mb.add(xform(knob, Mup), gold)
-    bow = bm_tube([(0.05 * math.cos(TAU * i / 40), 0.578 + 0.05 * math.sin(TAU * i / 40), 0)
-                   for i in range(40)], 0.0105, sides=12, closed=True, fixed_b=(0, 0, 1))
+    bow = bm_tube([(0.05 * math.cos(TAU * i / 12), 0.578 + 0.05 * math.sin(TAU * i / 12), 0)
+                   for i in range(12)], 0.0105, sides=5, closed=True, fixed_b=(0, 0, 1))
     mb.add(xform(bow, Mw), gold)
     finish(mb, 'Clock', sharp=50, weighted=True)
 
@@ -854,7 +1815,7 @@ def build_clock(P):
     mbm = MB()
     mbm.add(hand([(-0.075, 0.010), (-0.05, 0.006), (-0.02, 0.005), (0.0, 0.014), (0.02, 0.005),
                   (0.30, 0.0035), (0.335, 0.0)], 0.0305, 0.0335), steel)
-    pin = bm_lathe([(0, 0.02), (0.011, 0.02), (0.012, 0.035), (0.009, 0.039), (0, 0.040)], segs=24)
+    pin = bm_lathe([(0, 0.02), (0.011, 0.02), (0.012, 0.035), (0.009, 0.039), (0, 0.040)], segs=8)
     mbm.add(xform(pin, Mw), gold)
     finish(mbm, 'Clock_HandMinute', pivot=P0, parent='Clock', sharp=30)
 
@@ -999,8 +1960,8 @@ def build_mirror(P):
                         (0.022, 0.05), (0.014, 0.08), (0.014, 0.5), (0, 0.5)], segs=12)
     rot(stretch, math.pi / 2, 'Y')
     mb.add(move(stretch, (0, 0, 0.3)), wood)
-    finish(mb, 'Mirror', sharp=45, vfn=ao_fn(h=0.3, amt=0.25), weighted=True)
-    gl = bm_lathe([(1.0, 0), (0.8, 0), (0.5, 0), (0.0, 0)], segs=64, sx=0.333, sy=0.593)
+    finish(mb, 'Mirror', sharp=45, vfn=ao_fn(h=0.3, amt=0.25), weighted=True, decimate=2750)
+    gl = bm_lathe([(1.0, 0), (0.8, 0), (0.5, 0), (0.0, 0)], segs=24, sx=0.333, sy=0.593)
     xform(gl, Matrix.Translation(V((0, -0.004, Cz))) @ Matrix.Rotation(math.pi / 2, 4, 'X'))
     g = MB()
     g.add(gl, glassm)
@@ -1060,11 +2021,11 @@ def build_candle(P):
     def vfn(co, n, f):
         k = 1.0 - 0.18 * smoothstep(0.12, 0.0, co.z) * smoothstep(0.02, 0.06, math.hypot(co.x, co.y))
         return (k, k, k)
-    finish(mb, 'Candle', sharp=50, vfn=vfn)
+    finish(mb, 'Candle', sharp=50, vfn=vfn, decimate=1020)
     fb = MB()
     base = V((0.002, 0, z1 + 0.012))
     fl = bm_lathe([(0, 0), (0.008, 0.004), (0.015, 0.018), (0.018, 0.034), (0.016, 0.05),
-                   (0.011, 0.068), (0.005, 0.083), (0, 0.095)], segs=20, sy=0.85)
+                   (0.011, 0.068), (0.005, 0.083), (0, 0.095)], segs=10, sy=0.85)
     fb.add(move(fl, base), flame)
     finish(fb, 'Candle_Flame', pivot=base, parent='Candle', sharp=None)
 
@@ -1108,21 +2069,40 @@ def build_anvil(P):
     finish(mb, 'Anvil', sharp=50, vfn=vfn, weighted=True)
 
 
-def drape(nu, nv, u0, u1, v0, v1, top, hx, yf, rho, amp, seed, freq=9.0):
-    """Cloth draped over a box top [|x|<=hx, y>=yf] at height `top`, hanging over
-    the sides and the foot end.  Returns bmesh (grid, normals up)."""
+def ridge(p):
+    return (1.0 - abs(noise.noise(p))) ** 3
+
+
+def cloth(nu, nv, u0, u1, v0, v1, top, hx, yf, rho, seed, amp_top=0.02, amp_hang=0.03, freq=9.0,
+          hump=None, max_hang=None, foot_hang=None):
+    """Cloth laid over a box top [|x| <= hx, y >= yf] at height `top`, falling
+    over both sides and the foot end (-Y) round a soft edge of radius rho, then
+    rumpled: ridged wrinkles on top, vertical folds that deepen toward the hem,
+    an optional hump (x, y, rx, ry, h).  Single-sided grid, normals outward."""
     bm = bm_grid(nu, nv, u0, u1, v0, v1)
     ph = seed * 1.7
+    so = V((seed * 3.1, seed * 1.3, seed * 0.7))
     for v in bm.verts:
         u, w = v.co.x, v.co.y
         ex = max(0.0, abs(u) - hx)
         ey = max(0.0, yf - w)
         e = math.hypot(ex, ey)
-        if e <= 1e-9:
-            v.co = V((u, w, top))
-            continue
-        d = V((math.copysign(ex, u) / e, -ey / e, 0.0))
         bx, by = clamp(u, -hx, hx), max(w, yf)
+        if e <= 1e-9:
+            base = V((u, w, top))
+            nrm = V((0, 0, 1))
+            g = V((u * 2.2, w * 2.2, 0)) + so
+            g2 = V((u * 5.0 + 0.6 * noise.noise(g), w * 3.0, 1.0)) + so
+            d = amp_top * (0.65 * ridge(g) + 0.5 * ridge(g2) - 0.35)
+            if hump:
+                hx_, hy_, rx, ry, hh = hump
+                q = ((u - hx_) / rx) ** 2 + ((w - hy_) / ry) ** 2
+                d += hh * math.exp(-q * 1.6) * (1.0 + 0.3 * noise.noise(g * 1.5))
+            # soften toward the edge so the roll-over stays continuous
+            edge = smoothstep(0.0, 0.08, min(hx - abs(u), w - yf))
+            v.co = base + nrm * (d * edge)
+            continue
+        dd = V((math.copysign(ex, u) / e, -ey / e, 0.0))
         arc = math.pi * rho / 2
         if e < arc:
             ang = e / rho
@@ -1131,93 +2111,183 @@ def drape(nu, nv, u0, u1, v0, v1, top, hx, yf, rho, amp, seed, freq=9.0):
         else:
             h, dz = rho, rho + (e - arc)
             hang = e - arc
-        s = w if ex >= ey else u
-        fold = amp * smoothstep(0.0, 0.25, hang) * (math.sin(freq * s + ph) * 0.7 +
-                                                    0.3 * math.sin(2.3 * freq * s + 2 * ph))
-        v.co = V((bx, by, top - dz)) + d * (h + fold)
+        lim = max_hang
+        if foot_hang is not None:
+            t_ = smoothstep(0.3, 0.75, ey / e)
+            lim = lerp(max_hang if max_hang is not None else 9.0, foot_hang, t_)
+        if lim is not None and hang > lim:
+            dz -= hang - lim
+            h += (hang - lim) * 0.15
+            hang = lim
+        s_ = w if ex >= ey else u
+        k = smoothstep(0.0, 0.3, hang)
+        fold = amp_hang * k * (math.sin(freq * s_ + ph + 1.5 * noise.noise(V((s_ * 2.0, hang * 2.0, seed)))) * 0.7 +
+                               0.3 * math.sin(2.3 * freq * s_ + 2 * ph))
+        fold += 0.008 * k * k                                  # the hem swings out a little
+        v.co = V((bx, by, top - dz)) + dd * (h + fold)
     set_smooth(bm)
     return bm
 
 
 def build_bed(P):
-    wood = material('BedWood', '#5b2a1b', 0.0, 0.42)
+    """Four-poster: turned and reeded oak posts on square blocks with brass
+    finials, moulded tester and side rails, panelled head- and footboards with
+    an arched cresting rail; mattress, sheet with a turned-down cuff, a rumpled
+    oxblood blanket with a woven border, and a dented pillow (Bed_Pillow,
+    same pivot)."""
+    rng = random.Random(1142)
+    off = V((7.7, 2.1, 5.5))
+    oak = tx('oak')
     sheet, brass = P['sheet'], P['brass']
     blanket = material('Blanket', '#7c2424', 0.0, 0.85, double=True)
+    mats = [oak, brass, sheet, blanket]
     mb = MB()
-    post_prof = [(0.0, 0.45), (0.036, 0.45), (0.041, 0.468), (0.031, 0.49), (0.028, 0.52),
-                 (0.045, 0.62), (0.05, 0.7), (0.042, 0.8), (0.028, 0.88), (0.024, 0.92),
-                 (0.034, 0.95), (0.024, 0.98), (0.021, 1.1), (0.02, 1.5), (0.019, 1.8),
-                 (0.027, 1.83), (0.019, 1.86), (0.019, 1.88), (0.0, 1.88)]
+
+    def wtint(co):
+        g = 1.0 - 0.08 * max(0.0, fbm(co * 3.0 + off, 2)) * 2.0
+        g *= 1.0 - 0.2 * (1.0 - smoothstep(0.0, 0.3, co.z))
+        return (g, g * 0.9, g * 0.8)
+
+    def add(bm, mi, uvf, tag=1, tnt=None, smooth=None):
+        mb.add(part_bm(bm, mi, uvf, tnt or wtint, tag=tag, smooth=smooth), None, mats=mats, tint='src', uvf='src',
+               ftag='src')
+    # ---- posts
+    NR = 6                                            # reeds on the upper post
+
+    def reeds(t, r, z):
+        rr = r
+        if 1.02 < z < 1.72:
+            ph = (t * NR / TAU) % 1.0
+            rr = r * (1.0 - 0.1 * (1.0 - math.sin(math.pi * ph) ** 0.6) * smoothstep(1.02, 1.08, z) * smoothstep(1.72, 1.66, z))
+        return (rr * math.cos(t), rr * math.sin(t), z)
+    post = [(0.0, 0.45), (0.036, 0.45), (0.041, 0.462), (0.034, 0.476), (0.03, 0.5), (0.034, 0.53),
+            (0.047, 0.6), (0.053, 0.66), (0.05, 0.72), (0.04, 0.78), (0.03, 0.83), (0.026, 0.86),
+            (0.033, 0.875), (0.036, 0.89), (0.029, 0.905), (0.025, 0.93), (0.031, 0.95), (0.027, 0.97),
+            (0.029, 1.0), (0.03, 1.02), (0.03, 1.2), (0.028, 1.4), (0.026, 1.6), (0.025, 1.72),
+            (0.029, 1.735), (0.032, 1.75), (0.024, 1.77), (0.021, 1.8), (0.028, 1.83), (0.02, 1.86),
+            (0.02, 1.885), (0.0, 1.885)]
     for sx in (-1, 1):
         for sy in (-1, 1):
             x, y = 0.75 * sx, 1.05 * sy
-            mb.add(move(bm_lathe([(0, 0), (0.04, 0), (0.048, 0.02), (0.042, 0.045), (0, 0.052)],
-                                 segs=16), (x, y, 0)), wood)
-            mb.add(bm_box((0.09, 0.09, 0.4), center=(x, y, 0.25), bevel=0.008), wood)
-            mb.add(move(bm_lathe(post_prof, segs=16), (x, y, 0)), wood)
-            mb.add(bm_box((0.07, 0.07, 0.08), center=(x, y, 1.92), bevel=0.006), wood)
-            mb.add(move(bm_lathe([(0, 1.955), (0.02, 1.96), (0.028, 1.975), (0.02, 1.992),
-                                  (0, 2.0)], segs=16), (x, y, 0)), brass)
-        # side rails + canopy rails
-        mb.add(bm_box_mm((0.73 * sx - 0.02, -1.05, 0.2), (0.73 * sx + 0.02, 1.05, 0.4), bevel=0.006),
-               wood)
-        mb.add(bm_box_mm((0.75 * sx - 0.022, -1.05, 1.885), (0.75 * sx + 0.022, 1.05, 1.93),
-                         bevel=0.006), wood)
+            ft = bm_lathe([(0, 0), (0.038, 0), (0.047, 0.018), (0.044, 0.04), (0.036, 0.052), (0, 0.055)], segs=8)
+            add(move(ft, (x, y, 0)), 0, uv_cyl(cx=x, cy=y, axial_u=True))
+            blk = bm_box((0.09, 0.09, 0.4), center=(x, y, 0.253), bevel=0.008, segs=1, smooth=False)
+            add(blk, 0, uv_box(grain='z'), smooth=False)
+            pl = decimate_bm(bm_lathe(post, segs=12, vfun=reeds), 380)
+            add(move(pl, (x, y, 0)), 0, uv_cyl(cx=x, cy=y, axial_u=True))
+            tb = bm_box((0.07, 0.07, 0.075), center=(x, y, 1.9225), bevel=0.006, segs=1, smooth=False)
+            add(tb, 0, uv_box(grain='z'), smooth=False)
+            fin = bm_lathe([(0, 1.96), (0.012, 1.96), (0.012, 1.965), (0.02, 1.972), (0.024, 1.982),
+                            (0.02, 1.992), (0.008, 1.997), (0, 2.0)], segs=6)
+            add(move(fin, (x, y, 0)), 1, uv_box(), tnt=lambda co: (1, 1, 1))
+    # ---- moulded tester rails and side rails
+    def rail_x(x0, x1, y, z0, z1, d):
+        prof = [(-d, z0), (d, z0), (d, z1 - 0.012), (d * 0.6, z1), (-d * 0.6, z1), (-d, z1 - 0.012)]
+        r = bm_loft([[V((x0, y + py, z)) for (py, z) in prof], [V((x1, y + py, z)) for (py, z) in prof]],
+                    smooth=False)
+        bmesh.ops.recalc_face_normals(r, faces=r.faces)
+        return r
+
+    def rail_y(y0, y1, x, z0, z1, d):
+        prof = [(-d, z0), (d, z0), (d, z1 - 0.012), (d * 0.6, z1), (-d * 0.6, z1), (-d, z1 - 0.012)]
+        r = bm_loft([[V((x + px, y0, z)) for (px, z) in prof], [V((x + px, y1, z)) for (px, z) in prof]],
+                    smooth=False)
+        bmesh.ops.recalc_face_normals(r, faces=r.faces)
+        return r
+    for sx in (-1, 1):
+        add(rail_y(-1.005, 1.005, 0.75 * sx, 1.885, 1.935, 0.022), 0, uv_box(grain='y'))
+        add(rail_y(-1.005, 1.005, 0.73 * sx, 0.2, 0.4, 0.02), 0, uv_box(grain='y'))
     for sy in (-1, 1):
-        mb.add(bm_box_mm((-0.75, 1.05 * sy - 0.022, 1.885), (0.75, 1.05 * sy + 0.022, 1.93),
-                         bevel=0.006), wood)
-    mb.add(bm_box_mm((-0.75, -1.07, 0.2), (0.75, -1.03, 0.4), bevel=0.006), wood)
-    mb.add(bm_box_mm((-0.72, -1.065, 0.4), (0.72, -1.035, 0.66), bevel=0.006), wood)
-    mb.add(bm_box_mm((-0.74, -1.075, 0.66), (0.74, -1.025, 0.7), bevel=0.01), wood)
-    # headboard with an arched top
-    pts = [(-0.72, 0.4), (0.72, 0.4)]
+        add(rail_x(-0.705, 0.705, 1.05 * sy, 1.885, 1.935, 0.022), 0, uv_box())
+    # ---- footboard (-Y): rail, two fielded panels, cap
+    add(bm_box_mm((-0.705, -1.07, 0.2), (0.705, -1.03, 0.4), bevel=0.006, segs=1, smooth=False), 0, uv_box())
+    add(bm_box_mm((-0.705, -1.066, 0.4), (0.705, -1.034, 0.66), bevel=0.004, segs=1, smooth=False), 0, uv_box())
+    add(rail_x(-0.74, 0.74, -1.05, 0.66, 0.71, 0.027), 0, uv_box())
+    # ---- headboard (+Y): two fielded panels in a frame under an arched rail
+    add(bm_box_mm((-0.705, 1.03, 0.2), (0.705, 1.07, 0.4), bevel=0.006, segs=1, smooth=False), 0, uv_box())
+
+    def arch_z(x):
+        return 1.18 + 0.27 * max(0.0, math.cos(math.pi * x / 1.44)) ** 1.5
+    pts = [(-0.705, 0.4), (0.705, 0.4)]
     for k in range(25):
-        x = lerp(0.72, -0.72, k / 24)
-        pts.append((x, 1.18 + 0.27 * max(0.0, math.cos(math.pi * x / 1.44)) ** 1.5))
-    head = bm_prism(pts, -1.07, -1.035)
-    rot(head, math.pi / 2, 'X')
-    mb.add(head, wood, smooth=False)
-    arc = [(x, 1.03, 1.18 + 0.27 * max(0.0, math.cos(math.pi * x / 1.44)) ** 1.5)
-           for x in [lerp(-0.73, 0.73, k / 30) for k in range(31)]]
-    mb.add(bm_tube(arc, 0.024, sides=10), wood)
-    for (x0, x1) in ((-0.6, -0.06), (0.06, 0.6)):
-        mb.add(bm_box_mm((x0, 1.022, 0.52), (x1, 1.04, 1.06), bevel=0.012, segs=1), wood)
-    mb.add(bm_box_mm((-0.72, -1.0, 0.4), (0.72, 1.0, 0.6), bevel=0.05, segs=3), sheet)
-    # sheet, turned-down cuff and a folded oxblood blanket at the foot
-    mb.add(solidify(drape(40, 44, -1.07, 1.07, -1.35, 0.56, 0.607, 0.72, -1.0, 0.05, 0.012, 1), 0.006),
-           sheet)
-    mb.add(solidify(drape(40, 8, -1.08, 1.08, 0.34, 0.6, 0.618, 0.72, -1.0, 0.058, 0.01, 2), 0.006),
-           sheet)
-    mb.add(solidify(drape(40, 20, -1.1, 1.1, -1.42, -0.52, 0.642, 0.72, -1.0, 0.08, 0.006, 3,
-                          freq=11.0), 0.008), blanket)
+        x = lerp(0.705, -0.705, k / 24)
+        pts.append((x, arch_z(x)))
+    head = bm_prism(pts, 1.035, 1.065)
+    xform(head, Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1))))
+    bmesh.ops.reverse_faces(head, faces=head.faces)
+    add(head, 0, uv_box(), smooth=False)
+    arc = [(x, 1.03, arch_z(x)) for x in [lerp(-0.73, 0.73, k / 30) for k in range(31)]]
+    at = bm_tube_uv(arc[::2], 0.026, sides=6)
+    mb.add(part_bm_keep(at, 0, wtint, tag=1), None, mats=mats, tint='src', uvf='src', ftag='src')
+    for (xa, xb) in ((-0.62, -0.05), (0.05, 0.62)):
+        for (za, zb) in ((0.5, 1.05),):
+            fi = 0.05
+            r0 = [(xa, za), (xb, za), (xb, zb), (xa, zb)]
+            r1 = [(xa + fi, za + fi), (xb - fi, za + fi), (xb - fi, zb - fi), (xa + fi, zb - fi)]
+            for sgn in (-1, 1):
+                y_ = 1.05 + sgn * 0.015
+                pn = bm_loft([[V((x, 1.05, z)) for (x, z) in r0], [V((x, y_ + sgn * 0.004, z)) for (x, z) in r0],
+                              [V((x, y_ + sgn * 0.012, z)) for (x, z) in r1]], smooth=False)
+                bmesh.ops.recalc_face_normals(pn, faces=pn.faces)
+                add(pn, 0, uv_box(off=(rng.uniform(0, 1), 0)), smooth=False)
+    # ---- mattress, sheet with a turned-down cuff, blanket with a woven border
+    mat_ = bm_box_mm((-0.72, -1.0, 0.4), (0.72, 1.0, 0.6), bevel=0.05, segs=2)
+    add(mat_, 2, uv_box(), tnt=lambda co: (0.93, 0.92, 0.9), smooth=True)
+
+    def sheet_tint(co):
+        k = 1.0 - 0.05 * max(0.0, fbm(co * 4.0 + off, 2)) * 2.0
+        return (k, k * 0.99, k * 0.96)
+    sh = cloth(38, 46, -0.9, 0.9, -1.1, 0.98, 0.607, 0.72, -0.96, 0.045, 1, amp_top=0.012, amp_hang=0.012,
+               max_hang=0.07, foot_hang=0.05)
+    add(decimate_bm(sh, 480), 2, uv_box(), tnt=sheet_tint, smooth=True)
+
+    def blanket_tint(co):
+        g = 1.0 - 0.1 * max(0.0, fbm(co * 5.0 + off, 2)) * 2.0
+        # a darker woven band a hand's width in from the hem / the fold
+        band = smoothstep(0.03, 0.0, abs(co.z - 0.3)) if co.z < 0.55 else 0.0
+        fold = smoothstep(0.025, 0.0, abs(co.y - 0.12)) if co.z > 0.55 else 0.0
+        weave = 0.04 * (math.sin(co.x * 260.0) * math.sin(co.y * 260.0 + co.z * 260.0))
+        k = g * (1.0 - 0.35 * max(band, fold) + weave)
+        return (k, k * 0.95, k * 0.95)
+    bl = cloth(54, 44, -1.12, 1.12, -1.2, 0.3, 0.64, 0.72, -0.955, 0.05, 3, amp_top=0.04, amp_hang=0.026,
+               freq=11.0, hump=(0.14, -0.3, 0.3, 0.62, 0.08), max_hang=0.28, foot_hang=0.1)
+    add(decimate_bm(bl, 1250), 3, uv_box(), tnt=blanket_tint, smooth=True)
+    # the sheet's cuff turned down over the blanket's head end
+    cf = cloth(38, 8, -1.08, 1.08, 0.2, 0.46, 0.655, 0.72, -1.0, 0.07, 5, amp_top=0.012, amp_hang=0.015,
+               max_hang=0.22)
+    add(decimate_bm(cf, 170), 2, uv_box(), tnt=sheet_tint, smooth=True)
 
     def vfn(co, n, f):
-        k = 1.0 - 0.3 * (1 - smoothstep(0.0, 0.4, co.z)) - 0.2 * smoothstep(0.0, -1.0, n.z)
-        return (k, k, k)
-    finish(mb, 'Bed', sharp=45, vfn=vfn, weighted=True)
-    # pillow
+        return (1.0, 1.0, 1.0)
+    ob = finish(mb, 'Bed', sharp=45, vfn=vfn)
+    # ---- pillow: plumped, pinched corners, a head-shaped dent
     pb = bmesh.new()
     bmesh.ops.create_cube(pb, size=2.0)
-    bmesh.ops.subdivide_edges(pb, edges=pb.edges, cuts=7, use_grid_fill=True)
-    hx, hy, hz = 0.32, 0.18, 0.075
+    bmesh.ops.subdivide_edges(pb, edges=pb.edges, cuts=4, use_grid_fill=True)
+    hx, hy, hz = 0.33, 0.19, 0.08
     for v in pb.verts:
         x, y, z = v.co
-        th = ((1 - abs(x) ** 2.5) * (1 - abs(y) ** 2.5)) ** 0.55
+        th = ((1 - abs(x) ** 2.4) * (1 - abs(y) ** 2.4)) ** 0.55
         X = x * hx * (1 + 0.05 * (1 - y * y))
         Y = y * hy * (1 + 0.07 * (1 - x * x))
         Z = z * hz * th
         if z > 0:
-            Z -= 0.022 * (1 - x * x) * (1 - y * y)
+            Z -= 0.03 * math.exp(-((x + 0.15) ** 2 / 0.18 + (y - 0.05) ** 2 / 0.35))
+            Z += 0.006 * ridge(V((x * 3.0, y * 3.0, 2.0)))
+        corner = abs(x) ** 6 * abs(y) ** 6
+        Z *= 1.0 - 0.5 * corner
         v.co = V((X, Y, Z))
-    pb = subsurf(pb, 1)
+    pb = decimate_bm(subsurf(pb, 1), 460)
     set_smooth(pb)
     zmin = min(v.co.z for v in pb.verts)
     pc = V((0, 0.76, 0.607))
     move(pb, pc - V((0, 0, zmin)))
     pmb = MB()
-    pmb.add(pb, sheet)
-    finish(pmb, 'Bed_Pillow', pivot=pc, parent='Bed', sharp=None,
-           vfn=lambda co, n, f: grey(1.0 - 0.15 * smoothstep(0.0, -1.0, n.z)))
+    pmb.add(part_bm(pb, 0, uv_box(), lambda co: grey(0.97), tag=1), None, mats=[sheet], tint='src', uvf='src',
+            ftag='src')
+    pob = finish(pmb, 'Bed_Pillow', pivot=pc, parent='Bed', sharp=None)
+    bake_ao(ob, dist=0.35, samples=128, strength=0.85, ground=0.0, keep=(pob,))
+    bake_ao(pob, dist=0.15, samples=96, strength=0.7, keep=(ob,))
 
 
 def build_bowler(P):
@@ -1230,18 +2300,19 @@ def build_bowler(P):
             k = (r - 0.132) / 0.08
             zz += 0.05 * k * k * (math.cos(t) ** 2) - 0.008 * k * (math.sin(t) ** 2)
         return (r * math.cos(t) * 0.93, r * math.sin(t), zz)
-    prof = [(0, 0.186), (0.06, 0.181), (0.094, 0.162), (0.114, 0.125), (0.12, 0.075), (0.121, 0.024),
-            (0.128, 0.01), (0.155, 0.007), (0.185, 0.01), (0.2, 0.017), (0.208, 0.027),
-            (0.2105, 0.038), (0.205, 0.045), (0.195, 0.043), (0.176, 0.031), (0.152, 0.025),
-            (0.136, 0.026), (0.1295, 0.031), (0.1275, 0.05), (0.1285, 0.09), (0.1245, 0.13),
-            (0.114, 0.16), (0.096, 0.182), (0.07, 0.196), (0.04, 0.2025), (0, 0.2045)]
+    # (perf budget: a lighter profile and 28 segments instead of 26 x 72;
+    #  felt and band share segments so the band never z-fights the crown)
+    prof = [(0, 0.186), (0.105, 0.152), (0.121, 0.024),
+            (0.13, 0.009), (0.17, 0.008), (0.2, 0.017), (0.209, 0.03), (0.2085, 0.041), (0.198, 0.044),
+            (0.17, 0.029), (0.14, 0.0255), (0.1295, 0.031), (0.1275, 0.05), (0.1285, 0.09), (0.1245, 0.13),
+            (0.108, 0.168), (0.07, 0.196), (0, 0.2045)]
     mb = MB()
-    mb.add(bm_lathe(prof, segs=72, vfun=vf), felt)
+    mb.add(bm_lathe(prof, segs=28, vfun=vf), felt)
     mb.add(bm_lathe([(0.1281, 0.028), (0.1296, 0.031), (0.1301, 0.061), (0.1283, 0.064)],
-                    segs=72, vfun=vf, cap=False), band)
+                    segs=28, vfun=vf, cap=False), band)
     for (y, zc, sc) in ((0.017, 0.047, (0.006, 0.02, 0.012)), (-0.017, 0.045, (0.006, 0.02, 0.011)),
                         (0.0, 0.046, (0.007, 0.009, 0.011))):
-        mb.add(bm_ico(1.0, 2, center=(0.1215, y, zc), sc=sc), band)
+        mb.add(bm_ico(1.0, 1, center=(0.1215, y, zc), sc=sc), band)
     zmin = min(v.co.z for v in mb.bm.verts)
     move(mb.bm, (0, 0, -zmin))
     finish(mb, 'BowlerHat', sharp=None,
@@ -1254,32 +2325,32 @@ def build_birdcage(P):
     mb = MB()
     tray = bm_lathe([(0, 0.0), (0.2, 0.0), (0.215, 0.006), (0.205, 0.018), (0.23, 0.024),
                      (0.25, 0.034), (0.25, 0.07), (0.244, 0.075), (0.236, 0.07), (0.232, 0.04),
-                     (0.0, 0.04)], segs=48)
+                     (0.0, 0.04)], segs=24)
     mb.add(tray, brass)
     nb = 24
     Rb, zt = 0.225, 0.46
     for i in range(nb):
         ph = TAU * i / nb
-        pts = [(Rb, 0.05), (Rb, 0.2), (Rb, 0.35), (Rb, zt)]
-        for k in range(1, 11):
-            s = (math.pi / 2 - 0.12) * k / 10
+        pts = [(Rb, 0.05), (Rb, zt)]
+        for k in range(1, 6):
+            s = (math.pi / 2 - 0.12) * k / 5
             pts.append((Rb * math.cos(s), zt + 0.21 * math.sin(s)))
         p3 = [(r * math.cos(ph), r * math.sin(ph), z) for (r, z) in pts]
-        mb.add(bm_tube(p3, 0.0042, sides=6), brass)
+        mb.add(bm_tube(p3, 0.0042, sides=4), brass)
     for (z, rr, th) in ((0.075, Rb + 0.001, 0.008), (0.26, Rb + 0.001, 0.006), (zt, Rb + 0.001, 0.007)):
-        mb.add(bm_tube([(rr * math.cos(TAU * k / 72), rr * math.sin(TAU * k / 72), z) for k in range(72)],
-                       th, sides=8, closed=True, fixed_b=(0, 0, 1)), brass)
+        mb.add(bm_tube([(rr * math.cos(TAU * k / 28), rr * math.sin(TAU * k / 28), z) for k in range(28)],
+                       th, sides=4, closed=True, fixed_b=(0, 0, 1)), brass)
     zc = zt + 0.21 * math.sin(math.pi / 2 - 0.12)
     rc = Rb * math.cos(math.pi / 2 - 0.12)
-    mb.add(bm_tube([(rc * math.cos(TAU * k / 32), rc * math.sin(TAU * k / 32), zc) for k in range(32)],
-                   0.006, sides=8, closed=True, fixed_b=(0, 0, 1)), brass)
+    mb.add(bm_tube([(rc * math.cos(TAU * k / 16), rc * math.sin(TAU * k / 16), zc) for k in range(16)],
+                   0.006, sides=4, closed=True, fixed_b=(0, 0, 1)), brass)
     mb.add(bm_lathe([(0, zc - 0.01), (0.04, zc - 0.005), (0.035, zc + 0.012), (0.018, zc + 0.025),
                      (0.012, zc + 0.045), (0.02, zc + 0.058), (0.012, zc + 0.068), (0, zc + 0.07)],
-                    segs=24), brass)
+                    segs=12), brass)
     top = zc + 0.064
-    mb.add(bm_tube([(0.034 * math.sin(TAU * k / 32), 0, top + 0.034 + 0.034 * -math.cos(TAU * k / 32))
-                    for k in range(32)], 0.006, sides=8, closed=True, fixed_b=(0, -1, 0)), brass)
-    rod = bm_lathe([(0, -0.23), (0.008, -0.23), (0.008, 0.23), (0, 0.23)], segs=10)
+    mb.add(bm_tube([(0.034 * math.sin(TAU * k / 16), 0, top + 0.034 + 0.034 * -math.cos(TAU * k / 16))
+                    for k in range(16)], 0.006, sides=4, closed=True, fixed_b=(0, -1, 0)), brass)
+    rod = bm_lathe([(0, -0.23), (0.008, -0.23), (0.008, 0.23), (0, 0.23)], segs=6)
     rot(rod, math.pi / 2, 'Y')
     mb.add(move(rod, (0, 0.03, 0.24)), perch)
     finish(mb, 'Birdcage', sharp=50, vfn=ao_fn(h=0.2, amt=0.2))
@@ -1341,6 +2412,8 @@ def build_pomegranate(P):
     if sum((f.calc_center_median() - V((0, 0, zc))).dot(f.normal) for f in bm.faces) < 0:
         bmesh.ops.reverse_faces(bm, faces=bm.faces)
     set_smooth(bm)
+    bm = decimate_bm(bm, 440)
+    set_smooth(bm)
     mb = MB()
 
     def rtint(co):
@@ -1361,7 +2434,7 @@ def build_pomegranate(P):
         return (rr * math.cos(t), rr * math.sin(t), zz)
     crown = bm_lathe([(0.0, 0.33), (0.042, 0.34), (0.031, 0.365), (0.032, 0.382), (0.045, 0.4),
                       (0.053, 0.408), (0.047, 0.413), (0.034, 0.4), (0.022, 0.388), (0, 0.378)],
-                     segs=48, vfun=crown_v)
+                     segs=12, vfun=crown_v)
     mb.add(crown, rind, tint=(0.55, 0.4, 0.34))
     finish(mb, 'Pomegranate', sharp=None,
            vfn=lambda co, n, f: grey(1.0 - 0.3 * smoothstep(0.0, -1.0, n.z)))
@@ -1391,7 +2464,8 @@ def build_pomegranate(P):
             if any((p - q).length < step * 0.8 for q in placed):
                 continue
             placed.append(p)
-            s_ = bm_ico(1.0, 1, sc=(0.0128, 0.0118, 0.0145), smooth=False)
+            s_ = bm_lathe([(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)], segs=4)   # an 8-tri aril, smooth shaded
+            scale(s_, (0.0128, 0.0118, 0.0145))
             rot(s_, rng.uniform(0, TAU), 'Z')
             q = nrm.to_track_quat('Z', 'Y')
             xform(s_, Matrix.Translation(p) @ q.to_matrix().to_4x4())
@@ -1410,25 +2484,6 @@ def cut_plane(n, point):
 # ============================================================================
 # ENVIRONMENT KIT
 # ============================================================================
-WALL_BODY = ratio('#e6d2ab', '#f0e2c2')
-WALL_PLINTH = ratio('#c29f78', '#f0e2c2')
-
-
-def wall_color(co, zc):
-    if zc < 0.3:
-        t = WALL_PLINTH
-    elif zc > 2.74:
-        t = (1.0, 1.0, 1.0)
-    else:
-        t = WALL_BODY
-    k = 1.0 - 0.2 * max(0.0, fbm(V((co.x * 0.9, co.y * 0.9, co.z * 0.8)) + V((5.3, 1.1, 7.7)), 3))
-    if 0.3 <= zc <= 2.74:
-        streak = max(0.0, noise.noise(V((co.x * 2.1, 7.7, 1.3)))) * smoothstep(1.4, 2.74, co.z)
-        k -= 0.3 * streak
-        k -= 0.25 * (1.0 - smoothstep(0.3, 1.2, co.z))
-    elif zc < 0.3:
-        k -= 0.12 * (1.0 - smoothstep(0.0, 0.25, co.z))
-    return (t[0] * k, t[1] * k, t[2] * k * 0.98)
 
 
 def grid_cut(bm, axis, values):
@@ -1442,52 +2497,8 @@ def grid_cut(bm, axis, values):
     return bm
 
 
-def build_wall(P):
-    st = P['stucco']
-    mb = MB()
-    body = bm_box_mm((-2, -0.25, 0.3), (2, 0.25, 2.74), smooth=False)
-    grid_cut(body, 0, [-2 + i * 0.25 for i in range(1, 16)])
-    grid_cut(body, 2, [0.3 + k * 0.244 for k in range(1, 10)])
-    mb.add(body, st)
-    mb.add(bm_box_mm((-2, -0.29, 0.0), (2, 0.29, 0.25), bevel=0.012), st)
-    mb.add(bm_box_mm((-2, -0.272, 0.25), (2, 0.272, 0.3), bevel=0.012, segs=3), st)
-    mb.add(bm_box_mm((-2, -0.266, 2.74), (2, 0.266, 2.8), bevel=0.01, segs=3), st)
-    mb.add(bm_box_mm((-2, -0.285, 2.8), (2, 0.285, 2.88), bevel=0.012), st)
-    mb.add(bm_box_mm((-2, -0.305, 2.88), (2, 0.305, 3.0), bevel=0.015), st)
-    finish(mb, 'Wall', sharp=40, weighted=True,
-           vfn=lambda co, n, f: wall_color(co, f.calc_center_median().z))
-
-
-def interior_tint(co, n, f, dark=0.8):
-    k = dark + (1 - dark) * (0.5 + 0.5 * fbm(co * 6.0, 2))
-    return (k, k, k)
-
-
-def chunk_object(convex, name, parent, mats, vfn_out, extra_cuts=(), max_verts=128):
-    bm = convex.to_bm({'out': 0, 'in': 1})
-    for (co, no) in extra_cuts:
-        bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=co,
-                               plane_no=no)
-    cen, vol = bm_volume_centroid(bm)
-    set_smooth(bm, True)          # flat look comes from the angle-based sharp edges
-    mb = MB()
-    mb.add(bm, None, mats=mats)
-
-    def vfn(co, n, f):
-        if f.material_index == 0:
-            return vfn_out(co, n, f)
-        return interior_tint(co, n, f)
-    ob = finish(mb, name, pivot=cen, parent=parent, sharp=35, vfn=vfn)
-    nv = len(ob.data.vertices)
-    assert nv <= max_verts, (name, nv)
-    return ob, vol, nv
-
-
-def build_wall_fractured(P):
-    st, wi = P['stucco'], P['wallint']
+def wall_seeds():
     rng = random.Random(1904)
-    empty('Wall_Fractured')
-    impact = V((0.0, 0.0, 1.5))
     seeds = []
     relax = 1.0
     tries = 0
@@ -1505,456 +2516,1033 @@ def build_wall_fractured(P):
         if any(math.hypot(p.x - q.x, p.z - q.z) < md for q in seeds):
             continue
         seeds.append(p)
-    box = Convex.box((-2, -0.25, 0), (2, 0.25, 3))
-    cells = []
-    for i, s in enumerate(seeds):
-        c = box
-        for j, t in enumerate(seeds):
-            if i == j or c is None:
-                continue
-            n = (t - s).normalized()
-            c = c.clip(n, n.dot((s + t) / 2), 'in')
-        if c is None:
-            continue
-        cen, vol = c.volume_centroid()
-        if vol > 1e-5:
-            cells.append((c, cen, vol))
-    cells.sort(key=lambda x: (x[1] - impact).length)
-    total, vmax = 0.0, 0
-    for k, (c, cen, vol) in enumerate(cells):
-        ob, v, nv = chunk_object(c, 'Wall_Chunk_%02d' % k, 'Wall_Fractured', [st, wi],
-                                 lambda co, n, f: wall_color(co, f.calc_center_median().z),
-                                 extra_cuts=[((0, 0, 0.3), (0, 0, 1)), ((0, 0, 2.74), (0, 0, 1))])
-        total += v
-        vmax = max(vmax, nv)
-    print('  Wall_Fractured: %d chunks, volume %.4f (box 6.0), max verts %d' % (len(cells), total, vmax))
+    return seeds
+
+
+def build_wall_fractured(P):
+    """Voronoi chunks cut from the Wall's own closed parts (render, rubble core,
+    plinth, coping), so the pieces show the same flaked render and stone; the
+    cut faces are rubble stone."""
+    if 'Wall' not in SOLIDS:
+        build_wall(P)                   # (--only: build the solid for its parts, drop it)
+        o = bpy.data.objects['Wall']
+        me = o.data
+        bpy.data.objects.remove(o)
+        bpy.data.meshes.remove(me)
+    parts, ao = SOLIDS['Wall']
+    empty('Wall_Fractured')
+    cells = voronoi_cells(wall_seeds(), (-2.2, -0.45, -0.05), (2.2, 0.45, 3.1))
+    off = V((1.1, 7.3, 2.9))
+
+    def cap_tint(co):
+        k = 0.62 + 0.14 * fbm(co * 3.0 + off, 2)
+        return (k, k * 0.96, k * 0.9)
+    info = cut_cells(parts, cells, wall_mats(), 1, uv_box(), cap_tint)
+    n, total, vmax = make_chunks('Wall_Fractured', 'Wall', info, (0.0, 0.0, 1.5), ao=ao, sharp=40)
+    print('  Wall_Fractured: %d chunks, volume %.4f (solid parts %.4f), max verts %d' % (
+        n, total, parts_volume(parts), vmax))
+
+
+COL_Z0, COL_Z1 = 0.37, 3.515          # fluted shaft
 
 
 def column_R(z):
-    t = clamp((z - 0.255) / (3.62 - 0.255))
-    return 0.302 - 0.04 * t ** 1.6 + 0.006 * math.sin(math.pi * t)
+    """Shaft radius with entasis (swell a third of the way up, then taper)."""
+    t = clamp((z - COL_Z0) / (COL_Z1 - COL_Z0))
+    return 0.302 - 0.04 * t ** 1.6 + 0.007 * math.sin(math.pi * t)
+
+
+def column_parts(lod=1.0):
+    """Closed parts of the fluted marble Column (all TX_marble, index 0):
+    plinth, Attic base, shaft, capital (astragal, necking, annulets, echinus),
+    abacus.  lod < 1 thins the tessellation (for the fracture pieces).
+    Tags: 1 plinth, 2 base, 3 shaft, 4 capital, 5 abacus."""
+    rng = random.Random(3117)
+    off = V((5.1, 2.2, 9.7))
+    NF = 20
+    SPF = 4 if lod >= 0.9 else 3                         # segments per flute
+    SEG = 40 if lod >= 0.9 else 20                        # lathe segments of the mouldings
+    ARC = 2 if lod >= 0.9 else 3                          # every ARC-th point of the moulding arcs
+    parts = []
+    uvc = uv_cyl()
+
+    def tint(co):
+        k = 1.0 - 0.07 * max(0.0, fbm(co * 1.6 + off, 3)) * 2.0
+        th = math.atan2(co.y, co.x)
+        st = max(0.0, noise.noise(V((th * 3.2, 0.0, 0.7)) + off)) * smoothstep(1.2, 3.7, co.z)
+        st += 0.6 * max(0.0, noise.noise(V((th * 9.0, 2.0, 0.3)) + off)) * smoothstep(2.4, 3.8, co.z)
+        base = 1.0 - smoothstep(0.0, 0.7, co.z)
+        r, g, b = 1.0, 0.97, 0.92
+        r, g, b = mix3((r, g, b), (0.6, 0.57, 0.52), 0.7 * min(1.0, st))
+        r, g, b = mix3((r, g, b), (0.66, 0.6, 0.5), 0.55 * base)
+        return (r * k, g * k, b * k)
+
+    def chip(bm, centre, n, depth, tag_):
+        """Knock a chip off an edge: a plane cut near the given point."""
+        n = V(n).normalized()
+        clip_closed(bm, -n, -(n.dot(V(centre)) - depth), 0, None, None, cap_tag=tag_)
+        # (-n.p <= -(n.c - depth))  ==  n.p >= n.c - depth: keeps the inside
+    # ---- plinth: chamfered square block, two corners chipped
+    pl = bm_box_mm((-0.35, -0.35, 0.0), (0.35, 0.35, 0.14), bevel=0.012, segs=1, smooth=False)
+    for (cx, cy, cz, dep) in ((0.35, -0.35, 0.14, 0.05), (-0.35, 0.35, 0.1, 0.035)):
+        nrm = V((-cx, -cy, -0.6 if cz > 0.12 else 0.2))
+        c_ = V((cx, cy, cz))
+        n_ = nrm.normalized()
+        clip_closed(pl, -n_, -(n_.dot(c_) + dep), 0, None, None, cap_tag=-2)
+    parts.append(part_bm(pl, 0, uv_box(), tint, tag=1, smooth=False))
+
+    # ---- Attic base: torus, fillet, scotia, fillet, torus, apophyge
+    prof = [(0.0, 0.14), (0.318, 0.14)]
+    for k in range(1, 8, ARC):                             # lower torus
+        a = -math.pi / 2 + math.pi * k / 8
+        prof.append((0.305 + 0.037 * math.cos(a), 0.1775 + 0.0375 * math.sin(a)))
+    prof += [(0.306, 0.215), (0.306, 0.224)]
+    for k in range(1, 6, ARC):                             # scotia (concave)
+        t = k / 6
+        prof.append((0.306 - 0.022 * math.sin(math.pi * t) ** 0.8 - 0.004 * t, 0.224 + 0.062 * t))
+    prof += [(0.302, 0.286), (0.302, 0.292)]
+    for k in range(1, 7, ARC):                             # upper torus
+        a = -math.pi / 2 + math.pi * k / 7
+        prof.append((0.3 + 0.022 * math.cos(a), 0.3145 + 0.0225 * math.sin(a)))
+    prof += [(0.306, 0.337), (0.306, 0.346), (0.302, 0.352), (0.0, 0.352)]
+    bs = bm_lathe(prof, segs=SEG, smooth=True)
+    parts.append(part_bm(bs, 0, uvc, tint, tag=2))
+
+    # ---- shaft: 20 Doric flutes meeting at (worn) arrises, entasis, erosion
+    zs = [COL_Z0] + [lerp(COL_Z0, COL_Z1, k / 9) for k in range(1, 9)] + [COL_Z1]
+    if lod < 1:
+        zs = [COL_Z0] + [lerp(COL_Z0, COL_Z1, k / 6) for k in range(1, 6)] + [COL_Z1]
+    D = 0.021
+    bites = []
+    for _ in range(7):
+        fz = rng.uniform(0.6, 3.3)
+        fk = rng.randrange(NF)
+        bites.append((fk * TAU / NF + 0.1, fz, rng.uniform(0.025, 0.05), rng.uniform(0.006, 0.014)))
+
+    def flute(t, r, z):
+        ph = ((t - 0.1) * NF / TAU) % 1.0
+        wear = 0.55 + 0.1 * noise.noise(V((t * 3.0, z * 2.0, 1.0)) + off)
+        dep = D * (1.0 - abs(2.0 * ph - 1.0) ** 2) ** wear
+        if z < COL_Z0 + 0.03 or z > COL_Z1 - 0.03:
+            dep *= smoothstep(0.0, 0.03, min(z - COL_Z0, COL_Z1 - z))  # flutes die out in the apophyges
+        ero = 0.0016 * fbm(V((math.cos(t) * 2.5, math.sin(t) * 2.5, z * 2.5)) + off, 3)
+        rr = r - dep + ero
+        for (bt, bz, br, bd) in bites:
+            dd = math.hypot((t - bt) * r, z - bz)
+            if dd < br:
+                rr -= bd * (1.0 - (dd / br) ** 2)
+        return (rr * math.cos(t), rr * math.sin(t), z)
+    sh = bm_lathe([(0.0, COL_Z0 - 0.01)] + [(column_R(z), z) for z in zs] + [(0.0, COL_Z1 + 0.01)],
+                  segs=NF * SPF, vfun=flute, phase=0.1, smooth=True)
+    parts.append(part_bm(sh, 0, uv_cyl(), tint, tag=3))
+
+    # ---- capital: astragal, fillet, necking, three annulets, echinus
+    rt = column_R(COL_Z1)
+    prof = [(0.0, COL_Z1 - 0.005), (rt, COL_Z1 - 0.005), (rt + 0.006, COL_Z1 + 0.004)]
+    for k in range(1, 6, ARC):
+        a = -math.pi / 2 + math.pi * k / 6
+        prof.append((rt + 0.008 + 0.015 * math.cos(a), COL_Z1 + 0.019 + 0.015 * math.sin(a)))
+    zn = COL_Z1 + 0.034
+    prof += [(rt + 0.004, zn), (rt + 0.004, zn + 0.11)]
+    z = zn + 0.11
+    for i in range(3):
+        r0 = rt + 0.01 + 0.007 * i
+        prof += [(r0, z), (r0, z + 0.011)]
+        z += 0.011
+    for k in list(range(0, 8, ARC)) + ([7] if ARC > 1 else []):
+        a = math.pi / 2 * k / 7
+        prof.append((rt + 0.03 + 0.053 * math.sin(a) ** 0.85, z + 0.095 * (1 - math.cos(a)) ** 1.1 * 0.62 + 0.004 * k / 7))
+    zt = prof[-1][1]
+    prof += [(0.0, zt)]
+    cp = bm_lathe(prof, segs=SEG, smooth=True)
+    parts.append(part_bm(cp, 0, uvc, tint, tag=4))
+
+    # ---- abacus: square slab with a projecting chamfered fillet, chipped
+    ab = bm_box_mm((-0.343, -0.343, zt - 0.004), (0.343, 0.343, 3.94), bevel=0.008, segs=1, smooth=False)
+    parts.append(part_bm(ab, 0, uv_box(), tint, tag=5, smooth=False))
+    ab2 = bm_box_mm((-0.35, -0.35, 3.935), (0.35, 0.35, 4.0), bevel=0.012, segs=1, smooth=False)
+    for (cx, cy, cz, dep) in ((-0.35, -0.35, 3.97, 0.045), (0.35, 0.35, 4.0, 0.03), (0.35, -0.35, 3.94, 0.02)):
+        n_ = V((-cx, -cy, -1.0 if cz > 3.99 else (0.8 if cz < 3.95 else 0.0))).normalized()
+        clip_closed(ab2, -n_, -(n_.dot(V((cx, cy, cz))) + dep), 0, None, None, cap_tag=-2)
+    parts.append(part_bm(ab2, 0, uv_box(), tint, tag=5, smooth=False))
+    # black crust where rain never washes: under the echinus, abacus and tori
+    def crust(co, n):
+        k = 1.0 - 0.38 * smoothstep(-0.2, -0.8, n.z) * (0.6 + 0.4 * smoothstep(0.5, 3.6, co.z))
+        return (k, k * 0.98, k * 0.95)
+    shade_parts(parts, crust)
+    # fresh (unweathered) chip faces
+    for p in parts:
+        tagl = p.faces.layers.int['tag']
+        col = p.loops.layers.float_color['Col']
+        uvl = p.loops.layers.uv['UVMap']
+        for f in p.faces:
+            if f[tagl] == -2:
+                f[tagl] = 0
+                c = f.calc_center_median()
+                for lp in f.loops:
+                    lp[col] = (0.97, 0.96, 0.93, 1.0)
+                    lp[uvl].uv = uv_box()(lp.vert.co, f.normal, c, f)
+    return parts
 
 
 def build_column(P):
-    mar = P['marble']
+    parts = column_parts(1.0)
     mb = MB()
-    mb.add(bm_box((0.7, 0.7, 0.14), center=(0, 0, 0.07), bevel=0.012), mar)
-    mb.add(bm_lathe([(0, 0.14), (0.325, 0.14), (0.338, 0.152), (0.343, 0.175), (0.335, 0.198),
-                     (0.318, 0.212), (0.304, 0.218), (0.304, 0.232), (0.314, 0.238), (0.314, 0.25),
-                     (0.3, 0.256), (0, 0.256)], segs=64), mar)
-    NF, SPF = 16, 6
-
-    def flute(t, r, z):
-        ph = (t * NF / TAU) % 1.0
-        depth = 0.02 * math.sin(math.pi * ph) ** 0.7
-        rr = r - depth
-        return (rr * math.cos(t), rr * math.sin(t), z)
-    zs = [0.25, 0.3] + [lerp(0.3, 3.56, k / 9) for k in range(1, 10)] + [3.6]
-    shaft = bm_lathe([(column_R(z), z) for z in zs], segs=NF * SPF, vfun=flute, cap=False)
-    mb.add(shaft, mar)
-    mb.add(bm_lathe([(0, 3.585), (0.27, 3.585), (0.282, 3.595), (0.282, 3.612), (0.272, 3.62),
-                     (0.272, 3.632), (0.283, 3.64), (0.283, 3.655), (0.27, 3.662), (0, 3.662)],
-                    segs=64), mar)
-    mb.add(bm_lathe([(0, 3.655), (0.27, 3.655), (0.285, 3.68), (0.31, 3.72), (0.332, 3.76),
-                     (0.345, 3.795), (0.35, 3.82), (0.348, 3.832), (0, 3.832)], segs=64), mar)
-    mb.add(bm_box((0.7, 0.7, 0.168), center=(0, 0, 3.916), bevel=0.012), mar)
-
-    def vfn(co, n, f):
-        k = 1.0 - 0.06 * max(0.0, fbm(co * 1.7 + V((2, 9, 4)), 3)) * 2
-        if 0.26 < co.z < 3.6 and n.z < 0.5 and n.z > -0.5:
-            t = math.atan2(co.y, co.x)
-            ph = (t * NF / TAU) % 1.0
-            k *= 1.0 - 0.13 * math.sin(math.pi * ph) ** 0.7
-        k *= 1.0 - 0.22 * (1.0 - smoothstep(0.0, 0.8, co.z))
-        k *= 1.0 - 0.2 * smoothstep(0.0, -1.0, n.z)
-        return (k, k * 0.99, k * 0.97)
-    finish(mb, 'Column', sharp=34, weighted=True, vfn=vfn)
+    for p in parts:
+        mb.add(p.copy(), None, mats=[tx('marble')], tint='src', uvf='src', ftag='src')
+    ob = finish(mb, 'Column', sharp=38)
+    ao = bake_ao(ob, dist=0.45, samples=160, strength=0.9, ground=0.0)
+    SOLIDS['Column'] = ao_lookup(ao)
+    print('  Column: %d parts, volume %.4f' % (len(parts), parts_volume(parts)))
 
 
 def build_column_fractured(P):
-    mar, si = P['marble'], P['stoneint']
+    """Drums split by slightly tilted breaks, most drums split again into
+    wedges, a base stub and a capital piece: all cut from the Column's own
+    (lighter-tessellated) parts, fresh marble on the breaks."""
+    if 'Column' not in SOLIDS:
+        build_column(P)                 # (--only: build the solid for its parts, drop it)
+        o = bpy.data.objects['Column']
+        me = o.data
+        bpy.data.objects.remove(o)
+        bpy.data.meshes.remove(me)
+    ao = SOLIDS['Column']
+    parts = column_parts(0.67)
     rng = random.Random(311)
     empty('Column_Fractured')
-    NS = 20
-
-    def poly(r, n=NS):
-        return [(r * math.cos(TAU * k / n + 0.1), r * math.sin(TAU * k / n + 0.1)) for k in range(n)]
-    shaft = Convex.frustum(poly(column_R(0.255)), poly(column_R(3.62)), 0.255, 3.62)
-    zs = [0.44, 1.07, 1.7, 2.31, 2.93, 3.48]
+    zs = [0.5, 1.1, 1.72, 2.33, 2.93, 3.46]
     planes = []
     for z in zs:
         a, b = math.radians(rng.uniform(3, 8)), rng.uniform(0, TAU)
         planes.append(cut_plane((math.sin(a) * math.cos(b), math.sin(a) * math.sin(b), math.cos(a)),
                                 (rng.uniform(-0.03, 0.03), rng.uniform(-0.03, 0.03), z)))
-
-    def vfn_out(co, n, f):
-        k = 1.0 - 0.06 * max(0.0, fbm(co * 1.7 + V((2, 9, 4)), 3)) * 2
-        k *= 1.0 - 0.22 * (1.0 - smoothstep(0.0, 0.8, co.z))
-        return (k, k * 0.99, k * 0.97)
-    chunks = []
-    # base: plinth + torus + broken stub
-    n0, d0 = planes[0]
-    stub = shaft.clip(n0, d0, 'in')
-    bm = bmesh.new()
-    parts = [Convex.box((-0.35, -0.35, 0), (0.35, 0.35, 0.14)).to_bm({'out': 0}),
-             bm_lathe([(0.0, 0.14), (0.33, 0.14), (0.342, 0.175), (0.325, 0.21), (0.304, 0.256),
-                       (0.0, 0.256)], segs=16),
-             stub.to_bm({'out': 0, 'in': 1})]
-    base_mb = MB()
-    for p_ in parts:
-        set_smooth(p_, True)
-        base_mb.add(p_, None, mats=[mar, si])
-    chunks.append(('base', base_mb))
-    # drums split into wedges
+    cells = [(None, [planes[0]])]
     for k in range(5):
         (na, da), (nb, db) = planes[k], planes[k + 1]
-        drum = shaft.clip(-na, -da, 'in').clip(nb, db, 'in')
+        slab = [(-na, -da), (nb, db)]
         m = [3, 2, 3, 2, 3][k]
         c = V((rng.uniform(-0.05, 0.05), rng.uniform(-0.05, 0.05), 0))
         th0 = rng.uniform(0, TAU)
         if m == 2:
             tilt = rng.uniform(-0.25, 0.25)
             n, d = cut_plane((math.cos(th0), math.sin(th0), tilt), c + V((0, 0, (zs[k] + zs[k + 1]) / 2)))
-            pieces = [drum.clip(n, d, 'in'), drum.clip(-n, -d, 'in')]
+            cells += [(None, slab + [(n, d)]), (None, slab + [(-n, -d)])]
         else:
             angs = [th0, th0 + TAU / 3 + rng.uniform(-0.3, 0.3), th0 + 2 * TAU / 3 + rng.uniform(-0.3, 0.3)]
-            pieces = []
             for i in range(3):
                 a0, a1 = angs[i], angs[(i + 1) % 3]
                 da_ = V((math.cos(a0), math.sin(a0), 0))
                 db_ = V((math.cos(a1), math.sin(a1), 0))
                 n1 = V((da_.y, -da_.x, 0))
                 n2 = V((-db_.y, db_.x, 0))
-                w = drum.clip(n1, n1.dot(c), 'in')
-                w = w.clip(n2, n2.dot(c), 'in') if w else None
-                pieces.append(w)
-        for pc in pieces:
-            if pc is None:
-                continue
-            chunks.append(('drum', pc))
-    # capital: broken neck + echinus + abacus
+                cells.append((None, slab + [(n1, n1.dot(c)), (n2, n2.dot(c))]))
     n5, d5 = planes[5]
-    neck = shaft.clip(-n5, -d5, 'in')
-    cap_mb = MB()
-    for p_ in [neck.to_bm({'out': 0, 'in': 1}),
-               bm_lathe([(0, 3.6), (0.275, 3.6), (0.285, 3.64), (0.33, 3.74), (0.35, 3.832),
-                         (0, 3.832)], segs=16),
-               Convex.box((-0.35, -0.35, 3.832), (0.35, 0.35, 4.0)).to_bm({'out': 0})]:
-        set_smooth(p_, True)
-        cap_mb.add(p_, None, mats=[mar, si])
-    chunks.append(('cap', cap_mb))
-    total = 0.0
-    vmax = 0
-    for k, (kind, item) in enumerate(chunks):
-        name = 'Column_Chunk_%02d' % k
-        if kind == 'drum':
-            ob, vol, nv = chunk_object(item, name, 'Column_Fractured', [mar, si], vfn_out)
-            total += vol
-        else:
-            cen, vol = bm_volume_centroid(item.bm)
-            total += vol
-            ob = finish(item, name, pivot=cen, parent='Column_Fractured', sharp=35,
-                        vfn=lambda co, n, f: vfn_out(co, n, f) if f.material_index == 0
-                        else interior_tint(co, n, f))
-            nv = len(ob.data.vertices)
-            assert nv <= 128, (name, nv)
-        vmax = max(vmax, nv)
-    print('  Column_Fractured: %d chunks, max verts %d' % (len(chunks), vmax))
+    cells.append((None, [(-n5, -d5)]))
+    info = []
+    fresh = lambda co: (0.98, 0.97, 0.95)
+    for (_, pl) in cells:
+        mb = MB()
+        got = False
+        for p in parts:
+            c = p.copy()
+            for (nrm, d) in pl:
+                clip_closed(c, nrm, d, 0, uv_box(), fresh)
+                if not c.verts:
+                    break
+            if c.verts and c.faces:
+                got = True
+                mb.add(c, None, mats=[tx('marble')], tint='src', uvf='src', ftag='src')
+            else:
+                c.free()
+        if got:
+            cen, vol = bm_volume_centroid(mb.bm)
+            info.append((mb, cen, vol))
+    # keep the bottom-up order of the old template (base first, capital last)
+    info.sort(key=lambda x: x[1].z)
+    total, vmax = 0.0, 0
+    for k, (mb, cen, vol) in enumerate(info):
+        mb.decimate(CHUNK_TRIS)
+        cen, vol = bm_volume_centroid(mb.bm)
+        tagl = mb.bm.faces.layers.int.get('tag')
+
+        def vfn(co, n, f, tagl=tagl):
+            if f[tagl] < 0:
+                return (1.0, 1.0, 1.0)
+            a = ao(co)
+            return (a, a, a)
+        ob = finish(mb, 'Column_Chunk_%02d' % k, pivot=cen, parent='Column_Fractured', sharp=38, vfn=vfn)
+        total += vol
+        vmax = max(vmax, len(ob.data.vertices))
+    print('  Column_Fractured: %d chunks, volume %.4f (solid parts %.4f), max verts %d' % (
+        len(info), total, parts_volume(parts), vmax))
 
 
 DRAWER_Z = [(0.185, 0.455), (0.495, 0.755), (0.795, 1.035)]
 
 
-def build_drawers(P):
-    wood, brass = P['wood'], P['brass']
-    mb = MB()
-    shadow = (0.18, 0.16, 0.15)
+def drawers_parts():
+    """Closed parts of the chest of drawers (0 = TX_oak, 1 = Brass, 2 = Ink):
+    moulded top, framed side panels, back, drawer rails, plinth with a cove,
+    bun feet, three lipped drawers with fielded fronts (the middle one pulled
+    out, its box showing), knobs, backplates, escutcheons.  Tags: 1 top,
+    2 sides, 3 back, 4 rails, 5 base, 6..8 drawers, 9 hardware."""
+    rng = random.Random(4471)
+    off = V((1.3, 8.2, 4.4))
+    parts = []
+
+    def tint(co):
+        g = 1.0 - 0.08 * max(0.0, fbm(co * 3.0 + off, 2)) * 2.0
+        return (1.0 * g, 0.95 * g, 0.9 * g)
+
+    def add(bm, mi, uvf, tag, tnt=None, smooth=False):
+        parts.append(part_bm(bm, mi, uvf, tnt or tint, tag=tag, smooth=smooth))
+    uh = uv_box                                   # oak grain along U: horizontal members
+    uvv = lambda **k: uv_box(grain='z', **k)       # vertical members
+    # moulded top (ovolo edge), overhanging to the collider's footprint
+    rings = [(0.012, 1.056), (0.006, 1.061), (0.001, 1.07), (0.0, 1.08), (0.0, 1.091), (0.004, 1.098),
+             (0.009, 1.1)]
+    secs = [rrect(0, 0, 0.5 - i_, 0.3 - i_, 0.012, z, n=2) for (i_, z) in rings]
+    top = bm_loft(secs, smooth=False)
+    add(top, 0, uh(off=(0.2, 0.1)), 1)
+    # side panels: stiles and rails round a recessed panel
+    for sx in (-1, 1):
+        x0, x1 = sorted((sx * 0.462, sx * 0.5))
+        for (ya, yb, za, zb, grain) in ((-0.29, -0.23, 0.16, 1.056, 'z'), (0.22, 0.28, 0.16, 1.056, 'z'),
+                                        (-0.23, 0.22, 0.16, 0.24, None), (-0.23, 0.22, 0.98, 1.056, None)):
+            b_ = bm_box_mm((x0, ya, za), (x1, yb, zb), bevel=0.003, segs=1, smooth=False)
+            add(b_, 0, uv_box(grain=grain, off=(rng.uniform(0, 1), 0)), 2)
+        xa, xb = sorted((sx * 0.466, sx * 0.49))
+        pn = bm_box_mm((xa, -0.232, 0.238), (xb, 0.222, 0.982), smooth=False)
+        add(pn, 0, uv_box(grain='z', off=(rng.uniform(0, 1), 0)), 2,
+            tnt=lambda co: tuple(c * 0.92 for c in tint(co)))
+    back = bm_box_mm((-0.463, 0.262, 0.16), (0.463, 0.29, 1.056), smooth=False)
+    add(back, 0, uvv(off=(0.3, 0)), 3, tnt=lambda co: tuple(c * 0.85 for c in tint(co)))
+    # drawer rails (dividers) with a bead on the front edge (front rails only,
+    # so the drawer pieces stay convex-ish when the chest breaks)
+    for (za, zb) in ((0.16, 0.185), (0.455, 0.495), (0.755, 0.795), (1.035, 1.058)):
+        rl = bm_box_mm((-0.463, -0.285, za), (0.463, -0.215, zb), smooth=False)
+        add(rl, 0, uh(off=(0, rng.uniform(0, 1))), 4)
+        bd = bm_tube_uv([(-0.462, -0.285, (za + zb) / 2), (0.462, -0.285, (za + zb) / 2)], 0.008, sides=5)
+        parts.append(part_bm_keep(bd, 0, tint, tag=4))
+    # plinth with a cove under the carcass, and turned bun feet
+    base = bm_loft([rrect(0, 0, 0.485, 0.285, 0.008, 0.075, n=1), rrect(0, 0, 0.485, 0.285, 0.008, 0.13, n=1),
+                    rrect(0, 0, 0.494, 0.294, 0.008, 0.142, n=1), rrect(0, 0, 0.502, 0.297, 0.008, 0.15, n=1),
+                    rrect(0, 0, 0.502, 0.297, 0.008, 0.1595, n=1)], smooth=False)
+    add(base, 0, uh(off=(0.5, 0.2)), 5, tnt=lambda co: tuple(c * 0.85 for c in tint(co)))
     for sx in (-1, 1):
         for sy in (-1, 1):
-            mb.add(move(bm_lathe([(0, 0), (0.035, 0), (0.045, 0.02), (0.042, 0.05), (0.032, 0.07),
-                                  (0, 0.075)], segs=16), (0.42 * sx, 0.22 * sy, 0)), wood)
-        x0, x1 = sorted((sx * 0.465, sx * 0.5))
-        mb.add(bm_box_mm((x0, -0.28, 0.16), (x1, 0.28, 1.06), bevel=0.006), wood)
-    mb.add(bm_box_mm((-0.49, -0.29, 0.07), (0.49, 0.29, 0.16), bevel=0.012, segs=2), wood,
-           tint=(0.8, 0.8, 0.8))
-    mb.add(bm_box_mm((-0.47, 0.265, 0.16), (0.47, 0.29, 1.06)), wood)
-    mb.add(bm_box_mm((-0.5, -0.3, 1.06), (0.5, 0.3, 1.1), bevel=0.014, segs=3), wood)
-    for (z0, z1) in ((0.16, 0.185), (0.455, 0.495), (0.755, 0.795), (1.035, 1.06)):
-        mb.add(bm_box_mm((-0.466, -0.285, z0), (0.466, -0.24, z1), bevel=0.004), wood)
-    mb.add(bm_box_mm((-0.466, -0.24, 0.16), (0.466, 0.266, 1.06)), wood, tint=shadow)
+            ft = bm_lathe([(0, 0), (0.03, 0), (0.042, 0.012), (0.047, 0.03), (0.044, 0.05), (0.035, 0.064),
+                           (0.03, 0.07), (0.03, 0.08), (0, 0.08)], segs=8)
+            add(move(ft, (0.41 * sx, 0.21 * sy, 0)), 0, uv_cyl(cx=0.41 * sx, cy=0.21 * sy, axial_u=True), 5,
+                tnt=lambda co: tuple(c * 0.75 for c in tint(co)))
+    # drawers
     for i, (z0, z1) in enumerate(DRAWER_Z):
         dy = -0.09 if i == 1 else 0.0
-        y0 = -0.293 + dy
+        yf = -0.293 + dy
         zm = (z0 + z1) / 2
-        mb.add(bm_box_mm((-0.458, y0, z0), (0.458, y0 + 0.028, z1), bevel=0.008), wood,
-               tint=(1.08 * 0.93, 0.93, 0.9))
-        mb.add(bm_box_mm((-0.39, y0 - 0.008, z0 + 0.045), (0.39, y0 + 0.01, z1 - 0.045), bevel=0.016,
-                         segs=1), wood, tint=(0.97, 0.95, 0.93))
+        tg = 6 + i
+        # lipped front: thin lip proud of the carcass, the body inside
+        lip = bm_box_mm((-0.458, yf, z0 - 0.004), (0.458, yf + 0.012, z1 + 0.004), bevel=0.005, segs=1,
+                        smooth=False)
+        add(lip, 0, uh(off=(rng.uniform(0, 1), rng.uniform(0, 1))), tg)
+        body = bm_box_mm((-0.444, yf + 0.011, z0 + 0.004), (0.444, yf + 0.026, z1 - 0.004), smooth=False)
+        add(body, 0, uh(off=(rng.uniform(0, 1), 0)), tg)
+        # fielded panel on the front
+        e, fi = 0.03, 0.058
+        r0 = [(-0.458 + e, z0 + e), (0.458 - e, z0 + e), (0.458 - e, z1 - e), (-0.458 + e, z1 - e)]
+        r1 = [(-0.458 + fi, z0 + fi), (0.458 - fi, z0 + fi), (0.458 - fi, z1 - fi), (-0.458 + fi, z1 - fi)]
+        pn = bm_loft([[V((x, yf + 0.004, z)) for (x, z) in r0], [V((x, yf - 0.004, z)) for (x, z) in r0],
+                      [V((x, yf - 0.009, z)) for (x, z) in r1]], smooth=False)
+        bmesh.ops.recalc_face_normals(pn, faces=pn.faces)
+        add(pn, 0, uh(off=(rng.uniform(0, 1), rng.uniform(0, 1))), tg)
+        if dy:                                           # the open drawer's box
+            dark = lambda co: tuple(c * 0.45 for c in tint(co))
+            for sx in (-1, 1):
+                x0, x1 = sorted((sx * 0.436, sx * 0.448))
+                sd = bm_box_mm((x0, yf + 0.024, z0 + 0.01), (x1, yf + 0.2, z1 - 0.03), smooth=False)
+                add(sd, 0, uh(off=(0, 0.3)), tg, tnt=lambda co: tuple(c * 0.8 for c in tint(co)))
+            bt = bm_box_mm((-0.436, yf + 0.024, z0 + 0.01), (0.436, yf + 0.2, z0 + 0.02), smooth=False)
+            add(bt, 0, uh(off=(0.2, 0.7)), tg, tnt=dark)
         for kx in (-0.24, 0.24):
             kn = bm_lathe([(0, 0), (0.012, 0), (0.009, 0.012), (0.02, 0.022), (0.025, 0.033),
-                           (0.021, 0.043), (0, 0.046)], segs=20)
+                           (0.021, 0.043), (0, 0.046)], segs=8)
             rot(kn, math.pi / 2, 'X')
-            mb.add(move(kn, (kx, y0 - 0.006, zm)), brass)
-            pl = bm_lathe([(0, 0), (0.034, 0), (0.034, 0.002), (0.028, 0.004), (0, 0.004)], segs=20)
+            add(move(kn, (kx, yf - 0.008, zm)), 1, uv_box(), 9, tnt=lambda co: (1.0, 1.0, 1.0), smooth=True)
+            pl = bm_lathe([(0, 0), (0.034, 0), (0.028, 0.004), (0, 0.004)], segs=8)
             scale(pl, (1.0, 1.35, 1.0))
             rot(pl, math.pi / 2, 'X')
-            mb.add(move(pl, (kx, y0 - 0.006, zm)), brass)
-        esc = bm_lathe([(0, 0), (0.026, 0), (0.026, 0.002), (0.02, 0.004), (0, 0.004)], segs=20)
+            add(move(pl, (kx, yf - 0.006, zm)), 1, uv_box(), 9, tnt=lambda co: (0.85, 0.82, 0.75), smooth=True)
+        esc = bm_lathe([(0, 0), (0.026, 0), (0.02, 0.004), (0, 0.004)], segs=8)
         scale(esc, (0.8, 1.4, 1.0))
         rot(esc, math.pi / 2, 'X')
-        mb.add(move(esc, (0, y0 - 0.006, zm)), brass)
+        add(move(esc, (0, yf - 0.006, zm)), 1, uv_box(), 9, tnt=lambda co: (0.85, 0.82, 0.75), smooth=True)
         kh = bm_prism([(-0.004, -0.016), (0.004, -0.016), (0.0025, 0.0), (0.006, 0.006), (0.0, 0.011),
                        (-0.006, 0.006), (-0.0025, 0.0)], 0.0, 0.003)
         rot(kh, math.pi / 2, 'X')
-        mb.add(move(kh, (0, y0 - 0.0085, zm)), P['ink'])
-        if dy:
-            for sx in (-1, 1):
-                mb.add(bm_box_mm((sx * 0.445 - 0.007, y0 + 0.028, z0 + 0.02),
-                                 (sx * 0.445 + 0.007, y0 + 0.2, z1 - 0.035)), wood,
-                       tint=(0.75, 0.72, 0.7))
-            mb.add(bm_box_mm((-0.445, y0 + 0.028, z0 + 0.02), (0.445, y0 + 0.2, z0 + 0.03)), wood,
-                   tint=(0.35, 0.33, 0.32))
-    finish(mb, 'Drawers', sharp=40, weighted=True, vfn=ao_fn(h=0.2, amt=0.25, down=0.3))
+        add(move(kh, (0, yf - 0.0085, zm)), 2, uv_box(), 9, tnt=lambda co: (1.0, 1.0, 1.0))
+    return parts
+
+
+def drawers_mats(P):
+    return [tx('oak'), P['brass'], P['ink']]
+
+
+def build_drawers(P):
+    parts = drawers_parts()
+    mb = MB()
+    for p_ in parts:
+        mb.add(p_.copy(), None, mats=drawers_mats(P), tint='src', uvf='src', ftag='src')
+
+    def vfn(co, n, f):
+        k = 1.0 - 0.1 * smoothstep(0.0, -1.0, n.z)
+        return (k, k, k)
+    ob = finish(mb, 'Drawers', sharp=40, vfn=vfn)
+    ao = bake_ao(ob, dist=0.25, samples=128, strength=0.85, ground=0.0)
+    SOLIDS['Drawers'] = (parts, ao_lookup(ao))
 
 
 def build_drawers_fractured(P):
-    wood, wi = P['wood'], P['woodint']
+    """Boards split along plausible lines (top in three, each side and the back
+    in two, the open drawer in two), cut from the Drawers' own parts; fresh
+    pale wood on the breaks."""
+    if 'Drawers' not in SOLIDS:
+        build_drawers(P)                # (--only: build the solid for its parts, drop it)
+        o = bpy.data.objects['Drawers']
+        me = o.data
+        bpy.data.objects.remove(o)
+        bpy.data.meshes.remove(me)
+    parts, ao = SOLIDS['Drawers']
+    wi = P['woodint']
+    mats = drawers_mats(P) + [wi]
     empty('Drawers_Fractured')
-    B = Convex.box
-    pieces = []
+    X = V((1, 0, 0))
+    Y = V((0, 1, 0))
+    Z = V((0, 0, 1))
 
-    def split(c, n, pt):
-        n, d = cut_plane(n, pt)
-        return [c.clip(n, d, 'in'), c.clip(-n, -d, 'in')]
-    top = B((-0.5, -0.3, 1.06), (0.5, 0.3, 1.1))
-    a, b = split(top, (1, 0.45, 0.05), (0.12, 0, 1.08))
-    sl, a = split(a, (0, -1, 0.12), (0, -0.235, 1.08))
-    pieces += [a, b, sl]
-    left = B((-0.5, -0.28, 0.16), (-0.465, 0.28, 1.06))
-    sl2, left = split(left, (0.05, -1, 0.06), (0, -0.2, 0.6))
-    pieces += [left, sl2]
-    right = B((0.465, -0.28, 0.16), (0.5, 0.28, 1.06))
-    pieces += split(right, (0, 0.35, 1), (0.48, 0, 0.62))
-    back = B((-0.465, 0.265, 0.16), (0.465, 0.29, 1.06))
-    pieces += split(back, (1, 0, 0.5), (-0.05, 0.28, 0.6))
-    for i, (z0, z1) in enumerate(DRAWER_Z):
-        fr = B((-0.458, -0.293, z0), (0.458, -0.265, z1))
+    def pl(n, pt):
+        return cut_plane(n, pt)
+
+    def neg(p_):
+        return (-p_[0], -p_[1])
+    top = pl(-Z, (0, 0, 1.056))                 # keep z >= 1.056
+    below_top = neg(top)
+    # the side panels start at |x| = 0.462: cut just inside them, so no drawer
+    # piece carries a paper-thin full-depth sliver of a side
+    side_l = pl(X, (-0.4615, 0, 0))             # keep x <= -0.4615
+    side_r = pl(-X, (0.4615, 0, 0))
+    inner_l, inner_r = neg(side_l), neg(side_r)
+    backp = pl(-Y, (0, 0.262, 0))
+    front = neg(backp)
+    base = pl(Z, (0, 0, 0.1598))                # between the plinth (top 0.1595) and the carcass (0.16)
+    above_base = neg(base)
+    cells = []
+    t1 = pl((1, 0.45, 0.05), (0.12, 0, 1.08))
+    t2 = pl((0, -1, 0.12), (0, -0.235, 1.08))
+    cells += [[top, t1, neg(t2)], [top, neg(t1)], [top, t1, t2]]
+    s1 = pl((0.05, -1, 0.06), (0, -0.2, 0.6))
+    cells += [[below_top, above_base, side_l, s1], [below_top, above_base, side_l, neg(s1)]]
+    s2 = pl((0, 0.35, 1), (0.48, 0, 0.62))
+    cells += [[below_top, above_base, side_r, s2], [below_top, above_base, side_r, neg(s2)]]
+    b1 = pl((1, 0, 0.5), (-0.05, 0.28, 0.6))
+    cells += [[below_top, above_base, inner_l, inner_r, backp, b1], [below_top, above_base, inner_l, inner_r, backp, neg(b1)]]
+    zc = [0.1598, 0.475, 0.775, 1.056]
+    for i in range(3):
+        lo = pl(-Z, (0, 0, zc[i]))
+        hi = pl(Z, (0, 0, zc[i + 1]))
+        c = [lo, hi, inner_l, inner_r, front]
         if i == 1:
-            pieces += split(fr, (1, 0.1, -0.7), (0.1, -0.28, (z0 + z1) / 2))
+            m1 = pl((1, 0.1, -0.7), (0.1, -0.28, 0.625))
+            cells += [c + [m1], c + [neg(m1)]]
         else:
-            pieces.append(fr)
-    pieces.append(B((-0.49, -0.29, 0.0), (0.49, 0.29, 0.16)))
-    vmax = 0
-    for k, c in enumerate(p for p in pieces if p is not None):
-        ob, vol, nv = chunk_object(c, 'Drawers_Chunk_%02d' % k, 'Drawers_Fractured', [wood, wi],
-                                   ao_fn(h=0.2, amt=0.2, down=0.3))
-        vmax = max(vmax, nv)
-    print('  Drawers_Fractured: %d chunks, max verts %d' % (k + 1, vmax))
+            cells.append(c)
+    cells.append([base])
+    fresh = lambda co: (0.95, 0.9, 0.82)
+    info = []
+    for pls in cells:
+        mb = MB()
+        got = False
+        for p_ in parts:
+            c = p_.copy()
+            for (nrm, d) in pls:
+                clip_closed(c, nrm, d, 3, uv_box(), fresh)
+                if not c.verts:
+                    break
+            if c.verts and c.faces:
+                got = True
+                mb.add(c, None, mats=mats, tint='src', uvf='src', ftag='src')
+            else:
+                c.free()
+        if got:
+            cen, vol = bm_volume_centroid(mb.bm)
+            info.append((mb, cen, vol))
+    total, vmax = 0.0, 0
+    for k, (mb, cen, vol) in enumerate(info):
+        mb.decimate(CHUNK_TRIS)
+        cen, vol = bm_volume_centroid(mb.bm)
+        tagl = mb.bm.faces.layers.int.get('tag')
+
+        def vfn(co, n, f, tagl=tagl):
+            if f[tagl] < 0:
+                return (1.0, 1.0, 1.0)
+            a = ao(co)
+            return (a, a, a)
+        ob = finish(mb, 'Drawers_Chunk_%02d' % k, pivot=cen, parent='Drawers_Fractured', sharp=40, vfn=vfn)
+        total += vol
+        vmax = max(vmax, len(ob.data.vertices))
+    print('  Drawers_Fractured: %d chunks, volume %.4f (solid parts %.4f), max verts %d' % (
+        len(info), total, parts_volume(parts), vmax))
+
+
+def block_uv(blocks, rng, org, axes, margin=True):
+    """A planar metre mapping that lands a stone's face inside one ashlar block of
+    the sandstone texture: org = the stone's centre, axes = (u_axis, v_axis)
+    world vectors for faces facing along the third axis; other faces fall back
+    to box projection about the same centre, in the same block."""
+    r0, r1, jo = blocks[rng.randrange(len(blocks))]
+    bu = jo + rng.randrange(2) + 0.5
+    bv = (r0 + r1) / 2
+    ua, va = V(axes[0]), V(axes[1])
+    nrm = ua.cross(va).normalized()
+    o = V(org)
+
+    def f(co, n, c, face=None):
+        if abs(n.dot(nrm)) > 0.6:
+            d = co - o
+            return (bu + d.dot(ua), bv + d.dot(va))
+        u, v = uv_box(org=o)(co, n, c, face)
+        return (bu + u * 0.9, bv + v * 0.9)
+    return f
 
 
 def build_arch(P):
-    st = P['arcade']
-    K = 16
-    Rr, zs, W, H, D = 1.2, 2.6, 2.0, 5.0, 0.5
-    arc = [(Rr * math.cos(math.pi - math.pi * k / K), zs + Rr * math.sin(math.pi - math.pi * k / K))
-           for k in range(K + 1)]
-    outer = []
-    for (x, z) in arc:
-        dx, dz = x / Rr, (z - zs) / Rr
-        ts = []
-        if abs(dx) > 1e-9:
-            ts.append(W / abs(dx))
-        if dz > 1e-9:
-            ts.append((H - zs) / dz)
-        t = min(ts)
-        outer.append((dx * t, zs + dz * t))
+    """Piazza arcade bay: ochre plaster over the piers and spandrels (TX_plaster,
+    tinted), a ring of sandstone voussoirs with a proud keystone, moulded
+    imposts, a sandstone base course and a moulded cornice (rail on top)."""
+    rng = random.Random(2204)
+    off = V((6.1, 3.3, 0.7))
+    plaster, sst = tx('plaster'), tx('sandstone')
+    mats = [plaster, sst]
+    blocks = sandstone_blocks()
+    Rr, zs, W, D = 1.2, 2.6, 2.0, 0.5
+    parts = []
 
-    def side(q):
-        if abs(q[0] + W) < 1e-6:
-            return 'L'
-        if abs(q[0] - W) < 1e-6:
-            return 'R'
-        return 'T'
-    polys = [[(-W, 0), (-Rr, 0), (-Rr, zs), (-W, zs)], [(Rr, 0), (W, 0), (W, zs), (Rr, zs)]]
-    for k in range(K):
-        p0, p1, q0, q1 = arc[k], arc[k + 1], outer[k], outer[k + 1]
-        poly = [p0, p1, q1]
-        s0, s1 = side(q0), side(q1)
-        if s0 != s1:
-            if s0 == 'L':
-                poly.append((-W, H))
-            elif s1 == 'R':
-                poly.append((W, H))
-        poly.append(q0)
-        polys.append(poly)
-    bm = bmesh.new()
-    cache = {}
+    def ochre(co):
+        g = 1.0 - 0.08 * max(0.0, fbm(co * 0.9 + off, 3)) * 2.0
+        base = 1.0 - 0.3 * (1.0 - smoothstep(0.3, 1.4, co.z))
+        st = max(0.0, noise.noise(V((co.x * 2.6, co.y * 0.5, 0.3)) + off)) * smoothstep(3.2, 4.7, co.z)
+        st2 = max(0.0, noise.noise(V((co.x * 3.1, 2.0, 0.3)) + off)) * smoothstep(2.62, 2.3, co.z) * smoothstep(1.4, 2.3, co.z)
+        k = g * base * (1.0 - 0.28 * st - 0.2 * st2)
+        return (1.0 * k, 0.71 * k, 0.4 * k)
 
-    def vert(x, y, z):
-        key = (round(x, 5), round(y, 5), round(z, 5))
-        if key not in cache:
-            cache[key] = bm.verts.new((x, y, z))
-        return cache[key]
-    for poly in polys:
-        clean = []
-        for p in poly:
-            if not clean or (abs(p[0] - clean[-1][0]) > 1e-6 or abs(p[1] - clean[-1][1]) > 1e-6):
-                clean.append(p)
-        bm.faces.new([vert(x, -D, z) for (x, z) in clean])
-        bm.faces.new([vert(x, D, z) for (x, z) in reversed(clean)])
-    # walls: every boundary edge of the front face set gets a quad to the back
-    front_edges = [e for e in bm.edges if len(e.link_faces) == 1 and all(abs(v.co.y + D) < 1e-6 for v in e.verts)]
-    for e in front_edges:
-        a, b = e.verts
-        a2, b2 = vert(a.co.x, D, a.co.z), vert(b.co.x, D, b.co.z)
-        try:
-            bm.faces.new([a, b, b2, a2])
-        except ValueError:
-            pass
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    grid_cut(bm, 2, [0.7, 1.4, 2.0, 3.3, 4.2])
-    set_smooth(bm, False)
-    mb = MB()
-    mb.add(bm, st)
+    def stone_tint(co):
+        g = 1.0 - 0.1 * max(0.0, fbm(co * 2.2 + off, 2)) * 2.0
+        base = 1.0 - 0.25 * (1.0 - smoothstep(0.0, 0.5, co.z))
+        return (g * base, g * base * 0.97, g * base * 0.93)
+    # ---- plaster body: a slab minus the opening (subdivided for AO / grime)
+    body = bm_box_mm((-W, -D, 0.35), (W, D, 4.74), smooth=False)
+    grid_cut(body, 0, [-1.6, -1.2, -0.8, -0.4, 0.0, 0.4, 0.8, 1.2, 1.6])
+    grid_cut(body, 2, [1.0, 1.7, 2.45, 3.1, 3.7, 4.25])
+    op = [(-Rr, -0.2), (Rr, -0.2)]
+    for k in range(25):
+        a = math.pi * k / 24
+        op.append((Rr * math.cos(a), zs + Rr * math.sin(a)))
+    op = [(x, z) for (x, z) in op]
+    cutter = prism_y(op, -0.7, 0.7)
+    body = bool_diff(body, [cutter], name='arch body')
+    parts.append(part_bm(body, 0, uv_box(), ochre, tag=1, smooth=False))
+    # ---- base course: sandstone blocks along both piers (also round the inside)
     for sx in (-1, 1):
-        x0, x1 = sorted((sx * W, sx * (Rr - 0.04)))
-        mb.add(bm_box_mm((x0, -D - 0.04, 0), (x1, D + 0.04, 0.32), bevel=0.012), st, tint=(0.82, 0.8, 0.78))
-        x0, x1 = sorted((sx * W, sx * (Rr - 0.03)))
-        mb.add(bm_box_mm((x0, -D - 0.03, zs - 0.1), (x1, D + 0.03, zs + 0.02), bevel=0.01), st)
-    band = [(1.44 * math.cos(math.pi * k / 24), zs + 1.44 * math.sin(math.pi * k / 24)) for k in range(25)]
-    band += [(Rr * math.cos(math.pi - math.pi * k / 24), zs + Rr * math.sin(math.pi - math.pi * k / 24))
-             for k in range(25)]
-    for (z0, z1) in ((D - 0.01, D + 0.025), (-D - 0.025, -D + 0.01)):
-        pr = bm_prism(band, z0, z1)
-        rot(pr, math.pi / 2, 'X')
-        mb.add(pr, st, tint=(0.95, 0.93, 0.9))
-    ks = bm_prism([(-0.13, 3.74), (0.13, 3.74), (0.17, 4.1), (-0.17, 4.1)], -D - 0.045, D + 0.045)
-    rot(ks, math.pi / 2, 'X')
-    mb.add(ks, st, tint=(0.97, 0.95, 0.93))
-    mb.add(bm_box_mm((-W, -D - 0.025, 4.74), (W, D + 0.025, 4.83), bevel=0.01), st)
-    mb.add(bm_box_mm((-W, -D - 0.05, 4.83), (W, D + 0.05, 5.0), bevel=0.015), st)
+        x0, x1 = sorted((sx * (W + 0.015), sx * (Rr - 0.015)))
+        for (za, zb) in ((0.0, 0.35),):
+            b_ = bm_box_mm((x0, -D - 0.035, za), (x1, D + 0.035, zb), bevel=0.012, segs=1, smooth=False)
+            parts.append(part_bm(b_, 1, block_uv(blocks, rng, ((x0 + x1) / 2, 0, (za + zb) / 2), ((1, 0, 0), (0, 0, 1))),
+                                 stone_tint, tag=2, smooth=False))
+        # moulded impost at the springing line: fillet + cyma, proud of the pier
+        prof = [(-0.0, 2.44), (0.012, 2.44), (0.012, 2.47), (0.02, 2.48), (0.032, 2.5), (0.05, 2.54),
+                (0.06, 2.575), (0.062, 2.6), (0.0, 2.6)]
+        xa, xb = sorted((sx * (W + 0.02), sx * (Rr - 0.06)))
+        sec = []
+        for (dy, z) in prof:
+            sec.append((dy, z))
+        # loft a closed section (y, z) along x
+        yz = [(-D - dy, z) for (dy, z) in sec] + [(D + dy, z) for (dy, z) in reversed(sec)]
+        imp = bm_loft([[V((xa, y, z)) for (y, z) in yz], [V((xb, y, z)) for (y, z) in yz]], smooth=False)
+        bmesh.ops.recalc_face_normals(imp, faces=imp.faces)
+        parts.append(part_bm(imp, 1, block_uv(blocks, rng, ((xa + xb) / 2, 0, 2.52), ((1, 0, 0), (0, 0, 1))),
+                             stone_tint, tag=3, smooth=False))
+    # ---- voussoirs: 12 wedges + a proud keystone, joints of 7 mm
+    NV = 13
+    for k in range(NV):
+        a0 = math.pi * k / NV
+        a1 = math.pi * (k + 1) / NV
+        key = (k == NV // 2)
+        j = 0.0035 / Rr
+        a0 += j
+        a1 -= j
+        r0 = Rr - 0.006
+        r1 = Rr + (0.5 if key else 0.36 + 0.03 * (k % 2))
+        yb = D + (0.05 if key else 0.022)
+        pts = []
+        for (a, r) in ((a0, r0), (a1, r0), (a1, r1), (a0, r1)):
+            pts.append((r * math.cos(a), zs + r * math.sin(a)))
+        if key:                       # the keystone flares
+            (x0_, z0_), (x1_, z1_), (x2_, z2_), (x3_, z3_) = pts
+            pts = [(x0_, z0_), (x1_, z1_), (x2_ - 0.04, z2_ + 0.02), (x3_ + 0.04, z3_ + 0.02)]
+        vb = prism_y(pts, -yb, yb)
+        bmesh.ops.bevel(vb, geom=list(vb.edges), offset=0.01, offset_type='OFFSET', segments=1,
+                        profile=0.5, affect='EDGES', clamp_overlap=True)
+        cx_ = sum(p_[0] for p_ in pts) / 4
+        cz_ = sum(p_[1] for p_ in pts) / 4
+        am = (a0 + a1) / 2
+        tangent = (-math.sin(am), 0, math.cos(am))
+        radial = (math.cos(am), 0, math.sin(am))
+        parts.append(part_bm(vb, 1, block_uv(blocks, rng, (cx_, 0, cz_), (tangent, radial)), stone_tint, tag=4,
+                             smooth=False))
+    # ---- cornice: frieze band + moulded crown (the rail runs along the top)
+    prof = [(0.0, 4.72), (0.018, 4.72), (0.018, 4.78), (0.03, 4.8), (0.042, 4.83), (0.042, 4.86),
+            (0.05, 4.88), (0.05, 4.93), (0.045, 4.96), (0.05, 4.98), (0.05, 5.0), (0.0, 5.0)]
+    yz = [(-D - dy, z) for (dy, z) in prof] + [(D + dy, z) for (dy, z) in reversed(prof)]
+    cor = bm_loft([[V((-W, y, z)) for (y, z) in yz], [V((W, y, z)) for (y, z) in yz]], smooth=False)
+    bmesh.ops.recalc_face_normals(cor, faces=cor.faces)
+    grid_cut(cor, 0, [-1.0, 0.0, 1.0])
+    parts.append(part_bm(cor, 1, uv_box(off=(0.3, 0.1)), stone_tint, tag=5, smooth=False))
+    mb = MB()
+    for p_ in parts:
+        mb.add(p_, None, mats=mats, tint='src', uvf='src', ftag='src')
 
     def vfn(co, n, f):
-        k = 1.0 - 0.1 * max(0.0, fbm(co * 0.8 + V((3, 3, 3)), 3)) * 2
-        c = f.calc_center_median()
-        if abs(c.x) < Rr - 0.001 and c.z < 3.85 and abs(c.y) < D - 0.001:
-            k *= 0.72 + 0.18 * smoothstep(D, D * 0.2, abs(co.y))
-        k *= 1.0 - 0.25 * (1.0 - smoothstep(0.0, 1.2, co.z))
-        k *= 1.0 - 0.15 * smoothstep(0.0, -1.0, n.z)
-        streak = max(0.0, noise.noise(V((co.x * 1.8, 3.3, 0.7)))) * smoothstep(3.0, 4.74, co.z)
-        k *= 1.0 - 0.18 * streak
-        return (k, k * 0.98, k * 0.96)
-    finish(mb, 'Arch', sharp=40, vfn=vfn)
+        k = 1.0 - 0.12 * smoothstep(0.0, -1.0, n.z)
+        return (k, k, k)
+    ob = finish(mb, 'Arch', sharp=40, vfn=vfn)
+    bake_ao(ob, dist=0.6, samples=128, strength=0.85, ground=0.0)
+
+
+def bark_tube(pts, radii, sides, twist=1.6, ridges=6, depth=0.14, seed=0.0, u0=0.0, gnarl=0.0):
+    """A branch: a star-ish section (bark ridges) twisting along a smoothed
+    path, with metre UVs (U along the grain, V around, following the twist)."""
+    pts = [V(p) for p in pts]
+    n = len(pts)
+    T = []
+    for i in range(n):
+        d = pts[min(i + 1, n - 1)] - pts[max(i - 1, 0)]
+        T.append(d.normalized() if d.length > 1e-9 else V((0, 0, 1)))
+    t0 = T[0]
+    ref = V((0, 0, 1)) if abs(t0.z) < 0.9 else V((1, 0, 0))
+    N = (ref - t0 * ref.dot(t0)).normalized()
+    frames = []
+    for t in T:
+        N = N - t * N.dot(t)
+        if N.length < 1e-9:
+            N = t.orthogonal()
+        N.normalize()
+        frames.append((N.copy(), t.cross(N)))
+    sarc = [0.0]
+    for i in range(1, n):
+        sarc.append(sarc[-1] + (pts[i] - pts[i - 1]).length)
+    bm = bmesh.new()
+    uvl = bm.loops.layers.uv.new('UVMap')
+    rings = []
+    for i, p in enumerate(pts):
+        r = radii[i]
+        Nf, Bf = frames[i]
+        if r <= 1e-6:
+            rings.append([(bm.verts.new(p), 0.0)])
+            continue
+        ring = []
+        for j in range(sides):
+            th = TAU * j / sides
+            ph = th + twist * sarc[i]
+            rr = r * (1.0 + depth * math.cos(ridges * ph + seed) * (0.6 + 0.4 * math.cos(3 * ph + seed * 2)))
+            rr *= 1.0 + 0.05 * noise.noise(V((math.cos(th) * 2, math.sin(th) * 2, sarc[i] * 3 + seed)))
+            if gnarl:
+                bump = noise.noise(V((math.cos(th) * 1.2, math.sin(th) * 1.2, sarc[i] * 2.2 + seed * 3)))
+                rr *= 1.0 + gnarl * max(0.0, bump) * 1.6 - gnarl * 0.3 * max(0.0, -bump)
+            ring.append((bm.verts.new(p + Nf * (rr * math.cos(th)) + Bf * (rr * math.sin(th))), th))
+        rings.append(ring)
+    for i in range(n - 1):
+        a_, b_ = rings[i], rings[i + 1]
+        for j in range(sides):
+            j2 = (j + 1) % sides
+            if len(b_) == 1:
+                vs = [a_[j], a_[j2], b_[0]]
+            elif len(a_) == 1:
+                vs = [a_[0], b_[j2], b_[j]]
+            else:
+                vs = [a_[j], a_[j2], b_[j2], b_[j]]
+            try:
+                f = bm.faces.new([v for v, _ in vs])
+            except ValueError:
+                continue
+            for lp, (v, th) in zip(f.loops, vs):
+                ii = i if (v in [q for q, _ in a_]) else i + 1
+                rr = max(radii[ii], 1e-3)
+                jj = th
+                if j2 == 0 and th == 0.0 and len(a_) > 1 and v in [a_[0][0]] + ([b_[0][0]] if len(b_) > 1 else []):
+                    jj = TAU
+                lp[uvl].uv = (sarc[ii] + u0, rr * (jj + twist * sarc[ii]))
+    if len(rings[0]) > 1:
+        f = bm.faces.new([v for v, _ in reversed(rings[0])])
+        for lp in f.loops:
+            lp[uvl].uv = (lp.vert.co.x, lp.vert.co.y)
+    if len(rings[-1]) > 1:
+        f = bm.faces.new([v for v, _ in rings[-1]])
+        for lp in f.loops:
+            lp[uvl].uv = (lp.vert.co.x, lp.vert.co.y)
+    set_smooth(bm, True)
+    return bm
+
+
+def catmull(pts, k=2):
+    """Subdivide a polyline k times with Catmull-Rom (keeps the end points)."""
+    for _ in range(k):
+        ext = [pts[0] * 2 - pts[1]] + pts + [pts[-1] * 2 - pts[-2]]
+        out = []
+        for i in range(len(pts) - 1):
+            p0, p1, p2, p3 = ext[i], ext[i + 1], ext[i + 2], ext[i + 3]
+            out.append(p1)
+            out.append((-p0 + 9 * p1 + 9 * p2 - p3) / 16)
+        out.append(pts[-1])
+        pts = out
+    return pts
 
 
 def build_dead_tree(P):
-    dw = P['deadwood']
+    """A dead Dali olive: space-colonisation crown, pipe-model radii, twisted
+    ridged bark (TX_oak, grain along each branch), buttress roots, a couple of
+    broken stubs, and the long horizontal branch the melting clock hangs on
+    (level.js clockGrove: ~(1.7, 0, 2.15..2.25), kept clear of other wood)."""
     rng = random.Random(1931)
-    verts, edges, radii = [], [], []
+    off = V((4.4, 1.7, 3.3))
+    wood = tx('oak')
+    # ---- trunk: a leaning S with a fork at ~2 m
+    trunk = [V((0, 0, -0.06)), V((0.03, 0.02, 0.35)), V((-0.05, 0.05, 0.75)), V((0.04, -0.02, 1.1)),
+             V((0.1, 0.0, 1.45)), V((0.06, 0.03, 1.75)), V((0.02, 0.0, 2.02))]
+    nodes = [p.copy() for p in trunk]
+    parent = [-1] + list(range(len(trunk) - 1))
+    # ---- the clock branch (hand placed; everything else grows around it)
+    clock = [V((0.02, 0.0, 2.02)), V((0.3, -0.02, 2.13)), V((0.62, 0.03, 2.22)), V((0.98, 0.0, 2.27)),
+             V((1.34, -0.04, 2.28)), V((1.7, 0.0, 2.25)), V((1.92, 0.02, 2.19)), V((2.08, 0.03, 2.12))]
+    # ---- space colonisation for the rest of the crown
+    att = []
+    while len(att) < 420:
+        p = V((rng.uniform(-1.3, 1.3), rng.uniform(-0.75, 0.75), rng.uniform(1.3, 3.3)))
+        e1 = ((p.x + 0.35) / 0.95) ** 2 + (p.y / 0.62) ** 2 + ((p.z - 2.55) / 0.72) ** 2
+        e2 = ((p.x - 0.35) / 0.55) ** 2 + (p.y / 0.5) ** 2 + ((p.z - 2.85) / 0.4) ** 2
+        if min(e1, e2) > 1.0:
+            continue
+        if 1.05 < p.x and abs(p.y) < 0.7 and 1.6 < p.z < 2.9:      # the clock's room
+            continue
+        att.append(p)
+    D, R_inf, R_kill = 0.085, 0.55, 0.13
+    for it in range(80):
+        if not att:
+            break
+        kd = KDTree(len(nodes))
+        for i, p in enumerate(nodes):
+            kd.insert(p, i)
+        kd.balance()
+        pull = {}
+        for a in att:
+            co, i, d = kd.find(a)
+            if d < R_inf and (i >= 4):
+                pull.setdefault(i, []).append((a - nodes[i]).normalized())
+        if not pull:
+            break
+        for i, dirs in sorted(pull.items()):
+            d = sum(dirs, V((0, 0, 0)))
+            if d.length < 1e-6:
+                continue
+            d = d.normalized()
+            d = (d + V((0, 0, 0.12)) + V((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-1, 1))) * 0.35).normalized()
+            q = nodes[i] + d * D
+            nodes.append(q)
+            parent.append(i)
+        kd = KDTree(len(nodes))
+        for i, p in enumerate(nodes):
+            kd.insert(p, i)
+        kd.balance()
+        att = [a for a in att if kd.find(a)[2] > R_kill]
+    n = len(nodes)
+    kids = [[] for _ in range(n)]
+    for i, pi in enumerate(parent):
+        if pi >= 0:
+            kids[pi].append(i)
+    # pipe model radii
+    rad = [0.0] * n
+    for i in reversed(range(n)):
+        if not kids[i]:
+            rad[i] = 0.011
+        else:
+            rad[i] = sum(rad[k] ** 2.4 for k in kids[i]) ** (1 / 2.4)
+    for i in range(len(trunk)):
+        rad[i] = max(rad[i], lerp(0.19, 0.11, i / (len(trunk) - 1)))
+    # relax the colonisation zig-zag along each limb (the hand-placed trunk
+    # stays put; done on the nodes so every joint stays shared)
+    for _ in range(2):
+        sm = [p.copy() for p in nodes]
+        for i in range(len(trunk), n):
+            if kids[i]:
+                k = max(kids[i], key=lambda k: rad[k])
+                sm[i] = (nodes[parent[i]] + nodes[i] * 2.0 + nodes[k]) * 0.25
+        nodes = sm
+    # chains: follow the thickest child, other children start new chains
+    chains = []
+    stack = [0]
+    while stack:
+        i = stack.pop()
+        chain = [parent[i]] if parent[i] >= 0 else []
+        chain.append(i)
+        while kids[i]:
+            ks = sorted(kids[i], key=lambda k: -rad[k])
+            stack.extend(ks[1:])
+            i = ks[0]
+            chain.append(i)
+        chains.append(chain)
+    parts = []
+    tris_est = 0
+    cp = catmull(clock, 1)
 
-    def node(p, r, parent=None):
-        verts.append(V(p))
-        radii.append(r)
-        i = len(verts) - 1
-        if parent is not None:
-            edges.append((parent, i))
-        return i
-
-    def branch(parent, pts, r0, r1, jitter=0.03):
-        idx = parent
-        out = []
-        for k, p in enumerate(pts):
-            t = (k + 1) / len(pts)
-            p = V(p) + V((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-1, 1))) * jitter
-            idx = node(p, lerp(r0, r1, t) * rng.uniform(0.9, 1.12), idx)
-            out.append(idx)
-        return out
-    root = node((0, 0, 0.0), 0.2)
-    trunk = branch(root, [(0.04, 0.02, 0.35), (-0.04, 0.05, 0.7), (0.05, -0.03, 1.05),
-                          (0.1, 0.0, 1.4), (0.06, 0.03, 1.72), (0.02, 0.0, 2.0)], 0.17, 0.11, 0.0)
-    top = branch(trunk[-1], [(-0.1, 0.04, 2.35), (-0.18, 0.02, 2.68), (-0.24, -0.02, 2.95),
-                             (-0.3, 0.0, 3.2)], 0.1, 0.03)
-    branch(top[1], [(0.05, 0.2, 2.9), (0.1, 0.3, 3.05)], 0.05, 0.02)
-    branch(trunk[-1], [(0.3, -0.02, 2.13), (0.62, 0.03, 2.22), (0.98, 0.0, 2.27), (1.34, -0.04, 2.28),
-                       (1.66, 0.0, 2.25), (1.9, 0.02, 2.19), (2.08, 0.03, 2.12)], 0.1, 0.028, 0.0)
-    lb = branch(trunk[3], [(-0.25, 0.04, 1.62), (-0.5, 0.0, 1.9), (-0.68, -0.05, 2.2),
-                           (-0.8, 0.0, 2.48), (-0.86, 0.02, 2.62)], 0.075, 0.022)
-    branch(lb[2], [(-0.95, 0.12, 2.25), (-1.1, 0.18, 2.3)], 0.03, 0.012)
-    branch(trunk[2], [(0.12, 0.28, 1.2), (0.12, 0.42, 1.28)], 0.055, 0.04, 0.0)
-    for k in range(5):
-        a = TAU * k / 5 + 0.4
-        L = rng.uniform(0.45, 0.65)
-        branch(root, [(math.cos(a) * L * 0.5, math.sin(a) * L * 0.5, 0.05),
-                      (math.cos(a) * L, math.sin(a) * L, 0.0)], 0.1, 0.035, 0.0)
-    bm = bm_skin(verts, edges, radii, levels=2, root=0)
-
-    def bark(co, n):
-        q = V((co.x * 7, co.y * 7, co.z * 1.6))
-        ridge = abs(noise.noise(q)) * 2 - 1
-        g = fbm(co * 2.5, 2)
-        return co + n * (0.012 * ridge + 0.035 * g)
-    displace(bm, bark)
-    for v in bm.verts:
-        if v.co.z < 0.0:
-            v.co.z = 0.0
-    set_smooth(bm)
+    def in_clock_branch(p):
+        # twigs that grew along the clock branch end up buried in it
+        for a, b in zip(cp, cp[1:]):
+            ab = b - a
+            t = clamp((p - a).dot(ab) / ab.length_squared, 0.0, 1.0)
+            if (a + ab * t - p).length < 0.1:
+                return True
+        return False
+    for ci, ch in enumerate(chains):
+        pts = [nodes[i] for i in ch]
+        rs = [rad[i] for i in ch]
+        L = sum((pts[k + 1] - pts[k]).length for k in range(len(pts) - 1))
+        if L < 0.22 and rs[0] < 0.03:
+            continue
+        if ci and sum(in_clock_branch(p) for p in pts[1:]) * 2 >= len(pts) - 1:
+            continue
+        # gnarl: wobble the joints a little, pull the start into the parent
+        pts = [p + V((noise.noise(p * 3.0 + off), noise.noise(p * 3.0 + off + V((5, 0, 0))),
+                      noise.noise(p * 3.0 + off + V((0, 9, 0))))) * min(0.03, rs[k] * 0.5)
+               if 0 < k else p for k, p in enumerate(pts)]
+        # rings where they are needed: spacing grows with the branch radius
+        # (the colonisation nodes are 8.5 cm apart all the way up)
+        keep_p, keep_r = [pts[0]], [rs[0]]
+        for q, r in zip(pts[1:-1], rs[1:-1]):
+            if (q - keep_p[-1]).length >= clamp(2.6 * r, 0.1, 0.24):
+                keep_p.append(q)
+                keep_r.append(r)
+        keep_p.append(pts[-1])
+        keep_r.append(rs[-1])
+        pts, rs = keep_p, keep_r
+        rs = [max(0.005, r) for r in rs]
+        rs[-1] *= 0.55                                      # taper the tip
+        sides = 10 if rs[0] > 0.09 else (6 if rs[0] > 0.035 else 3)
+        tb = bark_tube(pts, rs, sides, twist=1.4 + rng.uniform(-0.3, 0.3), ridges=5 if sides == 10 else 3,
+                       depth=0.2 if sides == 10 else (0.12 if sides >= 6 else 0.0), seed=rng.uniform(0, 9),
+                       u0=rng.uniform(0, 3), gnarl=0.12 if sides == 10 else 0.0)
+        parts.append(tb)
+        tris_est += len(tb.faces) * 2
+    # ---- the clock branch
+    crs = [lerp(0.1, 0.03, (k / (len(cp) - 1)) ** 0.8) for k in range(len(cp))]
+    crs[-1] = 0.024
+    parts.append(bark_tube(cp, crs, 7, twist=1.1, ridges=3, depth=0.12, seed=2.0))
+    # a broken-off stub on the clock branch and one on the trunk
+    for (p0, d, r, L) in ((V((0.8, 0.0, 2.25)), V((0.2, -0.5, 0.6)), 0.03, 0.22),
+                          (V((0.07, 0.0, 1.25)), V((0.9, 0.4, 0.3)), 0.05, 0.2)):
+        d = d.normalized()
+        sp = [p0 - d * 0.03, p0 + d * (L * 0.5), p0 + d * L]
+        parts.append(bark_tube(sp, [r, r * 0.9, r * 0.82], 5, twist=0.8, ridges=2, depth=0.1, seed=4.0))
+    # ---- buttress roots, flaring into the ground
+    for k in range(6):
+        a = TAU * k / 6 + 0.4 + rng.uniform(-0.25, 0.25)
+        L = rng.uniform(0.38, 0.62)
+        c_, s_ = math.cos(a), math.sin(a)
+        rp = [V((c_ * 0.04, s_ * 0.04, 0.5)), V((c_ * 0.15, s_ * 0.15, 0.2)), V((c_ * L * 0.55, s_ * L * 0.55, 0.05)),
+              V((c_ * L, s_ * L, -0.06)), V((c_ * (L + 0.12), s_ * (L + 0.12), -0.2))]
+        rp = catmull(rp, 1)
+        rr = [0.1, 0.1, 0.09, 0.075, 0.06, 0.05, 0.042, 0.036, 0.03]
+        parts.append(bark_tube(rp, rr[:len(rp)], 6, twist=0.6, ridges=3, depth=0.12, seed=k * 1.3, gnarl=0.1))
     mb = MB()
-    mb.add(bm, dw)
 
-    def vfn(co, n, f):
-        q = V((co.x * 7, co.y * 7, co.z * 1.6))
-        ridge = abs(noise.noise(q))
-        k = 0.55 + 0.45 * smoothstep(0.05, 0.5, ridge)
-        k *= 1.0 - 0.35 * (1.0 - smoothstep(0.0, 0.8, co.z))
-        k *= 1.0 - 0.2 * smoothstep(0.0, -1.0, n.z)
-        return (k, k * 0.95, k * 0.88)
-    finish(mb, 'DeadTree', sharp=None, vfn=vfn)
+    def tint(co):
+        g = 1.0 - 0.12 * max(0.0, fbm(co * 2.0 + off, 3)) * 2.0
+        grey_ = 0.35 * smoothstep(1.6, 3.0, co.z)          # sun-bleached up top
+        c = mix3((0.92, 0.86, 0.8), (1.0, 0.98, 0.95), grey_)
+        k = g * (1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.5, co.z)))
+        return (c[0] * k, c[1] * k, c[2] * k)
+    for tb in parts:
+        tb.normal_update()
+        mb.add(part_bm_keep(tb, 0, tint, tag=1), None, mats=[wood], tint='src', uvf='src', ftag='src')
+    ob = finish(mb, 'DeadTree', sharp=None)
+    bake_ao(ob, dist=0.5, samples=128, strength=0.9, ground=0.0)
+    print('  DeadTree: %d nodes, %d branches' % (n, len(parts)))
+
+
+def casing_sweep(sec, xo, zt, y_back, sgn):
+    """A door architrave: a closed moulding section swept up the left jamb,
+    across the head and down the right jamb with mitred top corners.  sec:
+    [(u, v)], u inward from the outer edge, v away from the frame face
+    (sgn = -1 front, +1 back)."""
+    bm = bmesh.new()
+    corners = [(-xo, 0.0, 1, 0), (-xo, zt, 1, -1), (xo, zt, -1, -1), (xo, 0.0, -1, 0)]
+    rings = []
+    for (x, z, dx, dz) in corners:
+        rings.append([bm.verts.new((x + dx * u, y_back + sgn * v, z + dz * u if dz else z)) for (u, v) in sec])
+    m = len(sec)
+    for i in range(3):
+        a_, b_ = rings[i], rings[i + 1]
+        for j in range(m):
+            j2 = (j + 1) % m
+            bm.faces.new([a_[j], a_[j2], b_[j2], b_[j]])
+    bm.faces.new(rings[0])
+    bm.faces.new(list(reversed(rings[3])))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
 
 
 def build_door(P):
-    frame = material('DoorFrame', '#ede1c4', 0.0, 0.8)
-    paint = material('DoorPaint', '#2a5f5c', 0.0, 0.48)
+    """The exit: a freestanding door in a moulded stucco architrave (mitred
+    casings on both faces, plinth blocks), a marble sill; the leaf is painted
+    wood (stiles, rails and raised panels, grain following each member) on
+    iron strap hinges whose knuckles sit on the Door_Leaf pivot, brass knobs
+    and escutcheons.  Door_Leaf / Door_Light names and pivots are unchanged."""
+    rng = random.Random(3321)
+    off = V((2.7, 5.1, 3.3))
+    stucco, marble, iron, paint = tx('stucco'), tx('marble'), tx('iron'), tx('wood')
     brass = P['brass']
     light = material('DoorLight', '#fff0c0', 0.0, 1.0, emit='#ffd98c', strength=4.0)
+
+    def cream(co):
+        g = 1.0 - 0.07 * max(0.0, fbm(co * 2.0 + off, 2)) * 2.0
+        g *= 1.0 - 0.25 * (1.0 - smoothstep(0.0, 0.5, co.z))
+        return (1.0 * g, 0.94 * g, 0.82 * g)
     mb = MB()
-    for sx in (-1, 1):
-        x0, x1 = sorted((sx * 0.55, sx * 0.65))
-        mb.add(bm_box_mm((x0, -0.11, 0), (x1, 0.11, 2.4), bevel=0.006), frame)
-        x0, x1 = sorted((sx * 0.57, sx * 0.65))
-        for (y0, y1) in ((-0.125, -0.1), (0.1, 0.125)):
-            mb.add(bm_box_mm((x0, y0, 0), (x1, y1, 2.47), bevel=0.008, segs=2), frame)
-        x0, x1 = sorted((sx * 0.55, sx * 0.535))
-        mb.add(bm_box_mm((x0, 0.022, 0.02), (x1, 0.05, 2.385)), frame)
-    mb.add(bm_box_mm((-0.65, -0.11, 2.4), (0.65, 0.11, 2.47), bevel=0.006), frame)
-    mb.add(bm_box_mm((-0.55, 0.022, 2.385), (0.55, 0.05, 2.4)), frame)
-    for (y0, y1) in ((-0.125, -0.1), (0.1, 0.125)):
-        mb.add(bm_box_mm((-0.65, y0, 2.4), (0.65, y1, 2.47), bevel=0.008), frame)
-    mb.add(bm_box_mm((-0.65, -0.125, 2.47), (0.65, 0.125, 2.5), bevel=0.01, segs=2), frame)
-    mb.add(bm_box_mm((-0.55, -0.11, 0.0), (0.55, 0.11, 0.02), bevel=0.004), frame, tint=(0.8, 0.78, 0.75))
-    finish(mb, 'Door', sharp=40, weighted=True, vfn=ao_fn(h=0.3, amt=0.3))
-    # the leaf: slab with six raised panels per side, knobs and hinges
+    mats = [stucco, marble, iron]
+    # frame core (open at the bottom), with the door stop behind the leaf
+    core = bm_prism([(-0.65, 0.0), (-0.55, 0.0), (-0.55, 2.4), (0.55, 2.4), (0.55, 0.0), (0.65, 0.0),
+                     (0.65, 2.5), (-0.65, 2.5)], -0.11, 0.11)
+    xform(core, Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1))))
+    bmesh.ops.reverse_faces(core, faces=core.faces)
+    grid_cut(core, 2, [0.6, 1.2, 1.8])
+    mb.add(part_bm(core, 0, uv_box(), cream, tag=1, smooth=False), None, mats=mats, tint='src', uvf='src', ftag='src')
+    for (x0, x1, z0, z1) in ((-0.55, -0.535, 0.02, 2.385), (0.535, 0.55, 0.02, 2.385), (-0.55, 0.55, 2.385, 2.4)):
+        st = bm_box_mm((x0, 0.022, z0), (x1, 0.05, z1), smooth=False)
+        mb.add(part_bm(st, 0, uv_box(), cream, tag=1, smooth=False), None, mats=mats, tint='src', uvf='src', ftag='src')
+    # moulded architraves on both faces: fillet, ogee, bead
+    sec = [(0.0, 0.0), (0.0, 0.009), (0.006, 0.012), (0.014, 0.012), (0.02, 0.015), (0.032, 0.015),
+           (0.05, 0.011), (0.068, 0.008), (0.08, 0.009), (0.088, 0.012), (0.094, 0.009), (0.1, 0.004),
+           (0.1, 0.0)]
+    for sgn in (-1, 1):
+        cs = casing_sweep(sec, 0.65, 2.5, sgn * 0.11, sgn)
+        mb.add(part_bm(cs, 0, uv_box(), cream, tag=2, smooth=False), None, mats=mats, tint='src', uvf='src',
+               ftag='src')
+        for sx in (-1, 1):                                  # plinth blocks
+            x0, x1 = sorted((sx * 0.542, sx * 0.662))
+            pb = bm_box_mm((x0, -0.132, 0.0), (x1, 0.132, 0.22), bevel=0.006, segs=1, smooth=False)
+            mb.add(part_bm(pb, 1, uv_box(off=(sx * 0.7, 0.3)), lambda co: (0.9, 0.89, 0.86), tag=2, smooth=False),
+                   None, mats=mats, tint='src', uvf='src', ftag='src')
+    # marble sill with a rounded nose
+    prof = [(0.12, 0.0), (0.12, 0.022), (-0.12, 0.022), (-0.132, 0.019), (-0.138, 0.011), (-0.135, 0.004),
+            (-0.13, 0.0)]
+    yz = [(y, z) for (y, z) in prof]
+    sill = bm_loft([[V((-0.55, y, z)) for (y, z) in yz], [V((0.55, y, z)) for (y, z) in yz]], smooth=False)
+    bmesh.ops.recalc_face_normals(sill, faces=sill.faces)
+    mb.add(part_bm(sill, 1, uv_box(off=(0.4, 0.2)), lambda co: (0.86, 0.85, 0.83), tag=3, smooth=False), None,
+           mats=mats, tint='src', uvf='src', ftag='src')
+    # iron pintles on the frame for the leaf's knuckles
+    hinge = V((-0.55, -0.03, 0.0))
+    ZH = (0.12, 0.8, 2.32)
+    for z in ZH:
+        pin = bm_lathe([(0.0, z - 0.1), (0.011, z - 0.1), (0.011, z - 0.06), (0.0, z - 0.06)], segs=10)
+        mb.add(part_bm(move(pin, (hinge.x, hinge.y, 0)), 2, uv_cyl(cx=hinge.x, cy=hinge.y), (0.9, 0.9, 0.9),
+                       tag=4), None, mats=mats, tint='src', uvf='src', ftag='src')
+        plate = bm_box_mm((-0.585, -0.126, z - 0.1), (-0.555, -0.112, z - 0.05), bevel=0.003, segs=1, smooth=False)
+        mb.add(part_bm(plate, 2, uv_box(), (0.85, 0.85, 0.85), tag=4, smooth=False), None, mats=mats, tint='src',
+               uvf='src', ftag='src')
+    ob = finish(mb, 'Door', sharp=40)
+    bake_ao(ob, dist=0.3, samples=128, strength=0.85, ground=0.0)
+
+    # ---- the leaf: stiles, rails, muntin, six raised panels per face
     lb = MB()
+    lmats = [paint, iron, brass]
     y0, y1 = -0.03, 0.02
-    lb.add(bm_box_mm((-0.546, y0, 0.023), (0.546, y1, 2.382), bevel=0.004), paint)
-    cols = [(-0.46, -0.04), (0.04, 0.46)]
-    rows = [(0.14, 0.72), (0.84, 1.52), (1.64, 2.27)]
+    Z0, Z1 = 0.023, 2.382
+
+    def paint_tint(co):
+        g = 1.0 - 0.08 * max(0.0, fbm(co * 2.5 + off, 2)) * 2.0
+        g *= 1.0 - 0.22 * (1.0 - smoothstep(0.0, 0.45, co.z))
+        hand = 0.18 * smoothstep(0.2, 0.0, math.hypot(co.x - 0.44, co.z - 1.02))
+        return (g * (1 - hand), g * (1 - hand), g * (1 - hand * 1.2))
+    SX = [(-0.546, -0.426), (-0.03, 0.03), (0.426, 0.546)]            # stiles + muntin
+    RZ = [(0.023, 0.2), (0.72, 0.84), (1.5, 1.62), (2.26, 2.382)]      # rails
+    for (xa, xb) in SX:
+        za, zb = (Z0, Z1) if abs(xa) > 0.1 else (0.2, 2.26)
+        st = bm_box_mm((xa, y0, za), (xb, y1, zb), bevel=0.004, segs=1, smooth=False)
+        lb.add(part_bm(st, 0, uv_box(off=(rng.uniform(0, 1), 0)), paint_tint, tag=1, smooth=False), None,
+               mats=lmats, tint='src', uvf='src', ftag='src')
+    for (za, zb) in RZ:
+        rl = bm_box_mm((-0.426, y0, za), (0.426, y1, zb), bevel=0.004, segs=1, smooth=False)
+        lb.add(part_bm(rl, 0, uv_box(grain='z', off=(0, rng.uniform(0, 1))), paint_tint, tag=1, smooth=False),
+               None, mats=lmats, tint='src', uvf='src', ftag='src')
+    cols = [(-0.426, -0.03), (0.03, 0.426)]
+    rows = [(0.2, 0.72), (0.84, 1.5), (1.62, 2.26)]
     for (xa, xb) in cols:
         for (za, zb) in rows:
-            for (ya, yb) in ((y0 - 0.008, y0 + 0.004), (y1 - 0.004, y1 + 0.008)):
-                lb.add(bm_box_mm((xa, ya, za), (xb, yb, zb), bevel=0.02, segs=1), paint)
+            # raised field on each face: flat centre, bevel down to the recess
+            for (yr, yf, sgn) in ((y0 + 0.012, y0 + 0.002, -1), (y1 - 0.012, y1 - 0.002, 1)):
+                e, fi = 0.004, 0.05
+                ring0 = [(xa + e, za + e), (xb - e, za + e), (xb - e, zb - e), (xa + e, zb - e)]
+                ring1 = [(xa + fi, za + fi), (xb - fi, za + fi), (xb - fi, zb - fi), (xa + fi, zb - fi)]
+                ym = (y0 + y1) / 2
+                secs = [[V((x, ym, z)) for (x, z) in ring0], [V((x, yr, z)) for (x, z) in ring0],
+                        [V((x, yf, z)) for (x, z) in ring1]]
+                pn = bm_loft(secs, smooth=False)
+                bmesh.ops.recalc_face_normals(pn, faces=pn.faces)
+                lb.add(part_bm(pn, 0, uv_box(off=(rng.uniform(0, 1.5), 0)), paint_tint, tag=2, smooth=False),
+                       None, mats=lmats, tint='src', uvf='src', ftag='src')
+    # iron strap hinges on the front face, knuckles on the hinge line
+    def iron_tint(co):
+        return (0.9, 0.9, 0.9)
+    for z in ZH:
+        pts = []
+        L = 0.46
+        for k in range(9):
+            t = k / 8
+            w = lerp(0.028, 0.017, t) + (0.012 * math.sin(math.pi * (t - 0.85) / 0.15) if t > 0.85 else 0.0)
+            pts.append((hinge.x + 0.012 + L * t, w))
+        outline = [(x, z - w) for (x, w) in pts] + [(x, z + w) for (x, w) in reversed(pts)]
+        sp = prism_y(outline, y0 - 0.005, y0 + 0.001)
+        lb.add(part_bm(sp, 1, uv_box(), iron_tint, tag=3, smooth=False), None, mats=lmats, tint='src', uvf='src',
+               ftag='src')
+        for k in (2, 5, 7):                             # nail heads
+            x = pts[k][0]
+            nl = bm_ico(0.0065, 1, center=(x, y0 - 0.005, z), sc=(1, 0.55, 1))
+            lb.add(part_bm(nl, 1, uv_box(), (0.8, 0.8, 0.8), tag=3, smooth=True), None, mats=lmats, tint='src',
+                   uvf='src', ftag='src')
+        kn = bm_lathe([(0.0, z - 0.055), (0.013, z - 0.055), (0.014, z - 0.05), (0.014, z + 0.05),
+                       (0.013, z + 0.055), (0.0, z + 0.055)], segs=12)
+        lb.add(part_bm(move(kn, (hinge.x, hinge.y, 0)), 1, uv_cyl(cx=hinge.x, cy=hinge.y), iron_tint, tag=3),
+               None, mats=lmats, tint='src', uvf='src', ftag='src')
+    # brass knobs with rosettes, escutcheons with keyholes
     for (yy, sgn) in ((y0, -1), (y1, 1)):
         kn = bm_lathe([(0, 0), (0.012, 0), (0.008, 0.015), (0.018, 0.03), (0.028, 0.045),
-                       (0.025, 0.058), (0, 0.062)], segs=24)
+                       (0.025, 0.058), (0, 0.062)], segs=20)
         rot(kn, -sgn * math.pi / 2, 'X')
-        lb.add(move(kn, (0.44, yy, 1.02)), brass)
-        lb.add(bm_box_mm((0.425, yy - 0.004 if sgn < 0 else yy, 0.93),
-                         (0.455, yy if sgn < 0 else yy + 0.004, 1.1), bevel=0.003), brass)
-    hinge = V((-0.55, y0, 0.0))         # front-left edge: the leaf swings out toward -Y
-    for z in (0.3, 1.2, 2.1):
-        kb = bm_lathe([(0, z - 0.06), (0.012, z - 0.06), (0.012, z + 0.06), (0.008, z + 0.07), (0, z + 0.075)],
-                      segs=12)
-        lb.add(move(kb, (hinge.x, hinge.y, 0)), brass)
-    finish(lb, 'Door_Leaf', pivot=hinge, parent='Door', sharp=40, weighted=True)
+        lb.add(part_bm(move(kn, (0.44, yy, 1.02)), 2, uv_box(), (1.0, 1.0, 1.0), tag=4), None, mats=lmats,
+               tint='src', uvf='src', ftag='src')
+        ro = bm_lathe([(0, 0), (0.034, 0), (0.034, 0.003), (0.026, 0.007), (0.0, 0.008)], segs=20)
+        rot(ro, -sgn * math.pi / 2, 'X')
+        lb.add(part_bm(move(ro, (0.44, yy, 1.02)), 2, uv_box(), (0.9, 0.88, 0.8), tag=4), None, mats=lmats,
+               tint='src', uvf='src', ftag='src')
+        esc = bm_box_mm((0.425, yy - 0.004 if sgn < 0 else yy, 0.9), (0.455, yy if sgn < 0 else yy + 0.004, 0.97),
+                        bevel=0.003, smooth=False)
+        lb.add(part_bm(esc, 2, uv_box(), (0.85, 0.82, 0.75), tag=4, smooth=False), None, mats=lmats, tint='src',
+               uvf='src', ftag='src')
+        kh = bm_prism([(-0.003, -0.012), (0.003, -0.012), (0.002, 0.0), (0.005, 0.005), (0.0, 0.009),
+                       (-0.005, 0.005), (-0.002, 0.0)], 0.0, 0.002)
+        rot(kh, math.pi / 2, 'X')
+        lb.add(part_bm(move(kh, (0.44, yy + sgn * 0.0045 - (0.002 if sgn > 0 else 0.0), 0.935)), 1, uv_box(),
+                       (0.2, 0.2, 0.2), tag=4, smooth=False), None, mats=lmats, tint='src', uvf='src', ftag='src')
+    lob = finish(lb, 'Door_Leaf', pivot=hinge, parent='Door', sharp=40)
+    bake_ao(lob, dist=0.15, samples=96, strength=0.8)
     gl = MB()
     pl = bm_grid(1, 1, -0.549, 0.549, 0.02, 2.385)
     rot(pl, math.pi / 2, 'X')
@@ -1980,266 +3568,878 @@ def smooth_profile(pts, n=40):
     return out
 
 
-STRATA = [(1.0, 0.96, 0.9), (0.93, 0.78, 0.62), (0.84, 0.6, 0.44), (0.97, 0.87, 0.74)]
+def poly_clip_line(poly, nx, ny, d):
+    """Keep the part of a convex 2D polygon with nx*x + ny*y <= d."""
+    out = []
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        sa, sb = nx * a[0] + ny * a[1] - d, nx * b[0] + ny * b[1] - d
+        if sa <= 0:
+            out.append(a)
+        if (sa < 0 < sb) or (sb < 0 < sa):
+            t = sa / (sa - sb)
+            out.append((lerp(a[0], b[0], t), lerp(a[1], b[1], t)))
+    return out
 
 
-def strata_color(co, off, n):
-    q = co.z * 3.0 + 0.9 * fbm(co * 0.6 + off, 2)
-    i = int(math.floor(q)) % len(STRATA)
-    f = q - math.floor(q)
-    c = mix3(STRATA[i], STRATA[(i + 1) % len(STRATA)], smoothstep(0.75, 1.0, f))
-    k = 1.0 - 0.18 * max(0.0, math.sin(q * TAU * 2.0)) * 0.5
-    k *= 1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.45, co.z))
-    k *= 1.0 - 0.3 * smoothstep(0.1, -0.9, n.z)
-    return (c[0] * k, c[1] * k, c[2] * k)
+def convex_hull2(pts):
+    pts = sorted(set((round(x, 6), round(y, 6)) for x, y in pts))
+    if len(pts) < 3:
+        return pts
+
+    def cr(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lo, hi = [], []
+    for p_ in pts:
+        while len(lo) >= 2 and cr(lo[-2], lo[-1], p_) <= 0:
+            lo.pop()
+        lo.append(p_)
+    for p_ in reversed(pts):
+        while len(hi) >= 2 and cr(hi[-2], hi[-1], p_) <= 0:
+            hi.pop()
+        hi.append(p_)
+    return lo[:-1] + hi[:-1]
 
 
-def build_rock(P, name, prof, seed, sx=1.0, sy=1.0, lean=0.0, droop=None, ns=0.16):
-    sand = P['sandstone']
+def slab_prism(poly_b, poly_t, z0, z1):
+    """Closed prism between two matching CCW outlines (bottom at z0, top at z1)."""
+    return bm_loft([[V((x, y, z0)) for (x, y) in poly_b], [V((x, y, z1)) for (x, y) in poly_t]], smooth=False)
+
+
+def remesh_decimate(bm, voxel, tris, disp=None):
+    """Voxel-remesh a (possibly overlapping) set of closed shells into one
+    manifold mass, optionally displace it (disp(co, n) -> new co), then
+    collapse-decimate to about `tris` triangles."""
+    me = bpy.data.meshes.new('_rm')
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new('_rm', me)
+    bpy.context.scene.collection.objects.link(ob)
+    md = ob.modifiers.new('rm', 'REMESH')
+    md.mode = 'VOXEL'
+    md.voxel_size = voxel
+    md.adaptivity = 0.0
+    md.use_smooth_shade = False
+    dg = bpy.context.evaluated_depsgraph_get()
+    me2 = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    bpy.data.objects.remove(ob)
+    bpy.data.meshes.remove(me)
+    out = bmesh.new()
+    out.from_mesh(me2)
+    bpy.data.meshes.remove(me2)
+    if disp:
+        displace(out, disp)
+    bmesh.ops.triangulate(out, faces=out.faces)
+    n0 = len(out.faces)
+    me = bpy.data.meshes.new('_dc')
+    out.to_mesh(me)
+    out.free()
+    ob = bpy.data.objects.new('_dc', me)
+    bpy.context.scene.collection.objects.link(ob)
+    md = ob.modifiers.new('dc', 'DECIMATE')
+    md.decimate_type = 'COLLAPSE'
+    md.ratio = min(1.0, tris / max(1, n0))
+    md.use_collapse_triangulate = True
+    dg = bpy.context.evaluated_depsgraph_get()
+    me2 = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    bpy.data.objects.remove(ob)
+    bpy.data.meshes.remove(me)
+    out = bmesh.new()
+    out.from_mesh(me2)
+    bpy.data.meshes.remove(me2)
+    return out
+
+
+def build_rock(P, name, prof, seed, dims, lean=0.0, dip=0.35, joints=1, nlay=(0.14, 0.34), tris=1440):
+    """A boulder of Cap de Creus schist.  Strata plates (hard beds stand proud,
+    soft ones are eaten back, outlines drifting smoothly bed to bed) with the
+    bedding dipping into the ground, cut by joint planes: voxel-merged into one
+    mass, roughened (grooves along the bedding, pitting), decimated.  UVs are
+    projected in the bedding frame so the texture's foliation follows the beds.
+    Scaled to dims (the old bounding box), silhouette from prof [(r, z)]."""
     rng = random.Random(seed)
     off = V((rng.uniform(0, 50), rng.uniform(0, 50), rng.uniform(0, 50)))
+    sm = smooth_profile(prof, 40)
+    H = max(z for _, z in sm)
+
+    def rad(z):
+        best = None
+        for i in range(len(sm) - 1):
+            (r0, z0), (r1, z1) = sm[i], sm[i + 1]
+            if min(z0, z1) <= z <= max(z0, z1) and abs(z1 - z0) > 1e-9:
+                r = lerp(r0, r1, (z - z0) / (z1 - z0))
+                best = r if best is None else max(best, r)
+        return best if best is not None else 0.05
     a1, a2 = rng.uniform(0, TAU), rng.uniform(0, TAU)
-    rmax = max(p[0] for p in prof)
+    dip_az = rng.uniform(0, TAU)
+    Rt = Matrix.Rotation(dip, 3, V((math.cos(dip_az), math.sin(dip_az), 0.0)))
+    Ln = Rt @ V((0, 0, 1))
+    beds = []
+    z = -0.7
+    while z < H + 0.05:
+        t = rng.uniform(*nlay)
+        beds.append((z, min(z + t, H + 0.3), rng.random()))
+        z += t
+    shell = bmesh.new()
+    for (za, zb, hard) in beds:
+        zm = clamp((za + zb) / 2, 0.0, H)
+        r = rad(zm)
+        rec = 1.0 + 0.1 * (hard - 0.5) * 2.0
+        R = max(0.12, r * rec)
+        n = 16
+        poly = []
+        for i in range(n):
+            th = TAU * i / n
+            w = noise.noise(V((math.cos(th) * 1.3, math.sin(th) * 1.3, zm * 1.6)) + off)
+            rr = R * (1 + 0.13 * math.cos(th - a1) + 0.08 * math.cos(2 * th - a2) + 0.12 * w)
+            poly.append((rr * math.cos(th) + lean * zm, rr * math.sin(th)))
+        poly = convex_hull2(poly)
+        for _ in range(rng.choice((0, 1, 1, 2))):          # broken bed edges
+            ang = rng.uniform(0, TAU)
+            nx, ny = math.cos(ang), math.sin(ang)
+            cx_ = sum(p_[0] for p_ in poly) / len(poly)
+            cy_ = sum(p_[1] for p_ in poly) / len(poly)
+            ext = max(nx * (p_[0] - cx_) + ny * (p_[1] - cy_) for p_ in poly)
+            poly = poly_clip_line(poly, nx, ny, nx * cx_ + ny * cy_ + ext * rng.uniform(0.7, 0.92))
+        k = rng.uniform(0.9, 0.97)
+        cx_ = sum(p_[0] for p_ in poly) / len(poly)
+        cy_ = sum(p_[1] for p_ in poly) / len(poly)
+        top = [(cx_ + (x - cx_) * k, cy_ + (y - cy_) * k) for (x, y) in poly]
+        sl = slab_prism(poly, top, za - 0.01, zb + 0.01)
+        xform(sl, Rt.to_4x4())
+        bm_append(shell, sl)
+        sl.free()
+    # joint planes: clean breaks through the whole stack, then the ground
+    cx0 = lean * H * 0.5
+    cuts = []
+    for j in range(joints):
+        ang = rng.uniform(0, TAU)
+        nrm = V((math.cos(ang), math.sin(ang), rng.uniform(-0.25, 0.35))).normalized()
+        dist = rad(H * 0.5) * rng.uniform(0.55, 0.75)
+        cuts.append((nrm, nrm.dot(V((cx0, 0, H * 0.5))) + dist))
+    cuts.append((V((0, 0, -1)), 0.02))
+    isl = bm_split_islands(shell)
+    shell.free()
+    shell = bmesh.new()
+    for c in isl:
+        for (nrm, d) in cuts:
+            clip_closed(c, nrm, d, 0)
+        if c.verts:
+            bm_append(shell, c)
+        c.free()
 
-    def vf(t, r, z):
-        rr = r * (1 + 0.13 * math.cos(t - a1) + 0.08 * math.cos(2 * t - a2) + 0.04 * math.cos(3 * t + a1))
-        x, y = rr * math.cos(t) * sx, rr * math.sin(t) * sy
-        zz = z
-        if droop:
-            (dz0, dz1, amt, da) = droop
-            w = max(0.0, math.cos(t - da)) ** 2
-            zz -= amt * w * smoothstep(dz0, dz1, z) * smoothstep(0.3, 1.0, r / rmax)
-        return (x + lean * z, y, zz)
-    bm = bm_lathe(smooth_profile(prof, 27), segs=27, vfun=vf)
-
-    def disp(co, n):
-        g = 0.65 * fbm(co * 0.33 + off, 3) + 0.35 * fbm(co * 1.1 + off * 0.7, 3)
-        side = 1.0 - abs(n.z)
-        q = co.z * 2.2 + 0.6 * fbm(co * 0.35 + off * 1.3, 2)
-        fq = q - math.floor(q)
-        ledge = smoothstep(0.0, 0.7, fq) - smoothstep(0.85, 1.0, fq)
-        return co + n * (ns * g + 0.13 * side * (ledge - 0.5))
-    displace(bm, disp)
-    bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.12, use_axis_x=True, use_axis_y=True,
-                          use_axis_z=True)
-    zmin = min(v.co.z for v in bm.verts)
-    for v in bm.verts:
-        v.co.z -= zmin
-        if v.co.z < 0.04:
+    def rough(co, n):
+        s_ = co.dot(Ln)
+        lam = 0.012 * math.sin(s_ * TAU / 0.085 + 2.0 * noise.noise(co * 1.5 + off))
+        pit = -0.03 * max(0.0, noise.noise(co * 3.2 + off * 0.3) - 0.25)
+        g = 0.035 * fbm(co * 1.1 + off, 3)
+        side = 1.0 - abs(n.dot(Ln))
+        return co + n * (g + side * lam + pit)
+    body = remesh_decimate(shell, 0.035, tris, disp=rough)
+    # flat base on the ground
+    for v in body.verts:
+        if v.co.z < 0.035:
             v.co.z = 0.0
-    xs = [v.co.x for v in bm.verts]
-    ys = [v.co.y for v in bm.verts]
-    move(bm, (-(max(xs) + min(xs)) / 2, -(max(ys) + min(ys)) / 2, 0))
-    set_smooth(bm)
+    # fit the old bounding box, centred in x/y, standing on z = 0
+    xs = [v.co.x for v in body.verts]
+    ys = [v.co.y for v in body.verts]
+    zs = [v.co.z for v in body.verts]
+    sx_ = dims[0] / (max(xs) - min(xs))
+    sy_ = dims[1] / (max(ys) - min(ys))
+    sz_ = dims[2] / (max(zs) - min(zs))
+    cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+    for v in body.verts:
+        v.co = V(((v.co.x - cx) * sx_, (v.co.y - cy) * sy_, (v.co.z - min(zs)) * sz_))
+    bedk = [(za, zb, hard) for (za, zb, hard) in beds]
+
+    def tint(co):
+        # per-bed tone (hard quartz-rich beds paler, soft micaceous ones darker)
+        s_ = (Rt.transposed() @ V((co.x / sx_, co.y / sy_, co.z / sz_))).z
+        hard = 0.5
+        for (za, zb, h_) in bedk:
+            if za <= s_ < zb:
+                hard = h_
+                break
+        g = 1.0 - 0.16 * max(0.0, fbm(co * 1.3 + off, 3)) * 2.0
+        k = (0.74 + 0.26 * hard) * g
+        warm = 0.5 + 0.5 * noise.noise(co * 0.6 + off * 2.0)
+        return (k, k * (0.97 - 0.05 * warm), k * (0.97 - 0.12 * warm))
+    uvf = uv_box(M=Rt.transposed())
+    part_bm(body, 0, uvf, tint, tag=1, smooth=True)
     mb = MB()
-    mb.add(bm, sand)
+    mb.add(body, None, mats=[tx('schist')], tint='src', uvf='src', ftag='src')
 
     def vfn(co, n, f):
-        c = strata_color(co, off, n)
-        g = fbm(co * 0.5 + off, 4)
-        k = 1.0 - 0.25 * smoothstep(0.0, -0.4, g)
-        return (c[0] * k, c[1] * k, c[2] * k)
-    finish(mb, name, sharp=None, vfn=vfn)
+        k = 1.0 - 0.28 * (1.0 - smoothstep(0.0, 0.5, co.z))
+        k *= 1.0 - 0.12 * smoothstep(0.0, -0.8, n.z)
+        return (k, k * 0.98, k * 0.95)
+    ob = finish(mb, name, sharp=48, vfn=vfn)
+    bake_ao(ob, dist=0.8, samples=128, strength=0.9, ground=0.0)
+    print('  %s: %d beds, %d tris' % (name, len(beds), sum(len(p.vertices) - 2 for p in ob.data.polygons)))
 
 
 def build_rocks(P):
     build_rock(P, 'Rock_A', [(0, 3.0), (0.7, 2.96), (1.2, 2.78), (1.38, 2.5), (1.25, 2.26), (0.85, 2.12),
                              (0.7, 1.7), (0.68, 1.1), (0.85, 0.5), (1.05, 0.15), (1.0, -0.05),
-                             (0, -0.08)], seed=11, sx=1.0, sy=0.8,
-               droop=(1.9, 2.6, 0.55, 0.8), ns=0.3)
+                             (0, -0.08)], seed=11, dims=(2.619, 2.349, 3.117), dip=0.3, joints=1)
     build_rock(P, 'Rock_B', [(0, 1.85), (0.9, 1.78), (1.55, 1.5), (1.95, 1.0), (2.0, 0.55), (1.85, 0.15),
-                             (1.6, -0.05), (0, -0.08)], seed=23, sx=1.0, sy=0.72,
-               droop=(0.9, 1.6, 0.4, 2.6), ns=0.38)
+                             (1.6, -0.05), (0, -0.08)], seed=23, dims=(3.910, 3.193, 2.011), dip=0.42, joints=2)
     build_rock(P, 'Rock_C', [(0, 2.45), (0.45, 2.4), (0.85, 2.1), (1.02, 1.7), (0.95, 1.3), (0.62, 0.95),
-                             (0.6, 0.55), (0.82, 0.18), (0.8, -0.05), (0, -0.08)], seed=37, sx=1.0,
-               sy=0.75, lean=0.28, droop=(1.3, 2.2, 0.45, 0.2), ns=0.3)
+                             (0.6, 0.55), (0.82, 0.18), (0.8, -0.05), (0, -0.08)], seed=37, lean=0.28,
+               dims=(2.548, 1.610, 2.613), dip=0.5, joints=1)
+
+
+def bm_tube_uv(pts, radii, sides=8, twist_uv=0.0, v_off=0.0, u_off=0.0, **kw):
+    """bm_tube with metre UVs: U = arc length along the path (wood grain runs
+    along U), V = around the circumference (twist_uv adds a spiral)."""
+    bm = bm_tube(pts, radii, sides=sides, **kw)
+    pts = [V(p) for p in pts]
+    n = len(pts)
+    if isinstance(radii, (int, float)):
+        radii = [radii] * n
+    sarc = [0.0]
+    for i in range(1, n):
+        sarc.append(sarc[-1] + (pts[i] - pts[i - 1]).length)
+    info = []
+    for i in range(n):
+        r = radii[i] if isinstance(radii[i], (int, float)) else max(radii[i])
+        if r <= 1e-7 and not kw.get('closed'):
+            info.append((i, -1))
+        else:
+            for j in range(sides):
+                info.append((i, j))
+    uvl = bm.loops.layers.uv.new('UVMap')
+    bm.verts.ensure_lookup_table()
+    vid = {v: info[k] if k < len(info) else (0, 0) for k, v in enumerate(bm.verts)}
+    for f in bm.faces:
+        js = [vid[v][1] for v in f.verts]
+        wrap = (0 in js) and (sides - 1 in js)
+        for lp in f.loops:
+            i, j = vid[lp.vert]
+            r = radii[i] if isinstance(radii[i], (int, float)) else max(radii[i])
+            r = max(r, 0.004)
+            if j < 0:
+                j = sides / 2.0
+            if wrap and j == 0:
+                j = sides
+            lp[uvl].uv = (sarc[i] + u_off, TAU * r * j / sides + twist_uv * sarc[i] + v_off)
+    return bm
+
+
+def sandstone_blocks():
+    """Where the shared sandstone texture's ashlar joints fall: [(row v0, row
+    v1, joint u offset)] in metres (4 courses of 0.5 m, 1 m blocks), measured
+    from the albedo so irregular stones can be mapped inside single blocks."""
+    rows = [(0.0, 0.5, 0.891), (0.5, 1.0, 0.549), (1.0, 1.5, 0.977), (1.5, 2.0, 0.604)]
+    path = os.path.join(PROJ, 'assets', 'tex', 'sandstone_albedo.jpg')
+    try:
+        import numpy as np
+        im = bpy.data.images.load(path, check_existing=True)
+        w, h = im.size
+        a = np.array(im.pixels[:], dtype=np.float32).reshape(h, w, 4)[..., :3].mean(-1)
+        bpy.data.images.remove(im)
+        ppm = w / 2.0
+        out = []
+        for r in range(4):
+            y0, y1 = int((r * 0.5 + 0.08) * ppm), int((r * 0.5 + 0.42) * ppm)
+            band = a[y0:y1].mean(0)
+            half = int(ppm)
+            fold = band[:half] + band[half:2 * half]
+            out.append((r * 0.5, r * 0.5 + 0.5, float(np.argmin(fold)) / ppm))
+        rows = out
+    except Exception as e:                  # library missing: measured defaults
+        print('  sandstone joints: defaults (%s)' % e)
+    return rows
+
+
+def poly_offset(poly, d):
+    """Inset a convex CCW polygon by d."""
+    n = len(poly)
+    lines = []
+    for i in range(n):
+        (ax, ay), (bx, by) = poly[i], poly[(i + 1) % n]
+        ex, ey = bx - ax, by - ay
+        L = math.hypot(ex, ey) or 1e-9
+        nx, ny = ey / L, -ex / L          # outward normal of a CCW polygon
+        lines.append((nx, ny, nx * ax + ny * ay - d))
+    out = []
+    for i in range(n):
+        (n1x, n1y, d1), (n2x, n2y, d2) = lines[i - 1], lines[i]
+        det = n1x * n2y - n1y * n2x
+        if abs(det) < 1e-9:
+            out.append(poly[i])
+            continue
+        out.append(((d1 * n2y - n1y * d2) / det, (n1x * d2 - d1 * n2x) / det))
+    return out
 
 
 def build_platform(P):
-    sand, sst = P['sand'], P['sandstone']
-    stone = material('PlatformStone', '#b49a72', 0.0, 0.85)
-    roots = P['deadwood']
+    """A floating slab of old paving: irregular sandstone flags (each mapped
+    inside one block of the texture) bedded in a band of earth over a rough
+    schist underside, a hanging clump of earth, dangling roots.  The paving is
+    flat at z = 0 over the 3 x 3 m collider footprint."""
     rng = random.Random(77)
-    mb = MB()
-    top = bm_grid(12, 12, -1.34, 1.34, -1.34, 1.34, z=-0.004)
-    mb.add(top, sand, smooth=False,
-           tint=lambda co: grey(0.93 + 0.07 * math.sin(co.x * 9 + 2.0 * fbm(co * 1.3, 2))))
-    # stone lip: a ring of bevelled blocks, tops flush at z = 0
-    blocks = []
-    for k in range(6):
-        x0 = -1.5 + k * 0.5
-        blocks.append(((x0, -1.5), (x0 + 0.5, -1.33)))
-        blocks.append(((x0, 1.33), (x0 + 0.5, 1.5)))
-    for k in range(5):
-        y0 = -1.33 + k * (2.66 / 5)
-        blocks.append(((-1.5, y0), (-1.33, y0 + 2.66 / 5)))
-        blocks.append(((1.33, y0), (1.5, y0 + 2.66 / 5)))
-    for (a, b) in blocks:
-        zb = -rng.uniform(0.26, 0.32)
-        g = 0.006
-        x0 = a[0] if abs(a[0]) >= 1.5 else a[0] + g
-        y0 = a[1] if abs(a[1]) >= 1.5 else a[1] + g
-        x1 = b[0] if abs(b[0]) >= 1.5 else b[0] - g
-        y1 = b[1] if abs(b[1]) >= 1.5 else b[1] - g
-        t = rng.uniform(0.84, 1.0)
-        mb.add(bm_box_mm((x0, y0, zb), (x1, y1, 0.0), bevel=0.02, segs=2), stone,
-               tint=(t, t * 0.98, t * 0.95))
-    # tapered rocky underside
     off = V((3.1, 7.2, 1.9))
-    prof = [(1.44, -0.2), (1.46, -0.3), (1.3, -0.45), (1.05, -0.62), (0.75, -0.8), (0.45, -0.95),
-            (0.18, -1.06), (0.0, -1.1)]
+    mats = [tx('sandstone'), tx('schist'), tx('oak')]
+    blocks = sandstone_blocks()
+    mb = MB()
+    # ---- flagstones: jittered-grid Voronoi cells of the 3 x 3 m square
+    N = 7
+    sp = 3.0 / N
+    seeds = []
+    for i in range(N):
+        for j in range(N):
+            seeds.append((-1.5 + sp * (i + 0.5) + rng.uniform(-0.32, 0.32) * sp,
+                          -1.5 + sp * (j + 0.5) + rng.uniform(-0.32, 0.32) * sp))
+    square = [(-1.5, -1.5), (1.5, -1.5), (1.5, 1.5), (-1.5, 1.5)]
+    missing = set()
+    cracked = {rng.randrange(len(seeds)) for _ in range(4)}
+    stones = []
+    for i, (sx, sy) in enumerate(seeds):
+        poly = square[:]
+        for j, (tx_, ty_) in enumerate(seeds):
+            if i == j:
+                continue
+            nx, ny = tx_ - sx, ty_ - sy
+            L = math.hypot(nx, ny)
+            nx, ny = nx / L, ny / L
+            poly = poly_clip_line(poly, nx, ny, nx * (sx + tx_) / 2 + ny * (sy + ty_) / 2)
+            if len(poly) < 3:
+                break
+        if len(poly) < 3:
+            continue
+        # a ragged outer edge: border stones sit a little inside the square
+        for (nx, ny) in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            if max(nx * x + ny * y for (x, y) in poly) > 1.499:
+                poly = poly_clip_line(poly, nx, ny, 1.5 - rng.uniform(0.0, 0.022))
+        if i in missing:
+            continue
+        if i in cracked:
+            ang = rng.uniform(0, TAU)
+            nx, ny = math.cos(ang), math.sin(ang)
+            d = nx * sx + ny * sy + rng.uniform(-0.05, 0.05)
+            stones.append(poly_clip_line(poly, nx, ny, d - 0.003))
+            stones.append(poly_clip_line(poly, -nx, -ny, -d - 0.003))
+        else:
+            stones.append(poly)
+    for k, poly in enumerate(stones):
+        poly = ccw([p_ for p_ in poly])
+        if len(poly) < 3 or loop_area(poly) < 0.01:
+            continue
+        # drop near-duplicate corners (offsetting them would spike)
+        clean = []
+        for p_ in poly:
+            if not clean or math.hypot(p_[0] - clean[-1][0], p_[1] - clean[-1][1]) > 0.02:
+                clean.append(p_)
+        if len(clean) > 3 and math.hypot(clean[0][0] - clean[-1][0], clean[0][1] - clean[-1][1]) <= 0.02:
+            clean.pop()
+        poly = clean
+        if len(poly) < 3:
+            continue
+        cx = sum(p_[0] for p_ in poly) / len(poly)
+        cy = sum(p_[1] for p_ in poly) / len(poly)
 
-    def se(t, r, z):
-        e = lerp(4.0, 2.0, smoothstep(-0.3, -0.9, z))
-        c, s = math.cos(t), math.sin(t)
-        x = math.copysign(abs(c) ** (2 / e), c)
-        y = math.copysign(abs(s) ** (2 / e), s)
-        return (r * x, r * y, z)
-    under = bm_lathe(list(reversed(prof)), segs=48, vfun=se)
+        def safe_inset(pl, d):
+            q = poly_offset(pl, d)
+            a0 = loop_area(pl)
+            ok_ = loop_area(q) > 0.2 * a0 and poly_simple(q) and all(
+                math.hypot(x - cx, y - cy) < max(math.hypot(u - cx, w - cy) for (u, w) in pl) for (x, y) in q)
+            if ok_:
+                return q
+            k = max(0.5, 1.0 - 2.5 * d / math.sqrt(a0))
+            return [(cx + (x - cx) * k, cy + (y - cy) * k) for (x, y) in pl]
+        poly = safe_inset(poly, 0.005)                   # the joints
+        inset = safe_inset(poly, 0.014)
+        sink = rng.uniform(0.0, 0.006)
+        zt = -sink
+        th = rng.uniform(0.1, 0.13)
+        bm = bm_loft([[V((x, y, -th)) for (x, y) in poly], [V((x, y, zt - 0.013)) for (x, y) in poly],
+                      [V((x, y, zt)) for (x, y) in inset]], cap_start=False, smooth=False)
+        # a hair of tilt, never above z = 0
+        ax_ = V((rng.uniform(-1, 1), rng.uniform(-1, 1), 0)).normalized()
+        rot(bm, math.radians(rng.uniform(0.0, 0.5)), ax_, (cx, cy, zt))
+        zmax = max(v.co.z for v in bm.verts)
+        if zmax > 0.0:
+            move(bm, (0, 0, -zmax))
+        # principal axis -> texture block: long side along U, inside one block
+        sxx = sum((x - cx) ** 2 for (x, y) in poly)
+        syy = sum((y - cy) ** 2 for (x, y) in poly)
+        sxy = sum((x - cx) * (y - cy) for (x, y) in poly)
+        ang = 0.5 * math.atan2(2 * sxy, sxx - syy)
+        ca, sa = math.cos(ang), math.sin(ang)
+        r0, r1, jo = blocks[rng.randrange(len(blocks))]
+        bu = jo + rng.randrange(2) + 0.5
+        bv = (r0 + r1) / 2
 
-    def disp(co, n):
-        if co.z > -0.28:
+        def uvf(co, n, c, f, cx=cx, cy=cy, ca=ca, sa=sa, bu=bu, bv=bv):
+            if n.z > 0.35:
+                dx, dy = co.x - cx, co.y - cy
+                return (bu + dx * ca + dy * sa, bv - dx * sa + dy * ca)
+            # sides: box projection about the stone's own centre, in the same block
+            u, v = uv_box(org=(cx, cy, -0.06))(co, n, c, f)
+            return (bu + u, bv + v)
+        tone = rng.uniform(0.7, 1.0)
+        warm = rng.uniform(0.86, 1.0)
+
+        def tint(co, tone=tone, warm=warm, zt=zt):
+            g = 1.0 - 0.1 * max(0.0, fbm(co * 2.5 + off, 2)) * 2.0
+            e = 1.0 - 0.12 * smoothstep(1.3, 1.5, max(abs(co.x), abs(co.y)))
+            e *= 0.72 if co.z < zt - 0.008 else 1.0            # grime down the joints
+            return (tone * g * e, tone * g * e * warm, tone * g * e * warm * 0.96)
+        mb.add(part_bm(bm, 0, uvf, tint, tag=1, smooth=False), None, mats=mats, tint='src', uvf='src', ftag='src')
+    # ---- earth band + schist underside, one voxel-merged mass: a main
+    # hanging cone and two smaller lobes, strata plates drifting and eroded
+    shell = bmesh.new()
+    lobes = [((0.0, 0.0), -0.1, -1.16, 1.46, 0.0), ((-0.62, 0.55), -0.3, -0.86, 0.72, 1.0),
+             ((0.7, 0.62), -0.3, -0.7, 0.62, 2.0)]
+    for li, ((lx, ly), ztop, zbot, R0, ph) in enumerate(lobes):
+        zb_ = [ztop]
+        z = ztop
+        while z > zbot + 0.02:
+            z -= rng.uniform(0.07, 0.19)
+            zb_.append(max(z, zbot))
+        dx_, dy_ = rng.uniform(-0.2, 0.2), rng.uniform(-0.2, 0.2)
+        for i in range(len(zb_) - 1):
+            z1, z0 = zb_[i], zb_[i + 1]
+            zm = (z0 + z1) / 2
+            t = clamp((ztop - zm) / (ztop - zbot))
+            R = R0 * (1.0 - t) ** 0.85 + 0.04
+            e = lerp(5.0, 2.0, smoothstep(0.0, 0.45, t)) if li == 0 else 2.0
+            hard = rng.random()
+            if t > 0.1:
+                R *= 1.0 + 0.16 * (hard - 0.5)
+            cxl = lx + dx_ * t * t + 0.05 * noise.noise(V((zm * 3.0, 1.0, li)) + off)
+            cyl = ly + dy_ * t * t + 0.05 * noise.noise(V((zm * 3.0, 2.0, li)) + off)
+            poly = []
+            for k in range(20):
+                th = TAU * k / 20
+                c_, s_ = math.cos(th), math.sin(th)
+                w = noise.noise(V((c_ * 1.6, s_ * 1.6, zm * 2.4 + ph)) + off)
+                rr = R * (1.0 + 0.26 * w * min(1.0, t * 3.0))
+                poly.append((cxl + rr * math.copysign(abs(c_) ** (2 / e), c_),
+                             cyl + rr * math.copysign(abs(s_) ** (2 / e), s_)))
+            poly = convex_hull2(poly)
+            if rng.random() < 0.5 and t > 0.15:            # a bed broken off along a line
+                ang = rng.uniform(0, TAU)
+                nx, ny = math.cos(ang), math.sin(ang)
+                ext = max(nx * (p_[0] - cxl) + ny * (p_[1] - cyl) for p_ in poly)
+                poly = poly_clip_line(poly, nx, ny, nx * cxl + ny * cyl + ext * rng.uniform(0.6, 0.85))
+            for (nx, ny) in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                poly = poly_clip_line(poly, nx, ny, 1.47)
+            k = rng.uniform(0.9, 0.97)
+            pcx = sum(p_[0] for p_ in poly) / len(poly)
+            pcy = sum(p_[1] for p_ in poly) / len(poly)
+            sl = slab_prism(poly, [(pcx + (x - pcx) * k, pcy + (y - pcy) * k) for (x, y) in poly],
+                            z0 - 0.012, z1 + 0.012)
+            bm_append(shell, sl)
+            sl.free()
+    clump = rough_rock(0.34, rng, sc=(1.2, 1.0, 0.8), subdiv=2, amp=0.3)
+    move(clump, (0.72, -0.55, -0.5))
+    bm_append(shell, clump)
+    clump.free()
+
+    def rough(co, n):
+        g = 0.055 * fbm(co * 1.2 + off, 3) + 0.02 * noise.noise(co * 4.0 + off)
+        lam = 0.012 * math.sin(co.z * TAU / 0.07 + 2.0 * noise.noise(co * 1.5 + off)) * (1.0 - abs(n.z))
+        if co.z > -0.13:
             return co
-        g = fbm(co * 1.4 + off, 4)
-        return co + n * 0.12 * g * smoothstep(-0.28, -0.45, co.z)
-    displace(under, disp)
-    mb.add(under, sst)
-    # hanging roots and drips
-    for k in range(6):
-        a = TAU * k / 6 + rng.uniform(-0.3, 0.3)
-        r0 = rng.uniform(0.5, 1.0)
+        return co + n * (g + lam) * smoothstep(-0.13, -0.25, co.z)
+    body = remesh_decimate(shell, 0.035, 1100, disp=rough)
+    for v in body.verts:
+        if v.co.z > -0.1:
+            v.co.z = min(v.co.z, -0.1)
+        v.co.x = clamp(v.co.x, -1.49, 1.49)
+        v.co.y = clamp(v.co.y, -1.49, 1.49)
+        v.co.z = max(v.co.z, -1.18)
+    cl = V((0.72, -0.55, -0.5))
+
+    def earthy(co):
+        return max(smoothstep(-0.38, -0.26, co.z), smoothstep(0.42, 0.3, (co - cl).length))
+
+    def body_tint(co):
+        g = 1.0 - 0.15 * max(0.0, fbm(co * 1.6 + off, 3)) * 2.0
+        e = earthy(co)
+        rock = (0.86 * g, 0.84 * g, 0.8 * g)
+        soil = (0.78 * g, 0.55 * g, 0.36 * g)
+        c = mix3(rock, soil, e)
+        k = 1.0 - 0.3 * smoothstep(-0.5, -1.15, co.z)
+        return (c[0] * k, c[1] * k, c[2] * k)
+    part_bm(body, 1, uv_box(), body_tint, tag=2, smooth=True)
+    mb.add(body, None, mats=mats, tint='src', uvf='src', ftag='src')
+    bed = bm_box_mm((-1.485, -1.485, -0.13), (1.485, 1.485, -0.095), smooth=False)
+    mb.add(part_bm(bed, 1, uv_box(), lambda co: (0.5, 0.4, 0.3), tag=2, smooth=False), None, mats=mats,
+           tint='src', uvf='src', ftag='src')
+    # ---- dangling roots (oak, grain along the root)
+    for k in range(9):
+        a = TAU * k / 9 + rng.uniform(-0.3, 0.3)
+        r0 = rng.uniform(0.45, 1.35)
         x, y = math.cos(a) * r0, math.sin(a) * r0
-        z0 = -0.45 - (1.0 - r0) * 0.3
+        x, y = clamp(x, -1.38, 1.38), clamp(y, -1.38, 1.38)
+        t = clamp((max(abs(x), abs(y)) - 0.1) / 1.4)
+        z0 = -0.2 - 0.85 * (1.0 - t) ** 1.3 + 0.1
+        L = min(rng.uniform(0.35, 0.8), 1.15 + z0)
         pts, rad = [], []
-        L = min(rng.uniform(0.35, 0.7), 1.17 + z0)
-        for i in range(8):
-            s = i / 7
-            pts.append((x * (1 + 0.15 * s) + 0.05 * math.sin(s * 7 + k), y * (1 + 0.15 * s),
-                        z0 - L * s))
-            rad.append(lerp(0.035, 0.0, s ** 1.3))
-        mb.add(bm_tube(pts, rad, sides=6), roots, tint=grey(0.7))
-    for k in range(3):
-        a = TAU * k / 3 + 1.0
-        x, y = math.cos(a) * 0.35, math.sin(a) * 0.35
-        zb = -1.18 + 0.08 * k
-        drip = bm_lathe([(0, zb), (0.028, zb + 0.03), (0.04, zb + 0.06), (0.025, zb + 0.12),
-                         (0.05, -0.8), (0.0, -0.7)], segs=12)
-        mb.add(move(drip, (x, y, 0)), sst)
+        steps = 7
+        d = V((rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3), -1.0)).normalized()
+        p_ = V((x, y, z0 + 0.06))
+        for i in range(steps + 1):
+            s_ = i / steps
+            pts.append(p_.copy())
+            rad.append(lerp(0.038, 0.003, s_ ** 0.8) * rng.uniform(0.9, 1.1) if i < steps else 0.0)
+            d = (d + V((rng.uniform(-0.35, 0.35), rng.uniform(-0.35, 0.35), -0.3))).normalized()
+            p_ = p_ + d * (L / steps)
+            p_.z = max(p_.z, -1.15)
+        tb = bm_tube_uv(pts, rad, sides=5, twist_uv=0.3)
+        mb.add(part_bm_keep(tb, 2, lambda co: (0.62, 0.55, 0.5), tag=3), None, mats=mats, tint='src',
+               uvf='src', ftag='src')
+        if k % 2 == 0:                                  # a rootlet
+            i0 = rng.randrange(2, 5)
+            q = pts[i0]
+            d2 = V((rng.uniform(-1, 1), rng.uniform(-1, 1), -0.6)).normalized()
+            pts2 = [q + d2 * (0.09 * m) + V((0, 0, -0.045 * m * m)) for m in range(4)]
+            for q2 in pts2:
+                q2.z = max(q2.z, -1.15)
+            tb = bm_tube_uv(pts2, [rad[i0] * 0.6 * (1 - m / 3) for m in range(4)], sides=4)
+            mb.add(part_bm_keep(tb, 2, lambda co: (0.6, 0.53, 0.48), tag=3), None, mats=mats, tint='src',
+                   uvf='src', ftag='src')
 
     def vfn(co, n, f):
-        if co.z > -0.26:
-            return (1.0, 1.0, 1.0)
-        c = strata_color(co * 1.8, off, n)
-        k = 1.0 - 0.35 * smoothstep(-0.3, -1.1, co.z)
-        return (c[0] * k, c[1] * k, c[2] * k)
-    finish(mb, 'Platform', sharp=40, vfn=vfn)
+        return (1.0, 1.0, 1.0)
+    ob = finish(mb, 'Platform', sharp=40, vfn=vfn)
+    bake_ao(ob, dist=0.5, samples=128, strength=0.85)
+    print('  Platform: %d stones' % len(stones))
+
+
+def part_bm_keep(src, mat_index, tint, tag=0):
+    """part_bm for a bmesh that already has its UVMap: adds Col / tag only."""
+    col = src.loops.layers.float_color.get('Col') or src.loops.layers.float_color.new('Col')
+    tagl = src.faces.layers.int.get('tag') or src.faces.layers.int.new('tag')
+    for f in src.faces:
+        f.material_index = mat_index
+        f[tagl] = tag
+        for lp in f.loops:
+            c = tint(lp.vert.co) if callable(tint) else tint
+            lp[col] = (c[0], c[1], c[2], 1.0)
+    return src
 
 
 def build_railpost(P):
-    wood = material('CrutchWood', '#a9763f', 0.0, 0.55)
-    pad = material('Leather', '#6e2320', 0.0, 0.6)
-    rubber = material('Rubber', '#231f1d', 0.0, 0.8)
-    sand = P['sand']
+    """A Dali crutch holding up a grind rail: brass ferrule, turned oak shaft,
+    a brass collar where two bowed oak uprights fork off, a turned hand grip
+    with brass bolt heads, and a curved oak crosspiece with a tufted leather
+    pad the rail rests on (rail centre line at z = 1.6; the game scales the
+    post in z to the rail height)."""
+    oak = tx('oak')
     brass = P['brass']
+    leather = material('Leather', '#6e2320', 0.0, 0.6)
+    mats = [oak, brass, leather]
     mb = MB()
-    mb.add(bm_lathe([(0, 0), (0.15, 0), (0.12, 0.02), (0.07, 0.045), (0.025, 0.055), (0, 0.056)], segs=32),
-           sand, tint=grey(0.92))
-    mb.add(bm_lathe([(0, 0.02), (0.024, 0.02), (0.026, 0.05), (0.02, 0.075), (0.018, 0.08), (0, 0.08)],
-                    segs=16), rubber)
-    mb.add(bm_lathe([(0, 0.075), (0.02, 0.075), (0.02, 0.62), (0.025, 0.63), (0.025, 0.66),
-                     (0, 0.66)], segs=14), wood)
-    mb.add(bm_lathe([(0, 0.57), (0.026, 0.57), (0.026, 0.62), (0, 0.62)], segs=14), brass)
-    # two bowed uprights forking into a Y
-    zs = [0.62, 0.72, 0.85, 1.0, 1.15, 1.3, 1.42, 1.5, 1.58, 1.66, 1.7]
+
+    def wood_tint(co):
+        g = 1.0 - 0.1 * max(0.0, fbm(co * 6.0 + V((1, 2, 3)), 2)) * 2.0
+        grip = smoothstep(0.14, 0.02, abs(co.z - 1.08)) * 0.25
+        foot = 0.25 * (1.0 - smoothstep(0.0, 0.3, co.z))
+        k = g * (1.0 - grip - foot)
+        return (1.0 * k, 0.9 * k, 0.78 * k)
+    # brass ferrule with a worn, flattened foot
+    fer = bm_lathe([(0.0, 0.0), (0.019, 0.0), (0.024, 0.006), (0.025, 0.02), (0.023, 0.05), (0.024, 0.085),
+                    (0.027, 0.09), (0.027, 0.1), (0.022, 0.104), (0.0, 0.104)], segs=12)
+    mb.add(fer, brass, uvf=uv_cyl(), ftag=2, tint=(1.0, 0.97, 0.9))
+    for i, (z, r) in enumerate(((0.04, 0.0245), (0.07, 0.0245))):
+        rv = bm_ico(0.004, 1, center=(r, 0.0, z))
+        rot(rv, TAU * i / 2 + 0.4, 'Z')
+        mb.add(rv, brass, uvf=uv_box(), ftag=2, tint=(0.7, 0.65, 0.55))
+    # turned oak shaft
+    zs = [0.095, 0.16, 0.3, 0.45, 0.56, 0.6]
+    shaft = bm_tube_uv([(0, 0, z) for z in zs], [0.0195, 0.0198, 0.0205, 0.0212, 0.022, 0.022], sides=12,
+                       twist_uv=0.0)
+    mb.add(part_bm_keep(shaft, 0, wood_tint, tag=1), None, mats=mats, tint='src', uvf='src', ftag='src')
+    # brass collar over the fork, two screws
+    col_ = bm_lathe([(0.0, 0.56), (0.026, 0.56), (0.029, 0.566), (0.029, 0.63), (0.034, 0.64), (0.034, 0.655),
+                     (0.028, 0.662), (0.0, 0.662)], segs=14)
+    mb.add(col_, brass, uvf=uv_cyl(), ftag=2, tint=(1.0, 1.0, 1.0))
+    for sgn in (-1, 1):
+        sc = bm_lathe([(0, 0), (0.006, 0), (0.006, 0.003), (0.0, 0.005)], segs=8)
+        rot(sc, math.pi / 2, 'X')
+        move(sc, (0.0, sgn * 0.029, 0.6))
+        if sgn > 0:
+            rot(sc, math.pi, 'Z', (0, 0, 0.6))
+        mb.add(sc, brass, uvf=uv_box(), ftag=2, tint=(0.75, 0.7, 0.6))
+    # two bowed uprights forking into a Y (elliptical section)
+    ztop = 1.5
     for sgn in (-1, 1):
         pts = []
-        for z in zs:
-            t = (z - 0.62) / (1.5 - 0.62)
-            if z <= 1.5:
-                x = 0.016 + 0.082 * math.sin(math.pi * min(1.0, t) * 0.75) ** 0.9
-            else:
-                x = 0.08 + (z - 1.5) * 0.3
-            pts.append((sgn * x, 0, z))
-        rad = [0.018] * (len(pts) - 1) + [0.016]
-        tube = bm_tube(pts, rad, sides=10)
-        mb.add(tube, wood)
-        mb.add(bm_ico(0.0175, 2, center=pts[-1], sc=(1, 1, 0.8)), wood)
-    grip = bm_lathe([(0, -0.1), (0.018, -0.1), (0.022, -0.06), (0.022, 0.06), (0.018, 0.1), (0, 0.1)],
-                    segs=12)
-    rot(grip, math.pi / 2, 'Y')
-    mb.add(move(grip, (0, 0, 1.08)), wood, tint=(0.8, 0.75, 0.7))
-    # saddle: rail rests with its centre line at z = 1.6 (notch bottom at 1.55)
-    sad = []
-    for k in range(13):
-        x = lerp(-0.1, 0.1, k / 12)
-        sad.append((x, 0, 1.55 - 0.022 + 0.035 * (x / 0.1) ** 2))
-    mb.add(bm_tube(sad, [(0.022, 0.045)] * len(sad), sides=12), pad)
-    finish(mb, 'RailPost', sharp=45, vfn=ao_fn(h=0.15, amt=0.25))
+        for k in range(13):
+            t = k / 12
+            z = lerp(0.62, ztop + 0.02, t)
+            x = 0.016 + 0.07 * math.sin(math.pi * min(1.0, t * 1.05) * 0.8) ** 0.9 + 0.045 * t ** 3
+            pts.append((sgn * x, 0.0, z))
+        up = bm_tube_uv(pts, [(0.017, 0.0145)] * len(pts), sides=8)
+        mb.add(part_bm_keep(up, 0, wood_tint, tag=1), None, mats=mats, tint='src', uvf='src', ftag='src')
+        # brass bolt through the grip, and the upright's cap under the pad
+        bx = sgn * (0.016 + 0.07 * math.sin(math.pi * ((1.08 - 0.62) / (ztop + 0.02 - 0.62)) * 1.05 * 0.8) ** 0.9 + 0.045 * ((1.08 - 0.62) / 0.9) ** 3)
+        bolt = bm_lathe([(0, 0), (0.009, 0), (0.009, 0.004), (0.006, 0.007), (0, 0.008)], segs=10)
+        rot(bolt, sgn * math.pi / 2, 'Y')
+        mb.add(move(bolt, (bx + sgn * 0.014, 0, 1.08)), brass, uvf=uv_box(), ftag=2, tint=(0.9, 0.85, 0.75))
+    # turned hand grip
+    gp = [(-0.085 + 0.17 * k / 6, 0.0, 1.08) for k in range(7)]
+    gr = [0.012, 0.016, 0.0195, 0.0205, 0.0195, 0.016, 0.012]
+    grip = bm_tube_uv(gp, gr, sides=8)
+    mb.add(part_bm_keep(grip, 0, lambda co: (0.7, 0.62, 0.52), tag=1), None, mats=mats, tint='src', uvf='src',
+           ftag='src')
+    # curved oak crosspiece (crescent) with a tufted leather pad on top: the
+    # rail's centre line sits at z = 1.6 (pad top at ~1.53 in the middle)
+    NX = 14
+    xs = [lerp(-0.13, 0.13, k / NX) for k in range(NX + 1)]
+
+    def crest(x):
+        return 1.49 + 0.045 * (x / 0.13) ** 2
+    cp = [(x, 0.0, crest(x)) for x in xs]
+    cb = bm_tube_uv(cp, [(0.03, 0.016)] * len(cp), sides=8, fixed_b=(0, 1, 0))
+    mb.add(part_bm_keep(cb, 0, wood_tint, tag=1), None, mats=mats, tint='src', uvf='src', ftag='src')
+    pad = bmesh.new()
+    rows = []
+    NY = 6
+    for i, x in enumerate(xs):
+        row = []
+        zc = crest(x) + 0.016
+        for j in range(NY + 1):
+            v = j / NY
+            y = lerp(-0.042, 0.042, v)
+            h = 0.034 * (1.0 - (2 * v - 1) ** 2) ** 0.5
+            ends = smoothstep(0.13, 0.1, abs(x))
+            dimple = 0.0
+            for bx_ in (-0.065, 0.0, 0.065):
+                dd = math.hypot(x - bx_, y)
+                dimple += 0.008 * max(0.0, 1.0 - (dd / 0.025) ** 2)
+            row.append(pad.verts.new((x, y, zc + (h * ends + 0.004) - dimple * ends)))
+        rows.append(row)
+    for i in range(NX):
+        for j in range(NY):
+            pad.faces.new([rows[i][j], rows[i + 1][j], rows[i + 1][j + 1], rows[i][j + 1]])
+    # sides and bottom close the cushion
+    bot = [[pad.verts.new((x, y, crest(x) + 0.012)) for y in (-0.042, 0.042)] for x in xs]
+    for i in range(NX):
+        pad.faces.new([bot[i][0], bot[i + 1][0], rows[i + 1][0], rows[i][0]])
+        pad.faces.new([rows[i][NY], rows[i + 1][NY], bot[i + 1][1], bot[i][1]])
+        pad.faces.new([bot[i][1], bot[i + 1][1], bot[i + 1][0], bot[i][0]])
+    pad.faces.new([bot[0][0], rows[0][0]] + [rows[0][j] for j in range(1, NY + 1)] + [bot[0][1]])
+    pad.faces.new([bot[-1][1]] + [rows[-1][j] for j in range(NY, -1, -1)] + [bot[-1][0]])
+    bmesh.ops.recalc_face_normals(pad, faces=pad.faces)
+    set_smooth(pad)
+
+    def leather_tint(co):
+        k = 1.0 - 0.18 * max(0.0, fbm(co * 18.0 + V((4, 4, 4)), 2)) * 2.0
+        worn = 0.2 * smoothstep(0.03, 0.0, abs(co.x)) * smoothstep(0.03, 0.0, abs(co.y))
+        return (k * (1 + worn * 0.4), k * (1 - worn * 0.1), k)
+    mb.add(pad, leather, uvf=uv_box(), ftag=3, tint=leather_tint)
+    for bx_ in (-0.065, 0.0, 0.065):                      # buttons
+        zc = crest(bx_) + 0.016 + 0.034 + 0.004 - 0.008
+        bt = bm_lathe([(0.0, -0.002), (0.0055, -0.001), (0.0045, 0.002), (0.0, 0.0035)], segs=6)
+        mb.add(move(bt, (bx_, 0.0, zc)), leather, uvf=uv_box(), ftag=3, tint=(0.55, 0.5, 0.45))
+    # brass nails round the pad's skirt (low domes: they are a few mm across)
+    for k in range(7):
+        x = lerp(-0.11, 0.11, k / 6)
+        for sgn in (-1, 1):
+            nl = bm_lathe([(0.0, 0.0), (0.0038, 0.0), (0.0, 0.0028)], segs=5)
+            rot(nl, -sgn * math.pi / 2, 'X')
+            mb.add(move(nl, (x, sgn * 0.0425, crest(x) + 0.017)), brass, uvf=uv_box(), ftag=2,
+                   tint=(0.85, 0.8, 0.7))
+    ob = finish(mb, 'RailPost', sharp=45)
+    bake_ao(ob, dist=0.15, samples=96, strength=0.85, ground=0.0)
+
+
+def spoked_wheel(R, width, spokes, hub=0.1, rim=0.07, cw=True, segs=28):
+    """A locomotive wheel in its own frame (axis +Y, centre at the origin):
+    tyre with flange, rim, tapered spokes, hub boss, optional counterweight."""
+    parts = []
+    w = width / 2
+    tyre = bm_lathe([(R - rim, -w), (R, -w), (R, -w + 0.02), (R - 0.035, -w + 0.035),
+                     (R - 0.04, w), (R - rim, w), (R - rim, -w)], segs=segs, cap=False)
+    rot(tyre, -math.pi / 2, 'X')
+    parts.append(tyre)
+    hb = bm_lathe([(0, -w - 0.03), (hub, -w - 0.03), (hub, w + 0.02), (hub * 0.6, w + 0.05), (0, w + 0.05)],
+                  segs=8)
+    rot(hb, -math.pi / 2, 'X')
+    parts.append(hb)
+    for k in range(spokes):
+        a = TAU * k / spokes
+        c_, s_ = math.cos(a), math.sin(a)
+        sp = bm_tube([(c_ * hub * 0.8, 0, s_ * hub * 0.8), (c_ * (R - rim * 0.8), 0, s_ * (R - rim * 0.8))],
+                     [(0.03, 0.02), (0.02, 0.016)], sides=4, fixed_b=(0, 1, 0))
+        parts.append(sp)
+    if cw:
+        poly = []
+        for k in range(6):
+            a = math.radians(200 + 70 * k / 5)
+            poly.append((math.cos(a) * (R - rim * 0.9), math.sin(a) * (R - rim * 0.9)))
+        for k in range(4):
+            a = math.radians(270 - 70 * k / 3)
+            poly.append((math.cos(a) * (R * 0.45), math.sin(a) * (R * 0.45)))
+        c = prism_y(poly, -w * 0.6, w * 0.6)
+        parts.append(c)
+    return parts
 
 
 def build_train(P):
-    body = material('TrainBody', '#1f2a2c', 0.35, 0.45)
+    """The 6:40 that never stops (a background piece, kept light): riveted iron
+    boiler with brass bands, spoked driving wheels with counterweights, coupling
+    and connecting rods, cylinders, a cab with real window openings and glass,
+    curved roof, flared stack, domes, lamp, slatted cowcatcher, buffers."""
+    iron = tx('iron')
     red = material('TrainRed', '#6d1f1c', 0.1, 0.55)
     brass = P['brass']
     glassm = material('TrainWindow', '#0c0f10', 0.2, 0.2)
+    steel = material('TrainSteel', '#8a8d92', 0.9, 0.35)
+    mats = [iron, red, brass, glassm, steel]
     mb = MB()
-    mb.add(bm_box_mm((-4.0, -0.85, 0.62), (3.55, 0.85, 0.95), bevel=0.03), red)
+    body_t = lambda co: (0.5, 0.56, 0.58)
+
+    def add(bm, mi, uvf=None, tnt=(1, 1, 1), smooth=None):
+        mb.add(part_bm(bm, mi, uvf or uv_box(), tnt, tag=mi + 1, smooth=smooth), None, mats=mats, tint='src',
+               uvf='src', ftag='src')
+    # ---- frame, running boards, buffer beam
+    add(bm_box_mm((-4.0, -0.85, 0.62), (3.55, 0.85, 0.95), bevel=0.03, segs=1, smooth=False), 1)
+    for sy in (-1, 1):
+        y0, y1 = sorted((sy * 0.86, sy * 1.06))
+        add(bm_box_mm((-1.45, y0, 0.95), (3.3, y1, 0.99), bevel=0.01, segs=1, smooth=False), 1)
+    add(bm_box_mm((3.45, -0.95, 0.72), (3.6, 0.95, 1.0), bevel=0.02, segs=1, smooth=False), 1)
+    # ---- boiler (built along Z, UV'd, then laid along X)
+    prof = [(0.0, -1.5), (0.78, -1.5), (0.78, 3.35), (0.8, 3.36), (0.8, 3.42), (0.72, 3.44), (0.66, 3.47),
+            (0.2, 3.5), (0.0, 3.5)]
+    bo = bm_lathe(prof, segs=28)
+    part_bm(bo, 0, uv_cyl(), body_t, tag=1, smooth=True)
+    rot(bo, math.pi / 2, 'Y')
+    move(bo, (0, 0, 1.75))
+    mb.add(bo, None, mats=mats, tint='src', uvf='src', ftag='src')
+    for x in (-0.6, 0.9, 2.3, 3.3):                  # brass bands with rivet rows
+        band = bm_lathe([(0.78, -0.045), (0.8, -0.03), (0.8, 0.03), (0.78, 0.045)], segs=20, cap=False)
+        rot(band, math.pi / 2, 'Y')
+        add(move(band, (x, 0, 1.75)), 2, smooth=True)
+        if x > 3.0:                                   # rivets round the smokebox ring
+            for k in range(16):
+                a = TAU * k / 16
+                rv = bm_lathe([(0.0, 0.0), (0.014, 0.0), (0.0, 0.013)], segs=4)
+                rot(rv, math.pi / 2, 'Y')
+                rot(rv, -a, 'X')
+                add(move(rv, (x - 0.1, 0.785 * math.cos(a), 1.75 + 0.785 * math.sin(a))), 0, tnt=body_t)
+    # smokebox door with a dart handle
+    door = bm_lathe([(0.0, 3.5), (0.5, 3.5), (0.52, 3.52), (0.45, 3.56), (0.1, 3.58), (0.0, 3.58)], segs=24)
+    rot(door, math.pi / 2, 'Y')
+    move(door, (-3.5 + 3.5, 0, 0))
+    door2 = door
+    for v in door2.verts:
+        v.co = V((v.co.x, v.co.y, v.co.z + 1.75))
+    add(door2, 0, tnt=(0.55, 0.62, 0.64), smooth=True)
+    for a in (0.0, math.pi / 2, math.pi, 3 * math.pi / 2):
+        add(bm_tube([(3.58, 0.0, 1.75), (3.62, 0.18 * math.cos(a), 1.75 + 0.18 * math.sin(a))], 0.012, sides=4), 4)
+    # ---- stack, domes, lamp
+    stack = bm_lathe([(0, 2.3), (0.26, 2.3), (0.23, 2.4), (0.19, 2.55), (0.18, 2.7), (0.2, 2.78), (0.27, 2.9),
+                      (0.33, 2.97), (0.34, 3.0), (0.3, 3.0), (0.22, 2.95), (0, 2.95)], segs=16)
+    add(move(stack, (2.85, 0, 0)), 0, uv_cyl(cx=2.85), tnt=body_t, smooth=True)
+    rim_ = bm_lathe([(0.33, 2.96), (0.345, 2.97), (0.345, 3.0), (0.3, 3.0)], segs=20, cap=False)
+    add(move(rim_, (2.85, 0, 0)), 2, smooth=True)
+    dome = bm_lathe([(0, 2.35), (0.34, 2.35), (0.32, 2.5), (0.26, 2.62), (0.14, 2.7), (0, 2.72)], segs=20)
+    add(move(dome, (1.1, 0, 0)), 2, smooth=True)
+    dome2 = bm_lathe([(0, 2.35), (0.24, 2.35), (0.22, 2.45), (0.12, 2.55), (0, 2.57)], segs=16)
+    add(move(dome2, (0.05, 0, 0)), 0, uv_cyl(cx=0.05), tnt=body_t, smooth=True)
+    lamp = bm_box_mm((3.28, -0.16, 2.3), (3.52, 0.16, 2.6), bevel=0.02, segs=1, smooth=False)
+    add(lamp, 2)
+    lens = bm_lathe([(0, 0), (0.11, 0), (0.1, 0.02), (0, 0.025)], segs=16)
+    rot(lens, math.pi / 2, 'Y')
+    add(move(lens, (3.52, 0, 2.45)), 3, smooth=True)
+    # ---- cylinders + slide bars
+    for sy in (-1, 1):
+        cy_ = bm_lathe([(0, -0.35), (0.22, -0.35), (0.24, -0.32), (0.24, 0.32), (0.22, 0.35), (0, 0.35)], segs=16)
+        rot(cy_, math.pi / 2, 'Y')
+        add(move(cy_, (2.55, sy * 0.85, 0.95)), 1, smooth=True)
+        add(bm_box_mm((1.4, sy * 1.0 - 0.02, 0.93), (2.2, sy * 1.0 + 0.02, 0.97)), 4)
+    # ---- wheels: three coupled drivers, two leading pairs
+    crank = []
     for x in (-1.75, -0.45, 0.85):
         for sy in (-1, 1):
-            w = bm_lathe([(0, -0.06), (0.52, -0.06), (0.6, -0.04), (0.6, 0.04), (0.52, 0.06),
-                          (0.12, 0.08), (0, 0.1)], segs=32)
-            rot(w, sy * -math.pi / 2, 'X')
-            mb.add(move(w, (x, sy * 0.92, 0.6)), red)
+            for p_ in spoked_wheel(0.6, 0.12, 10, hub=0.1, rim=0.07, cw=True, segs=16):
+                if sy < 0:
+                    rot(p_, math.pi, 'Z')
+                add(move(p_, (x, sy * 0.92, 0.6)), 1, tnt=(0.9, 0.9, 0.9), smooth=True)
+            crank.append(V((x, sy * 1.02, 0.6 + 0.28)))
     for x in (2.55, 3.25):
         for sy in (-1, 1):
-            w = bm_lathe([(0, -0.05), (0.32, -0.05), (0.36, -0.03), (0.36, 0.03), (0.32, 0.05),
-                          (0, 0.07)], segs=24)
-            rot(w, sy * -math.pi / 2, 'X')
-            mb.add(move(w, (x, sy * 0.9, 0.36)), red)
+            for p_ in spoked_wheel(0.36, 0.1, 6, hub=0.07, rim=0.05, cw=False, segs=12):
+                if sy < 0:
+                    rot(p_, math.pi, 'Z')
+                add(move(p_, (x, sy * 0.9, 0.36)), 1, tnt=(0.9, 0.9, 0.9), smooth=True)
     for sy in (-1, 1):
-        mb.add(bm_box_mm((-1.9, sy * 1.02 - 0.03, 0.5), (1.0, sy * 1.02 + 0.03, 0.62), bevel=0.02),
-               brass)
-    boiler = bm_lathe([(0, -1.5), (0.78, -1.5), (0.78, 3.35), (0.72, 3.42), (0.4, 3.5), (0, 3.52)],
-                      segs=40)
-    rot(boiler, math.pi / 2, 'Y')
-    mb.add(move(boiler, (0, 0, 1.75)), body)
-    for x in (-0.6, 0.9, 2.3, 3.3):
-        band = bm_lathe([(0.785, -0.04), (0.8, -0.03), (0.8, 0.03), (0.785, 0.04)], segs=40, cap=False)
-        rot(band, math.pi / 2, 'Y')
-        mb.add(move(band, (x, 0, 1.75)), brass)
-    stack = bm_lathe([(0, 2.3), (0.26, 2.3), (0.22, 2.45), (0.18, 2.62), (0.2, 2.75), (0.3, 2.9),
-                      (0.33, 3.0), (0.26, 3.0), (0, 2.96)], segs=28)
-    mb.add(move(stack, (2.85, 0, 0)), body)
-    dome = bm_lathe([(0, 2.35), (0.34, 2.35), (0.32, 2.5), (0.26, 2.62), (0.14, 2.7), (0, 2.72)], segs=28)
-    mb.add(move(dome, (1.1, 0, 0)), brass)
-    dome2 = bm_lathe([(0, 2.35), (0.24, 2.35), (0.22, 2.45), (0.12, 2.55), (0, 2.57)], segs=24)
-    mb.add(move(dome2, (0.05, 0, 0)), body)
-    lamp = bm_lathe([(0, 0), (0.16, 0), (0.16, 0.22), (0.13, 0.26), (0, 0.26)], segs=20)
-    rot(lamp, math.pi / 2, 'Y')
-    mb.add(move(lamp, (3.4, 0, 2.3)), brass)
-    # cab
-    mb.add(bm_box_mm((-3.3, -1.0, 0.95), (-1.45, 1.0, 2.65), bevel=0.03), body)
+        pts = [c for c in crank if c.y * sy > 0]
+        pts.sort(key=lambda c: c.x)
+        add(bm_box_mm((pts[0].x - 0.05, sy * 1.02 - 0.02, pts[0].z - 0.035), (pts[-1].x + 0.05, sy * 1.02 + 0.02,
+                                                                                pts[0].z + 0.035), bevel=0.01, segs=1), 4)
+        # connecting rod from the crosshead to the middle driver
+        add(bm_tube([(2.2, sy * 1.06, 0.95), (pts[1].x, sy * 1.06, pts[1].z)], [(0.03, 0.02), (0.035, 0.02)],
+                    sides=4, fixed_b=(0, 1, 0)), 4)
+        for c in pts:
+            add(bm_ico(0.035, 1, center=(c.x, c.y + sy * 0.04, c.z)), 2, smooth=True)
+    # ---- cab: iron walls with window openings, glass, brass frames, curved roof
+    cab = bm_box_mm((-3.3, -1.0, 0.95), (-1.45, 1.0, 2.62), bevel=0.03, segs=1, smooth=False)
+    grid_cut(cab, 2, [1.6, 2.2])
+    cutters = []
+    for sy in (-1, 1):
+        for (x0, x1) in ((-3.05, -2.45), (-2.25, -1.7)):
+            poly = [(x0, 1.85), (x1, 1.85), (x1, 2.32), (x0 + (x1 - x0) * 0.5 + 0.12, 2.42), (x0, 2.35)]
+            poly = [(x0, 1.85), (x1, 1.85), (x1, 2.4), (x0, 2.4)]
+            y0, y1 = (sy * 1.1, sy * 0.9) if sy < 0 else (sy * 0.9, sy * 1.1)
+            cutters.append(prism_y(poly, min(y0, y1), max(y0, y1)))
+    for yc in (-0.5, 0.5):                               # round spectacle windows at the front
+        poly = [(yc + 0.2 * math.cos(TAU * k / 12), 2.15 + 0.2 * math.sin(TAU * k / 12)) for k in range(12)]
+        cutters.append(prism_x(poly, -1.55, -1.35))
+    cab = bool_diff(cab, cutters, name='train cab')
+    add(cab, 0, tnt=body_t, smooth=False)
+    for sy in (-1, 1):
+        for k in range(8):
+            z = lerp(1.05, 2.5, k / 7)
+            rv = bm_lathe([(0.0, 0.0), (0.014, 0.0), (0.0, 0.013)], segs=4)
+            rot(rv, -sy * math.pi / 2, 'X')
+            add(move(rv, (-1.52, sy * 1.0, z)), 0, tnt=body_t)
+    for sy in (-1, 1):
+        for (x0, x1) in ((-3.05, -2.45), (-2.25, -1.7)):
+            add(bm_box_mm((x0, sy * 0.955 - 0.004, 1.85), (x1, sy * 0.955 + 0.004, 2.4)), 3)
+            for (a0, a1, b0, b1) in ((x0 - 0.03, x0, 1.82, 2.43), (x1, x1 + 0.03, 1.82, 2.43),
+                                     (x0, x1, 1.82, 1.85), (x0, x1, 2.4, 2.43)):
+                y0, y1 = sorted((sy * 1.0, sy * 1.018))
+                add(bm_box_mm((a0, y0, b0), (a1, y1, b1)), 2)
+    for yc in (-0.5, 0.5):
+        g_ = bm_lathe([(0, 0), (0.2, 0), (0.2, 0.004), (0, 0.004)], segs=12)
+        rot(g_, math.pi / 2, 'Y')
+        add(move(g_, (-1.5, yc, 2.15)), 3)
+        rg = bm_tube([(-1.44, yc + 0.215 * math.cos(TAU * k / 16), 2.15 + 0.215 * math.sin(TAU * k / 16))
+                      for k in range(16)], 0.02, sides=6, closed=True, fixed_b=(1, 0, 0))
+        add(rg, 2, smooth=True)
     rpts = [(-1.1, 2.62), (1.1, 2.62)] + [(lerp(1.1, -1.1, k / 12), 2.72 + 0.12 * math.cos(math.pi * lerp(1.1, -1.1, k / 12) / 2.2))
-                                          for k in range(13)]
+                                        for k in range(13)]
     rf = bm_prism(rpts, -3.42, -1.35)
     xform(rf, Matrix(((0, 0, 1, 0), (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 1))))
-    mb.add(rf, red)
+    add(rf, 1, smooth=False)
+    # ---- slatted cowcatcher and buffers
+    for k in range(9):
+        t = k / 8
+        y = lerp(-0.82, 0.82, t)
+        tip = V((4.0, y * 0.12, 0.14))
+        add(bm_tube([(3.55, y, 0.6), (lerp(3.55, 4.0, 0.6), y * 0.55, 0.3), tuple(tip)], [0.022, 0.02, 0.018],
+                    sides=4, fixed_b=(0, 0, 1)), 1)
+    add(bm_tube([(3.58, -0.85, 0.58), (3.58, 0.85, 0.58)], 0.03, sides=6), 1)
+    add(bm_tube([(3.98, -0.1, 0.14), (3.98, 0.1, 0.14)], 0.03, sides=6), 1)
     for sy in (-1, 1):
-        mb.add(bm_box_mm((-3.0, sy * 1.0 - 0.012, 1.85), (-2.45, sy * 1.0 + 0.012, 2.4)), glassm)
-        mb.add(bm_box_mm((-2.25, sy * 1.0 - 0.012, 1.85), (-1.7, sy * 1.0 + 0.012, 2.4)), glassm)
-    # cowcatcher + buffer beam
-    cc = bm_prism([(3.55, -0.85), (3.55, 0.85), (4.0, 0.05), (4.0, -0.05)], 0.12, 0.62)
-    for v in cc.verts:
-        if v.co.x > 3.9 and v.co.z > 0.5:
-            v.co.z = 0.28
-    mb.add(cc, red, smooth=False)
-    mb.add(bm_box_mm((3.45, -0.95, 0.72), (3.6, 0.95, 1.0), bevel=0.02), red)
-    for sy in (-1, 1):
-        bf = bm_lathe([(0, 0), (0.09, 0), (0.09, 0.2), (0.12, 0.22), (0.12, 0.26), (0, 0.26)], segs=16)
+        bf = bm_lathe([(0, 0), (0.09, 0), (0.09, 0.2), (0.12, 0.22), (0.12, 0.26), (0, 0.26)], segs=12)
         rot(bf, math.pi / 2, 'Y')
-        mb.add(move(bf, (3.6, sy * 0.65, 0.86)), brass)
-    finish(mb, 'Train', sharp=40, weighted=True,
-           vfn=ao_fn(h=0.8, amt=0.35, down=0.3))
+        add(move(bf, (3.6, sy * 0.65, 0.86)), 2, smooth=True)
+
+    def vfn(co, n, f):
+        k = 1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.8, co.z))
+        k *= 1.0 - 0.25 * smoothstep(0.0, -1.0, n.z)
+        return (k, k, k)
+    ob = finish(mb, 'Train', sharp=40, vfn=vfn)
+    bake_ao(ob, dist=0.4, samples=64, strength=0.7, ground=0.0)
 
 
 def build_apple(P):
@@ -3244,11 +5444,25 @@ CONTRACT = [
 # round-2 checks: blended materials, UV'd meshes (node, material -> expected UV range), triangle caps
 BLEND_MATERIALS = ['FrameOpening', 'JarGlass']
 UV_CHECKS = [('Frame_Opening', 'FrameOpening'), ('Easel_Canvas', 'Painting')]
-TRI_CAPS = {'PortalRing': 4000, 'CanvasScrap': 1500}
+TRI_CAPS = {'PortalRing': 4000, 'CanvasScrap': 1500,
+            # round-3 per-root budgets from the perf pass (all children included)
+            'Pomegranate': 1200, 'BowlerHat': 1200, 'Candle': 1200, 'Clock': 2000, 'RailPost': 2000,
+            'Birdcage': 3000, 'Mirror': 3000, 'Drawers': 3000, 'Platform': 3500, 'Bed': 6000,
+            'DeadTree': 6000, 'Column': 6000, 'Wall': 6000, 'Rock_A': 1500, 'Rock_B': 1500, 'Rock_C': 1500,
+            'Train': 8000,
+            # a broken prop should not cost more than the intact one
+            'Wall_Fractured': 6000, 'Column_Fractured': 6000, 'Drawers_Fractured': 3000}
+CHUNK_TRI_CAP = 300   # each fracture chunk (CHUNK_TRIS is the decimation target)
 
-REQUIRED_MATERIALS = ['MirrorGlass', 'Flame', 'Seeds', 'WallInterior', 'StoneInterior', 'WoodInterior',
+REQUIRED_MATERIALS = ['MirrorGlass', 'Flame', 'Seeds', 'WoodInterior',
                       'EnemyCore', 'Mannequin', 'Sheet', 'EyeWhite', 'Flesh', 'BossLeg', 'Iris', 'DoorLight',
-                      'FrameOpening', 'PortalGilt', 'JarGlass', 'Painting']
+                      'FrameOpening', 'PortalGilt', 'JarGlass', 'Painting',
+                      'TX_stucco', 'TX_stone', 'TX_marble', 'TX_schist', 'TX_sandstone', 'TX_oak', 'TX_wood',
+                      'TX_plaster', 'TX_iron']
+# the textured (round 3) assets and their chunk templates: (parent, chunk count)
+TX_ASSETS = ['Wall', 'Wall_Fractured', 'Column', 'Column_Fractured', 'Drawers', 'Drawers_Fractured', 'Arch',
+             'DeadTree', 'Door', 'Rock_A', 'Rock_B', 'Rock_C', 'Platform', 'RailPost', 'Train', 'Bed']
+CHUNKS = {'Wall_Fractured': ('Wall', 24), 'Column_Fractured': ('Column', 15), 'Drawers_Fractured': ('Drawers', 14)}
 
 
 def export(path):
@@ -3295,6 +5509,7 @@ def world_bbox(ob):
 
 
 def verify(path):
+    verify.path = path
     print('\n==== VERIFY %s ====' % path)
     js, size = read_glb_json(path)
     tris = 0
@@ -3390,17 +5605,293 @@ def verify(path):
         t = tuple(round(x, 3) for x in o.matrix_world.translation)
         print('%-20s %-18s %8.3f %8.3f %8.3f   %s  z[%.3f..%.3f]' % (o.name, o.parent.name if o.parent else '-',
               d.x, d.y, d.z, t, mn.z, mx.z))
+    print('\ntriangle budgets (root + children):')
     for nm, cap in TRI_CAPS.items():
         o = obs.get(nm)
-        if o is not None:
-            t = sum(node_tris.get(h.name, 0) for h in [o] + list(o.children_recursive))
-            if t >= cap:
-                errors.append('%s has %d triangles (cap %d)' % (nm, t, cap))
+        if o is None:
+            errors.append('%s missing (has a triangle budget)' % nm)
+            continue
+        t = sum(node_tris.get(h.name, 0) for h in [o] + list(o.children_recursive))
+        print('   %-18s %6d / %6d  %s' % (nm, t, cap, 'OVER' if t >= cap else 'ok'))
+        if t >= cap:
+            errors.append('%s has %d triangles (cap %d)' % (nm, t, cap))
+    for par in CHUNKS:
+        ct = [(node_tris.get(h.name, 0), h.name) for h in obs[par].children] if par in obs else []
+        if ct:
+            print('   %-18s chunk tris max %d (%s), cap %d' % (par, max(ct)[0], max(ct)[1], CHUNK_TRI_CAP))
+        for t, nm in ct:
+            if t > CHUNK_TRI_CAP:
+                errors.append('%s has %d triangles (chunk cap %d)' % (nm, t, CHUNK_TRI_CAP))
     errors += round2_errors
+    errors += verify_textured(js, obs)
     print('\nCONTRACT CHECK: %s' % ('PASS' if not errors else 'FAIL'))
     for e in errors:
         print('  ' + e)
     return not errors, tris, size
+
+
+def _mesh_volume(ob):
+    """Signed volume of an object's triangles in world space (closed shells)."""
+    M = ob.matrix_world
+    me = ob.data
+    me.calc_loop_triangles()
+    vs = [M @ v.co for v in me.vertices]
+    vol = 0.0
+    for t in me.loop_triangles:
+        a, b, c = (vs[i] for i in t.vertices)
+        vol += a.dot(b.cross(c))
+    return vol / 6.0
+
+
+def _meshes(o):
+    return [h for h in [o] + list(o.children_recursive) if h.type == 'MESH']
+
+
+def _hull_volume(obs_):
+    bm = bmesh.new()
+    for o in obs_:
+        for v in o.data.vertices:
+            bm.verts.new(o.matrix_world @ v.co)
+    if len(bm.verts) < 4:
+        return 0.0
+    bmesh.ops.convex_hull(bm, input=bm.verts)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return abs(bm_volume_centroid(bm)[1])
+
+
+def _bvh(o):
+    """BVH over an object's own mesh (children excluded), world space."""
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bm.transform(o.matrix_world)
+    return BVHTree.FromBMesh(bm)
+
+
+def verify_textured(js, obs):
+    """Round-3 contract: textured props (TX_ placeholders, metre UVs, COLOR_0,
+    nothing embedded), collider-derived dimensions, chunk counts / volumes."""
+    errs = []
+    print('\n---- textured props ----')
+    if js.get('images') or js.get('textures'):
+        errs.append('glb embeds %d images / %d textures' % (len(js.get('images', [])), len(js.get('textures', []))))
+    print('embedded images: %d' % len(js.get('images', [])))
+    # TX_ materials: plain white placeholders, UVs present
+    for m in js.get('materials', []):
+        if m['name'].startswith('TX_'):
+            pbr = m.get('pbrMetallicRoughness', {})
+            if any(k in pbr for k in ('baseColorTexture', 'metallicRoughnessTexture')) or 'normalTexture' in m:
+                errs.append('%s has a texture' % m['name'])
+            if pbr.get('baseColorFactor', [1, 1, 1, 1])[:3] != [1, 1, 1] and pbr.get('baseColorFactor') is not None:
+                errs.append('%s base colour is not white' % m['name'])
+    for mesh in js['meshes']:
+        for pr in mesh['primitives']:
+            mname = js['materials'][pr['material']]['name']
+            if mname.startswith('TX_'):
+                if 'TEXCOORD_0' not in pr['attributes']:
+                    errs.append('%s (%s) has no UVs' % (mesh['name'], mname))
+                if 'COLOR_0' not in pr['attributes']:
+                    errs.append('%s (%s) has no COLOR_0' % (mesh['name'], mname))
+    # UV sanity per object and material: range, and texel density (UV area per
+    # world area ~ 1 for metre UVs; box projection alone gives >= 0.58)
+    print('%-18s %-13s %7s %7s  %s' % ('object', 'material', 'uv/m2', 'max|uv|', 'UV range'))
+    dens_bad = []
+    for name in TX_ASSETS:
+        o = obs.get(name)
+        if o is None:
+            errs.append('missing ' + name)
+            continue
+        for h in _meshes(o):
+            me = h.data
+            if not me.uv_layers:
+                continue
+            uvl = me.uv_layers[0].data
+            acc = {}
+            M = h.matrix_world
+            for poly in me.polygons:
+                mat = me.materials[poly.material_index].name if me.materials else '?'
+                if not mat.startswith('TX_'):
+                    continue
+                pts = [M @ me.vertices[me.loops[li].vertex_index].co for li in poly.loop_indices]
+                uvs = [uvl[li].uv for li in poly.loop_indices]
+                wa = 0.0
+                ua = 0.0
+                for i in range(1, len(pts) - 1):
+                    wa += (pts[i] - pts[0]).cross(pts[i + 1] - pts[0]).length / 2
+                    a, b = uvs[i] - uvs[0], uvs[i + 1] - uvs[0]
+                    ua += abs(a.x * b.y - a.y * b.x) / 2
+                r = acc.setdefault(mat, [0.0, 0.0, 1e9, -1e9, 1e9, -1e9, 0.0])
+                r[0] += wa
+                r[1] += ua
+                for uv in uvs:
+                    r[2], r[3] = min(r[2], uv.x), max(r[3], uv.x)
+                    r[4], r[5] = min(r[4], uv.y), max(r[5], uv.y)
+                    r[6] = max(r[6], abs(uv.x), abs(uv.y))
+            for mat, (wa, ua, u0, u1, v0, v1, mx) in acc.items():
+                d = ua / wa if wa > 1e-9 else 1.0
+                if 'Chunk' not in h.name or h.name.endswith('_00'):
+                    print('%-18s %-13s %7.2f %7.2f  u[%.2f..%.2f] v[%.2f..%.2f]' % (h.name, mat, d, mx, u0, u1, v0, v1))
+                if not (0.45 <= d <= 1.4):
+                    dens_bad.append('%s/%s %.2f' % (h.name, mat, d))
+                if mx > 40:
+                    errs.append('%s/%s UVs out of range (%.1f)' % (h.name, mat, mx))
+    if dens_bad:
+        errs.append('texel density off: ' + ', '.join(dens_bad))
+    # collider-derived dimensions (Blender Z-up: three.js y = Blender z)
+    def bb(name):
+        return world_bbox(obs[name])
+
+    def near(a, b, tol):
+        return abs(a - b) <= tol
+    mn, mx = bb('Wall')
+    print('Wall      bbox x[%.3f..%.3f] y[%.3f..%.3f] z[%.3f..%.3f]  (collider 4 x 3 x 0.5 at y 1.5)' % (
+        mn.x, mx.x, mn.y, mx.y, mn.z, mx.z))
+    if not (near(mn.x, -2, 0.005) and near(mx.x, 2, 0.005) and near(mn.z, 0, 0.005) and near(mx.z, 3, 0.005)
+            and mx.y <= 0.31 and mn.y >= -0.31):
+        errs.append('Wall bbox off the collider')
+    tree = _bvh(obs['Wall'])
+    hits = 0
+    for x in [-1.8 + 0.3 * i for i in range(13)]:
+        for z in (0.8, 1.5, 2.2):
+            for sgn in (-1, 1):
+                h = tree.ray_cast(V((x, sgn * 1.0, z)), V((0, -sgn, 0)))
+                if h[0] is not None and abs(abs(h[0].y) - 0.25) <= 0.03:
+                    hits += 1
+    print('Wall      faces within 3 cm of the collider sides: %d/78 probes' % hits)
+    if hits < 70:
+        errs.append('Wall faces stray from the collider (%d/78)' % hits)
+    mn, mx = bb('Column')
+    tree = _bvh(obs['Column'])
+    rmax = 0.0
+    for z in (0.6, 1.2, 2.0, 2.8, 3.4):
+        for k in range(24):
+            a = TAU * k / 24
+            d = V((math.cos(a), math.sin(a), 0))
+            h = tree.ray_cast(V((0, 0, z)) + d * 2.0, -d)
+            if h[0] is not None:
+                rmax = max(rmax, (h[0] - V((0, 0, z))).length)
+    print('Column    bbox %.3f x %.3f x %.3f z[%.3f..%.3f], shaft radius max %.3f (collider cylinder r 0.34, h 4)' % (
+        mx.x - mn.x, mx.y - mn.y, mx.z - mn.z, mn.z, mx.z, rmax))
+    if not (near(mn.z, 0, 0.005) and near(mx.z, 4.0, 0.005) and mx.x <= 0.352 and mn.x >= -0.352 and rmax <= 0.34):
+        errs.append('Column off its collider')
+    mn, mx = bb('Platform')
+    tree = _bvh(obs['Platform'])
+    tops = []
+    for i in range(21):
+        for j in range(21):
+            x, y = -1.44 + 2.88 * i / 20, -1.44 + 2.88 * j / 20
+            h = tree.ray_cast(V((x, y, 2.0)), V((0, 0, -1)))
+            tops.append(h[0].z if h[0] is not None else -9.0)
+    paving = [t for t in tops if t >= -0.012]
+    print('Platform  bbox x[%.3f..%.3f] y[%.3f..%.3f] z[%.3f..%.3f]; top over the footprint: %d/441 probes on paving '
+          'z[%.4f..%.4f], lowest (a joint) %.3f' % (mn.x, mx.x, mn.y, mx.y, mn.z, mx.z, len(paving), min(paving),
+                                                     max(paving), min(tops)))
+    if not (mx.z <= 1e-4 and len(paving) >= 0.93 * len(tops) and min(tops) >= -0.14 and mn.x >= -1.51
+            and mx.x <= 1.51 and mn.y >= -1.51 and mx.y <= 1.51 and mn.z >= -1.2):
+        errs.append('Platform top not flat at z = 0 over the footprint')
+    mn, mx = bb('Drawers')
+    print('Drawers   bbox x[%.3f..%.3f] y[%.3f..%.3f] z[%.3f..%.3f]  (collider 1.0 x 1.1 x 0.6)' % (
+        mn.x, mx.x, mn.y, mx.y, mn.z, mx.z))
+    if not (mn.x >= -0.505 and mx.x <= 0.505 and near(mn.z, 0, 0.005) and mx.z <= 1.105 and mx.y <= 0.305):
+        errs.append('Drawers off the collider')
+    mn, mx = bb('Bed')
+    print('Bed       bbox x[%.3f..%.3f] y[%.3f..%.3f] z[%.3f..%.3f]' % (mn.x, mx.x, mn.y, mx.y, mn.z, mx.z))
+    if not (mn.x >= -0.825 and mx.x <= 0.825 and mn.y >= -1.13 and mx.y <= 1.13 and mn.z >= -0.001 and mx.z <= 2.001):
+        errs.append('Bed out of its old envelope')
+    tree = _bvh(obs['DeadTree'])
+    rt = 0.0
+    for z in (0.8, 1.2, 1.6):
+        for k in range(16):
+            a = TAU * k / 16
+            d = V((math.cos(a), math.sin(a), 0))
+            h = tree.ray_cast(V((0.03, 0, z)) + d * 0.6, -d)
+            if h[0] is not None:
+                rt = max(rt, (h[0] - V((0.03, 0, z))).length)
+    hb = tree.ray_cast(V((1.7, 0.0, 3.5)), V((0, 0, -1)))
+    mn, mx = bb('DeadTree')
+    print('DeadTree  bbox x[%.3f..%.3f] y[%.3f..%.3f] z[%.3f..%.3f]; trunk radius %.3f (collider 0.22); clock branch top at x 1.7: %s' % (
+        mn.x, mx.x, mn.y, mx.y, mn.z, mx.z, rt, '%.3f' % hb[0].z if hb[0] is not None else 'MISSING'))
+    if rt > 0.3 or hb[0] is None or not (2.15 <= hb[0].z <= 2.4):
+        errs.append('DeadTree trunk / clock branch moved')
+    mn, mx = bb('Door')
+    leaf, lt = obs['Door_Leaf'], obs['Door_Light']
+    print('Door      bbox x[%.3f..%.3f] y[%.3f..%.3f] z[%.3f..%.3f]; Door_Leaf pivot %s, Door_Light pivot %s' % (
+        mn.x, mx.x, mn.y, mx.y, mn.z, mx.z, tuple(round(c, 4) for c in leaf.matrix_world.translation),
+        tuple(round(c, 4) for c in lt.matrix_world.translation)))
+    if (leaf.matrix_world.translation - V((-0.55, -0.03, 0.0))).length > 1e-4 or \
+            (lt.matrix_world.translation - V((0.0, 0.06, 1.2025))).length > 1e-4:
+        errs.append('Door_Leaf / Door_Light pivots moved')
+    if not (near(mn.x, -0.65, 0.02) and near(mx.x, 0.65, 0.02) and near(mx.z, 2.5, 0.005) and near(mn.z, 0.0, 0.005)):
+        errs.append('Door frame off its colliders')
+    tree = _bvh(obs['RailPost'])
+    h = tree.ray_cast(V((0, 0, 3.0)), V((0, 0, -1)))
+    mn, mx = bb('RailPost')
+    print('RailPost  bbox %.3f x %.3f x %.3f; the rail rests on z %s (rail centre line 1.6)' % (
+        mx.x - mn.x, mx.y - mn.y, mx.z - mn.z, '%.3f' % h[0].z if h[0] is not None else 'MISSING'))
+    if h[0] is None or not (1.5 <= h[0].z <= 1.56) or mx.z > 1.72:
+        errs.append('RailPost saddle moved')
+    tree = _bvh(obs['Arch'])
+    mn, mx = bb('Arch')
+    clear = tree.ray_cast(V((0, -2, 1.5)), V((0, 1, 0)), 4.0)[0] is None and \
+        tree.ray_cast(V((0, -2, 3.3)), V((0, 1, 0)), 4.0)[0] is None
+    print('Arch      bbox %.3f x %.3f x %.3f z[%.3f..%.3f]; opening clear: %s' % (
+        mx.x - mn.x, mx.y - mn.y, mx.z - mn.z, mn.z, mx.z, clear))
+    if not (near(mx.x - mn.x, 4.0, 0.05) and near(mx.z, 5.0, 0.005) and clear):
+        errs.append('Arch envelope / opening changed')
+    for name, dims in (('Rock_A', (2.619, 2.349, 3.117)), ('Rock_B', (3.910, 3.193, 2.011)),
+                       ('Rock_C', (2.548, 1.610, 2.613)), ('Train', (8.0, 2.2, 3.0))):
+        mn, mx = bb(name)
+        d = mx - mn
+        print('%-9s bbox %.3f x %.3f x %.3f (was %.3f x %.3f x %.3f)' % ((name, d.x, d.y, d.z) + dims))
+        if any(abs(d[i] - dims[i]) > 0.06 * dims[i] + 0.02 for i in range(3)) or abs(mn.z) > 0.005:
+            errs.append('%s envelope changed' % name)
+    # the game's debris collider is a convex hull of ~64 vertices sampled by
+    # index stride (physics.js collectPoints); how much of each chunk's true
+    # hull does that sample cover?
+    cover = {}
+    for nd in js['nodes']:
+        if '_Chunk_' not in nd.get('name', '') or 'mesh' not in nd:
+            continue
+        allp, samp = [], []
+        for pr in js['meshes'][nd['mesh']]['primitives']:
+            pts = read_accessor(verify.path, js, pr['attributes']['POSITION'])
+            allp += pts
+            samp += pts[::max(1, len(pts) // 120)]
+        if len(samp) > 64:
+            samp = samp[::math.ceil(len(samp) / 64)]
+
+        def hv(P):
+            bm = bmesh.new()
+            for q in P:
+                bm.verts.new(q)
+            bmesh.ops.convex_hull(bm, input=bm.verts)
+            bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+            return abs(bm_volume_centroid(bm)[1])
+        cover.setdefault(nd['name'].split('_Chunk_')[0], []).append(hv(samp) / max(1e-9, hv(allp)))
+    # fracture templates: counts, total volume vs the solid, convexity
+    for par, (solid, n_exp) in CHUNKS.items():
+        ch = [o for o in obs if o.name.startswith(solid + '_Chunk_')]
+        vols = [_mesh_volume(o) for o in ch]
+        sv = sum(_mesh_volume(h) for h in _meshes(obs[solid]) if not h.name.endswith('_Pillow'))
+        conv = min(abs(v) / max(1e-9, _hull_volume([o])) for o, v in zip(ch, vols)) if ch else 0.0
+        gpu = max(len(o.data.vertices) for o in ch) if ch else 0
+        cv = cover.get(solid, [0.0])
+        print('%-17s %2d chunks (expected %d), volume %.4f vs solid %.4f (%.1f%%), min chunk vol/hull %.2f, max verts %d, '
+              'game-sampled hull covers min %.2f / mean %.2f' % (par, len(ch), n_exp, sum(vols), sv,
+                                                                100.0 * sum(vols) / max(sv, 1e-9), conv, gpu, min(cv),
+                                                                sum(cv) / len(cv)))
+        if min(cv) < 0.6:
+            errs.append('%s: a chunk collider would cover only %.2f of its hull' % (par, min(cv)))
+        elif min(cv) < 0.75:
+            print('   note: a %s chunk collider covers %.2f of its hull (~%.0f%% smaller linearly); physics.js '
+                  'samples ~64 vertices by index stride' % (par, min(cv), 100 * (1 - min(cv) ** (1 / 3))))
+        if len(ch) != n_exp:
+            errs.append('%s has %d chunks (expected %d)' % (par, len(ch), n_exp))
+        if abs(sum(vols) - sv) > 0.03 * abs(sv):
+            errs.append('%s volume %.4f far from solid %.4f' % (par, sum(vols), sv))
+        if min(vols or [0]) <= 0:
+            errs.append('%s has an empty or inside-out chunk' % par)
+    return errs
 
 
 def main():

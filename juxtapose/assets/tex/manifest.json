@@ -1,0 +1,35 @@
+{
+  "stucco": {
+    "tile": 3.0
+  },
+  "plaster": {
+    "tile": 3.0
+  },
+  "stone": {
+    "tile": 2.0
+  },
+  "terracotta": {
+    "tile": 1.2
+  },
+  "rooftile": {
+    "tile": 2.0
+  },
+  "wood": {
+    "tile": 1.5
+  },
+  "oak": {
+    "tile": 1.0
+  },
+  "schist": {
+    "tile": 8.0
+  },
+  "marble": {
+    "tile": 2.0
+  },
+  "sandstone": {
+    "tile": 2.0
+  },
+  "iron": {
+    "tile": 1.0
+  }
+}

@@ -201,13 +201,13 @@ export class Player {
       this.dashEffects();
       if (this.dashT <= 0) { this.vel.x *= 0.5; this.vel.z *= 0.5; }
     } else if (this.state === 'ground') {
-      const target = wish.clone().multiplyScalar(this.moveSpeed());
+      const target = wish.clone().multiplyScalar(this.moveSpeed() * (this.game.level?.sand?.moveFactor(this, wish) ?? 1)); // soft sand: uphill is slower
       const acc = (wlen > 0.1 ? TUNE.groundAccel : TUNE.groundDecel) * h;
       // pivoting: reversing direction kills speed quickly for snappy turns
       if (wlen > 0.1 && this.vel.x * target.x + this.vel.z * target.z < 0) { this.vel.x *= 0.8; this.vel.z *= 0.8; }
       this.vel.x = approach(this.vel.x, target.x, acc * Math.max(1, Math.abs(target.x - this.vel.x) / 4));
       this.vel.z = approach(this.vel.z, target.z, acc * Math.max(1, Math.abs(target.z - this.vel.z) / 4));
-      this.vel.y = -3;
+      this.vel.y = this.game.level?.sand?.groundVel(this) ?? -3; // on sand: run along the slope, not into it
       if (wlen > 0.5 && this.hspeed() > 6) this.sprintT += h; else this.sprintT = Math.max(0, this.sprintT - h * 3);
       if (this.jumpBuf > 0) this.jump();
       else if (this.pendingIn.crouch && this.hspeed() > 5) this.startSlide();
@@ -227,7 +227,17 @@ export class Player {
         const a = angleLerp(cur, want, Math.min(1, h * 2.2));
         this.vel.x = Math.sin(a) * hs; this.vel.z = Math.cos(a) * hs;
       }
-      this.vel.y = -3;
+      // sand-surfing: down a steep dune face the slide keeps going and gathers speed (after steering)
+      const surf = this.game.level?.sand?.surf(this) || 0;
+      if (surf > 0) {
+        const n2 = this.groundNormal, k = g * 1.3 * surf * h;
+        this.vel.x += n2.x * k; this.vel.z += n2.z * k;
+        const s2 = this.hspeed();
+        if (s2 > 22) { this.vel.x *= 22 / s2; this.vel.z *= 22 / s2; }
+        if (surf > 0.25) this.slideT = Math.max(this.slideT, 0.2);
+      }
+      const gv = this.game.level?.sand?.groundVel(this); // on sand, follow a descent steeper than the usual press
+      this.vel.y = gv !== undefined && gv < -3 ? gv : -3;  // so a fast slide rides the dune face instead of launching
       if (this.jumpBuf > 0) { this.jump(1.18); }
       else if ((this.slideT <= 0 && !this.self.has('melting')) || hs < 3) this.endSlide();
     } else if (this.state === 'wallrun') {
@@ -329,6 +339,13 @@ export class Player {
   }
 
   halfHNow() { return this.collider.halfHeight ? this.collider.halfHeight() : this.halfH; }
+  // sand: a rebuilt heightfield tile rose under the feet; step up onto it before the next move
+  sandLift(dy) {
+    const t = this.body.translation();
+    this.body.setTranslation({ x: t.x, y: t.y + dy, z: t.z }, true);
+    this.body.setNextKinematicTranslation({ x: t.x, y: t.y + dy, z: t.z });
+    this.pos.y += dy; this.prevPos.y += dy; this.renderPos.y += dy;
+  }
   setCrouch(on) {
     const hh = on ? this.halfHSlide : this.halfH;
     const cur = this.halfHNow();
@@ -414,6 +431,7 @@ export class Player {
     this.fovKick = 1;
     this.anim.play('Dash', { fade: 0.05, restart: true, onDone: () => this.resumeLoco() });
     this.game.audio.sfx('dash', { position: this.pos });
+    this.game.level?.sand?.onDash(this);
     for (let i = 0; i < 10; i++) this.game.vfx.trail(this.pos.clone().add(new THREE.Vector3(rnd(-0.3, 0.3), rnd(0.3, 1.6), rnd(-0.3, 0.3))), '#fff0d0', 0.25, 0.35);
   }
 
@@ -474,6 +492,7 @@ export class Player {
     game.vfx.ring(this.pos.clone().setY(this.pos.y + 0.1), 0.5, R * 1.3, 0.5, heavy ? 0x9aa3b5 : 0xfff0d0, 1);
     game.vfx.dust(this.pos, heavy ? 2.4 : 1.3);
     game.vfx.shake = Math.min(1, game.vfx.shake + (heavy ? 0.7 : 0.35));
+    game.level?.sand?.onPound(this, heavy); // a crater; a heavy pound makes a big one
     for (const e of game.entities) {
       if (e.dead) continue;
       const c = e.center(_v);
@@ -514,9 +533,10 @@ export class Player {
       return;
     }
     if (wasPound) { this.poundLand(); return; }
+    const onSand = this.game.level?.sand?.onLand(this, fall); // the sand throws its own grains and dust
     const hs = this.hspeed();
     this.game.audio.sfx('land', { position: this.pos, gain: Math.min(1.5, 0.3 + fall * 0.12) });
-    if (fall > 1.5) this.game.vfx.dust(this.pos, Math.min(1.4, 0.3 + fall * 0.08));
+    if (fall > 1.5 && !onSand) this.game.vfx.dust(this.pos, Math.min(1.4, 0.3 + fall * 0.08));
     if (fall > 7 && hs > 5) {
       this.anim.play('RollLand', { fade: 0.05, lockUpper: true, restart: true, onDone: () => this.resumeLoco() });
     } else if (fall > 1.2) {
@@ -1250,6 +1270,7 @@ export class Player {
         this.lastFootIdx = idx;
         this.game.audio.sfx('footstep', { gain: Math.min(1, 0.25 + hs * 0.07), position: this.renderPos });
         if (hs > 7 && Math.random() < 0.5) this.game.vfx.dust(this.renderPos, 0.15);
+        this.game.level?.sand?.onFootstep(this, idx); // a print where the foot plants
       }
     }
     // lean into turns, tilt on walls
@@ -1258,6 +1279,8 @@ export class Player {
     if (this.state === 'wallrun') roll = (this.wall.leftSide ? -1 : 1) * 0.42;
     if (this.state === 'ground' && hs > 1) pitch = Math.min(0.12, hs * 0.008);
     this.visual.position.copy(this.renderPos);
+    const sand = this.game.level?.sand;
+    if (sand) this.visual.position.y -= sand.visualSink(this, dt); // feet sink a few cm into soft sand
     const cur = this.visual.userData.roll || 0;
     const nr = cur + (roll - cur) * Math.min(1, dt * 8);
     this.visual.userData.roll = nr;

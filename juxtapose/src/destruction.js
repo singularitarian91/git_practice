@@ -92,10 +92,17 @@ export class Destruction {
       const t = d.body.translation(), r = d.body.rotation(), v = d.body.linvel();
       d.mesh.position.set(t.x, t.y, t.z);
       d.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      // a thin chunk can be squeezed down through sand that re-forms under it: put it back on top
+      const sand = game.level?.sand;
+      if (sand && (d.t % 0.25) < dt && sand.contains(t.x, t.z)) {
+        const top = sand.height(t.x, t.z);
+        if (t.y < top - 0.35) { d.body.setTranslation({ x: t.x, y: top + 0.15, z: t.z }, true); d.body.setLinvel({ x: 0, y: 0, z: 0 }, true); }
+      }
       const speed = Math.hypot(v.x, v.y, v.z);
       if (d.pv) {
         const dv = Math.hypot(v.x - d.pv.x, v.y - d.pv.y, v.z - d.pv.z);
         if (dv > 4 && this.soundBudget >= 1) { this.soundBudget -= 1; game.audio.sfx('debris', { position: d.mesh.position, gain: Math.min(1, dv / 12) }); }
+        if (dv > 5) game.level?.sand?.debrisImpact(d.mesh.position, dv); // a chunk thuds into the sand
       } else d.pv = {};
       d.pv.x = v.x; d.pv.y = v.y; d.pv.z = v.z;
       // fast chunks hurt enemies they strike
@@ -123,6 +130,7 @@ export class Destruction {
     const c = e.center();
     if (this.soundBudget >= 1) { this.soundBudget -= 1; game.audio.sfx(heavy ? 'heavy' : 'debris', { position: c, gain: Math.min(1.5, dv / 10) }); }
     if (dv > 10) game.vfx.dust(c.clone().setY(c.y - e.extent.y), Math.min(1.5, dv / 14), e.dustColor);
+    if (dv > 6) game.level?.sand?.impact(e, speed, dv); // dents the sand; an anvil leaves a crater
     if (heavy && speed > 7) {
       game.vfx.shake = Math.min(1, game.vfx.shake + speed * 0.02);
       for (const w of game.entities) {
@@ -145,7 +153,10 @@ export class Destruction {
     game.audio.sfx('explosion', { position: pos, gain: Math.min(2, R / 3.5) });
     game.lucidity.gain(o.small ? 0.5 : 2);
     game.stats.explosions++;
-    const ground = game.physics.ray({ x: pos.x, y: pos.y + 0.5, z: pos.z }, { x: 0, y: -1, z: 0 }, R, G.WORLD);
+    // on sand the blast digs a real crater (scaled by radius) and throws the sand out;
+    // a flat scorch decal would only float over the hole
+    const cratered = game.level?.sand?.explosion(pos, R, o);
+    const ground = cratered ? null : game.physics.ray({ x: pos.x, y: pos.y + 0.5, z: pos.z }, { x: 0, y: -1, z: 0 }, R, G.WORLD);
     if (ground) game.vfx.decal(ground.point, ground.normal, R * 1.3, game.assets.textures.scorch, 0xffffff, o.implode ? 0.5 : 0.9, 40);
     const sign = o.implode ? -1 : 1;
     // rigid bodies (props, debris, enemies)

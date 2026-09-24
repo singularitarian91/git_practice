@@ -8,6 +8,17 @@ renders each group with Cycles (CPU) to juxtapose/docs/previews/props_*.png.
 
     python3 juxtapose/blender/render_previews.py
     python3 juxtapose/blender/render_previews.py --glb /tmp/x.glb --only enemies --samples 32
+
+Materials named TX_<name> are placeholders for the shared texture library
+(assets/tex); texturize() wires the real maps in for the render only, the same
+way the game does (metre UVs, repeat 1 / tile, albedo x COLOR_0, ORM, normal).
+
+Before / after sheets for the upgraded kit and the triangle-budget pass
+(props_before_after_{architecture,landscape,furniture,budget}.png): pass the
+old glb, or a git revision to take juxtapose/assets/props.glb from:
+
+    python3 juxtapose/blender/render_previews.py --before 8687465          # + all shots
+    python3 juxtapose/blender/render_previews.py --before old.glb --ba-only
 """
 import bpy
 import math
@@ -41,6 +52,7 @@ def setup_scene(samples, res):
     sc.cycles.caustics_reflective = False
     sc.cycles.caustics_refractive = False
     sc.cycles.blur_glossy = 1.0
+    sc.cycles.sample_clamp_indirect = 10.0      # no glossy fireflies in the rock creases
     sc.render.resolution_x, sc.render.resolution_y = res
     sc.render.resolution_percentage = 100
     sc.render.film_transparent = False
@@ -89,6 +101,84 @@ def setup_scene(samples, res):
     me.materials.append(m)
     sc.collection.objects.link(g)
     return sc
+
+
+TEX_DIR = os.path.join(PROJ, 'assets', 'tex')
+
+
+def texturize(tex_dir=TEX_DIR):
+    """Give every TX_<name> placeholder material the shared library's baked maps,
+    wired the way the game does it (assets.js applyTexture): UVs are metres, so
+    the maps repeat every <tile> metres; albedo x COLOR_0; ORM = AO (at 0.8),
+    roughness, metalness; OpenGL tangent-space normals.  Preview only: the glb
+    itself carries no textures."""
+    import json
+    import re
+    try:
+        man = json.load(open(os.path.join(tex_dir, 'manifest.json')))
+    except OSError:
+        print('no texture library at', tex_dir)
+        return 0
+    imgs = {}
+
+    def img(path, colorspace):
+        key = (path, colorspace)
+        if key not in imgs:
+            im = bpy.data.images.load(path, check_existing=False)
+            im.colorspace_settings.name = colorspace
+            imgs[key] = im
+        return imgs[key]
+    n = 0
+    for m in bpy.data.materials:
+        hit = re.match(r'^TX_([a-z]+)', m.name)
+        if not hit or hit.group(1) not in man or not m.use_nodes:
+            continue
+        name = hit.group(1)
+        tile = man[name].get('tile', 1.0)
+        nt = m.node_tree
+        nt.nodes.clear()
+        out = nt.nodes.new('ShaderNodeOutputMaterial')
+        bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+        uv = nt.nodes.new('ShaderNodeUVMap')
+        mp = nt.nodes.new('ShaderNodeMapping')
+        mp.inputs['Scale'].default_value = (1.0 / tile, 1.0 / tile, 1.0)
+        nt.links.new(uv.outputs['UV'], mp.inputs['Vector'])
+        tex = {}
+        for kind, cs in (('albedo', 'sRGB'), ('normal', 'Non-Color'), ('orm', 'Non-Color')):
+            t = nt.nodes.new('ShaderNodeTexImage')
+            t.image = img(os.path.join(tex_dir, '%s_%s.jpg' % (name, kind)), cs)
+            t.interpolation = 'Cubic' if kind == 'albedo' else 'Linear'
+            nt.links.new(mp.outputs['Vector'], t.inputs['Vector'])
+            tex[kind] = t
+        vc = nt.nodes.new('ShaderNodeVertexColor')
+        vc.layer_name = 'Color'
+        sep = nt.nodes.new('ShaderNodeSeparateColor')
+        nt.links.new(tex['orm'].outputs['Color'], sep.inputs['Color'])
+        ao = nt.nodes.new('ShaderNodeMapRange')          # aoMapIntensity 0.8
+        ao.inputs['To Min'].default_value = 0.2
+        nt.links.new(sep.outputs['Red'], ao.inputs['Value'])
+        m1 = nt.nodes.new('ShaderNodeMix')
+        m1.data_type = 'RGBA'
+        m1.blend_type = 'MULTIPLY'
+        m1.inputs['Factor'].default_value = 1.0
+        nt.links.new(tex['albedo'].outputs['Color'], m1.inputs[6])
+        nt.links.new(vc.outputs['Color'], m1.inputs[7])
+        m2 = nt.nodes.new('ShaderNodeMix')
+        m2.data_type = 'RGBA'
+        m2.blend_type = 'MULTIPLY'
+        m2.inputs['Factor'].default_value = 1.0
+        nt.links.new(m1.outputs[2], m2.inputs[6])
+        nt.links.new(ao.outputs['Result'], m2.inputs[7])
+        nt.links.new(m2.outputs[2], bsdf.inputs['Base Color'])
+        nt.links.new(sep.outputs['Green'], bsdf.inputs['Roughness'])
+        nt.links.new(sep.outputs['Blue'], bsdf.inputs['Metallic'])
+        nm = nt.nodes.new('ShaderNodeNormalMap')
+        nt.links.new(tex['normal'].outputs['Color'], nm.inputs['Color'])
+        nt.links.new(nm.outputs['Normal'], bsdf.inputs['Normal'])
+        n += 1
+    print('textured %d TX_ materials from %s' % (n, tex_dir))
+    return n
 
 
 def top_level():
@@ -356,6 +446,22 @@ def shot_detail_nightlight():
     return dict(loc=(-0.05, -0.75, 0.33), target=(0.12, 0.05, 0.2), lens=45)
 
 
+def shot_detail_ruins():
+    show('Wall', (-1.2, 1.0, 0), -14)
+    show('Column', (1.55, -0.1, 0), 0)
+    show('Rock_C', (3.6, 3.4, 0), 30)
+    return dict(loc=(-0.9, -5.6, 1.35), target=(0.3, 0.6, 1.45), lens=30)
+
+
+def shot_detail_platform():
+    show('Platform', (0.2, 1.0, 2.5), 25)
+    show('RailPost', (-2.6, -0.4, 0), 70)
+    clone('RailPost', 'PV_post3', (-1.2, 1.6, 0), 70)
+    rail((-3.2, -2.05, 1.6), (-0.6, 3.25, 1.6))
+    show('DeadTree', (-4.6, 4.0, 0), 20)
+    return dict(loc=(2.4, -5.9, 1.25), target=(0.0, 0.8, 1.9), lens=30)
+
+
 SHOTS = [
     ('sources_large', shot_sources_large),
     ('sources_small', shot_sources_small),
@@ -372,7 +478,149 @@ SHOTS = [
     ('keepsakes', shot_keepsakes),
     ('detail_easel', shot_detail_easel),
     ('detail_nightlight', shot_detail_nightlight),
+    ('detail_ruins', shot_detail_ruins),
+    ('detail_platform', shot_detail_platform),
 ]
+
+
+# ----------------------------------------------------------------------------
+# before / after sheets: identical cameras and light, old glb vs new glb
+# ----------------------------------------------------------------------------
+def _ba_door():
+    show('Door', (0, 0, 0), 25)
+    bpy.data.objects['Door_Leaf'].rotation_euler = (0, 0, math.radians(-55))
+
+
+def _ba_tree():
+    show('DeadTree', (0, 0, 0), 0)
+    show('Clock', (1.7, 0.0, 1.8), 90)
+
+
+def _ba_posts():
+    show('RailPost', (-0.55, 0, 0), 90)
+    clone('RailPost', 'PV_post_ba', (0.55, 0, 0), 90)
+    rail((-1.3, 0, 1.6), (1.3, 0, 1.6))
+
+
+# name -> (label, setup, (camera loc, target, lens))
+BA = {
+    'wall': ('Wall', lambda: show('Wall', (0, 0, 0), -18), ((1.4, -7.4, 2.0), (0.1, 0, 1.45), 35)),
+    'wall_fractured': ('Wall_Fractured (exploded)',
+                       lambda: (show('Wall_Fractured', (0, 0, 0), -18), explode('Wall_Fractured', 0.12, (0, 0, 1.5))),
+                       ((1.4, -7.4, 2.0), (0.1, 0, 1.45), 35)),
+    'column': ('Column and Column_Fractured',
+               lambda: (show('Column', (-0.75, 0, 0), 0), show('Column_Fractured', (0.75, 0, 0), 0),
+                        explode('Column_Fractured', 0.06, (0, 0, 2.0))),
+               ((0.3, -7.6, 2.2), (0.0, 0, 2.0), 32)),
+    'arch': ('Arch', lambda: show('Arch', (0, 0, 0), -20), ((1.6, -9.6, 2.5), (0, 0, 2.5), 35)),
+    'door': ('Door (leaf open)', _ba_door, ((-0.2, -4.9, 1.5), (0, 0, 1.25), 35)),
+    'rocks': ('Rock_A, Rock_B, Rock_C',
+              lambda: (show('Rock_A', (-3.4, 0, 0), 20), show('Rock_B', (0.4, 1.0, 0), -30),
+                       show('Rock_C', (4.0, 0, 0), 40)),
+              ((0.3, -11.5, 2.4), (0.4, 0.5, 1.3), 32)),
+    'platform': ('Platform', lambda: show('Platform', (0, 0, 1.7), 20), ((1.3, -6.3, 2.6), (0, 0, 1.2), 35)),
+    'tree': ('DeadTree (with the clock on its branch)', _ba_tree, ((0.6, -7.0, 1.9), (0.5, 0, 1.65), 35)),
+    'railpost': ('RailPost (a Dali crutch under a rail)', _ba_posts, ((0.6, -3.4, 1.2), (0, 0, 0.9), 35)),
+    'train': ('Train', lambda: show('Train', (0, 0, 0), -25), ((3.5, -10.5, 2.4), (0, 0, 1.4), 35)),
+    'drawers': ('Drawers and Drawers_Fractured',
+                lambda: (show('Drawers', (-0.8, 0, 0), 12), show('Drawers_Fractured', (0.9, 0, 0), -12),
+                         explode('Drawers_Fractured', 0.35, (0, 0, 0.55))),
+                ((0.1, -4.0, 1.7), (0.05, 0, 0.55), 40)),
+    'bed': ('Bed', lambda: show('Bed', (0, 0, 0), 28), ((1.2, -4.9, 2.3), (0, 0, 0.9), 35)),
+    # untextured props that only went through the triangle-budget pass
+    'small': ('Candle, BowlerHat, Birdcage, Pomegranate (triangle budget)',
+              lambda: (show('Candle', (-0.95, 0.15, 0), 0), show('BowlerHat', (-0.5, -0.12, 0), 20),
+                       show('Birdcage', (0.05, 0.3, 0), 0), show('Pomegranate', (0.5, -0.12, 0), -10)),
+              ((0.0, -2.2, 0.9), (-0.1, 0.05, 0.25), 46)),
+    'mirror_clock': ('Mirror and Clock (triangle budget)',
+                     lambda: (show('Mirror', (-0.6, 0, 0), -12), show('Clock', (0.75, -0.2, 0), -18),
+                              pose_clock_hands()),
+                     ((0.1, -4.0, 1.3), (0.05, 0, 1.0), 38)),
+}
+BA_SHEETS = [('architecture', ['wall', 'wall_fractured', 'column', 'arch', 'door']),
+             ('landscape', ['rocks', 'platform', 'tree', 'railpost', 'train']),
+             ('furniture', ['drawers', 'bed']),
+             ('budget', ['small', 'mirror_clock'])]
+
+
+def resolve_before(arg, tmp_dir):
+    if os.path.isfile(arg):
+        return os.path.abspath(arg)
+    import subprocess
+    out = os.path.join(tmp_dir, 'props_before_%s.glb' % arg.replace('/', '_'))
+    data = subprocess.run(['git', '-C', PROJ, 'show', '%s:juxtapose/assets/props.glb' % arg],
+                          check=True, capture_output=True).stdout
+    with open(out, 'wb') as f:
+        f.write(data)
+    return out
+
+
+def render_ba_tiles(glb, tag, tile_dir, samples, res, keys):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.gltf(filepath=glb)
+    for o in bpy.data.objects:
+        o.rotation_mode = 'XYZ'
+    texturize()
+    sc = setup_scene(samples, res)
+    obs0 = top_level()
+    rest = {o.name: o.location.copy() for o in bpy.data.objects if o.parent is not None}
+    out = {}
+    for key in keys:
+        reset(obs0)
+        for o in bpy.data.objects:
+            if o.name in rest:
+                o.location = rest[o.name]
+                o.rotation_euler = (0, 0, 0)
+        _, setup, (loc, tgt, lens) = BA[key]
+        setup()
+        camera(sc, loc, tgt, lens)
+        path = os.path.join(tile_dir, '%s_%s.png' % (tag, key))
+        sc.render.filepath = path
+        t = time.time()
+        bpy.ops.render.render(write_still=True)
+        print('rendered %s in %.1fs' % (path, time.time() - t))
+        out[key] = path
+    return out
+
+
+def compose_ba(tiles_b, tiles_a, out_dir, res):
+    from PIL import Image, ImageDraw, ImageFont
+    try:
+        font = ImageFont.truetype('DejaVuSans.ttf', 18)
+    except OSError:
+        font = ImageFont.load_default()
+    w, h = res
+    head = 30
+    for sheet, keys in BA_SHEETS:
+        keys = [k for k in keys if k in tiles_a]
+        if not keys:
+            continue
+        im = Image.new('RGB', (w * 2 + 6, head + len(keys) * (h + head) - head + 6), (24, 22, 20))
+        dr = ImageDraw.Draw(im)
+        for i, key in enumerate(keys):
+            y = head + i * (h + head)
+            label = BA[key][0]
+            dr.text((8, y - 24), 'BEFORE  %s' % label, fill=(200, 190, 175), font=font)
+            dr.text((w + 14, y - 24), 'AFTER  %s' % label, fill=(245, 225, 190), font=font)
+            if key in tiles_b:
+                im.paste(Image.open(tiles_b[key]).convert('RGB'), (0, y))
+            im.paste(Image.open(tiles_a[key]).convert('RGB'), (w + 6, y))
+        path = os.path.join(out_dir, 'props_before_after_%s.png' % sheet)
+        im.save(path)
+        print('wrote', path)
+
+
+def before_after(before, after, out_dir, samples, keys=None):
+    import tempfile
+    tile_dir = tempfile.mkdtemp(prefix='ba_tiles_')
+    before = resolve_before(before, tile_dir)
+    res = (640, 400)
+    keys = keys or list(BA)
+    tb = render_ba_tiles(before, 'before', tile_dir, samples, res, keys)
+    ta = render_ba_tiles(after, 'after', tile_dir, samples, res, keys)
+    compose_ba(tb, ta, out_dir, res)
+    import shutil
+    shutil.rmtree(tile_dir, ignore_errors=True)
 
 
 def main():
@@ -391,10 +639,16 @@ def main():
     if '--out' in argv:
         out_dir = os.path.abspath(argv[argv.index('--out') + 1])
     os.makedirs(out_dir, exist_ok=True)
+    if '--before' in argv:
+        keys = argv[argv.index('--ba-keys') + 1].split(',') if '--ba-keys' in argv else None
+        before_after(argv[argv.index('--before') + 1], glb, out_dir, min(samples, 64), keys)
+        if '--ba-only' in argv:
+            return
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=glb)
     for o in bpy.data.objects:
         o.rotation_mode = 'XYZ'
+    texturize()
     sc = setup_scene(samples, res)
     obs0 = top_level()
     for name, fn in SHOTS:

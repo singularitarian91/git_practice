@@ -203,9 +203,9 @@ void main(){
 };
 
 export const QUALITY = {
-  low: { pixelRatio: 0.85, shadows: 1024, bloom: true, ao: false, samples: 0 },
-  medium: { pixelRatio: 1.0, shadows: 2048, bloom: true, ao: false, samples: 2 },
-  high: { pixelRatio: 1.25, shadows: 4096, bloom: true, ao: true, samples: 2 },
+  low: { pixelRatio: 0.85, shadows: 1024, bloom: true, ao: false, samples: 0, shadowExtent: 24 },
+  medium: { pixelRatio: 1.0, shadows: 2048, bloom: true, ao: false, samples: 2, shadowExtent: 30 },
+  high: { pixelRatio: 1.25, shadows: 4096, bloom: true, ao: true, samples: 2, shadowExtent: 38 },
 };
 
 // NaN or Inf anywhere in the HDR buffer (a specular spike past half-float range,
@@ -303,6 +303,9 @@ export class Renderer {
     const r = this.renderer;
     r.setPixelRatio(Math.min(devicePixelRatio || 1, Q.pixelRatio)); // never pay for a retina screen twice over
     this.sun.shadow.mapSize.set(Q.shadows, Q.shadows);
+    // a smaller shadow box draws fewer casters twice (and keeps its texels sharp)
+    const sc = this.sun.shadow.camera, ext = Q.shadowExtent || 38;
+    sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.updateProjectionMatrix();
     if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
     const size = r.getDrawingBufferSize(new THREE.Vector2());
     const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: Q.samples });

@@ -68,6 +68,9 @@ export class Physics {
       .setCanSleep(true);
     if (rot) d.setRotation({ x: rot.x, y: rot.y, z: rot.z, w: rot.w });
     if (opts.ccd) d.setCcdEnabled(true);
+    // soft (predictive) CCD: Rapier's swept CCD does not catch heightfields (the sand), so a
+    // plummeting anvil or a chunk thrown by a blast could step straight through them
+    if (d.setSoftCcdPrediction) d.setSoftCcdPrediction(opts.softCcd ?? 0.5);
     if (opts.gravityScale !== undefined) d.setGravityScale(opts.gravityScale);
     return this.world.createRigidBody(d);
   }

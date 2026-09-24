@@ -3,9 +3,17 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DREAM, inkify } from './render.js';
 
-// Fetch a .glb; hosts that won't serve binary models get a base64 text copy instead
+// Fetch a .glb; hosts that won't serve binary models get a text copy instead:
+// gzipped then base64-encoded (about a third of the size), or plain base64
+function fromBase64(text) {
+  const bin = atob(text.trim());
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 async function fetchModel(url) {
   try {
     const r = await fetch(url);
@@ -14,13 +22,19 @@ async function fetchModel(url) {
       const magic = new Uint8Array(buf, 0, 4);
       if (magic[0] === 0x67 && magic[1] === 0x6c && magic[2] === 0x54 && magic[3] === 0x46) return buf; // 'glTF'
     }
-  } catch (e) { /* fall through to the text copy */ }
+  } catch (e) { /* fall through to the text copies */ }
+  if (typeof DecompressionStream !== 'undefined') {
+    try {
+      const r = await fetch(url + '.gz.b64.txt');
+      if (r.ok) {
+        const gz = fromBase64(await r.text());
+        return await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      }
+    } catch (e) { /* fall through to plain base64 */ }
+  }
   const r2 = await fetch(url + '.b64.txt');
   if (!r2.ok) throw new Error(`Could not load ${url}`);
-  const bin = atob((await r2.text()).trim());
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out.buffer;
+  return fromBase64(await r2.text()).buffer;
 }
 
 export class Assets {
@@ -31,15 +45,17 @@ export class Assets {
   }
 
   async load(onProgress) {
-    const files = [['props', './assets/props.glb'], ['figure', './assets/figure.glb']];
+    // the town kit and street dressing are optional: the game falls back to placeholder shells without them
+    const files = [['props', './assets/props.glb'], ['figure', './assets/figure.glb'], ['town', './assets/town.glb', true], ['street', './assets/street.glb', true]];
     let done = 0;
-    const results = await Promise.all(files.map(async ([k, url]) => {
-      const buf = await fetchModel(url);
-      const g = await this.loader.parseAsync(buf, './assets/');
+    const results = await Promise.all(files.map(async ([k, url, optional]) => {
+      let g = null;
+      try { g = await this.loader.parseAsync(await fetchModel(url), './assets/'); } catch (e) { if (!optional) throw e; }
       done++; onProgress && onProgress(done / files.length);
       return [k, g];
     }));
     for (const [k, g] of results) this[k] = g;
+    await this.loadTextureLibrary();
     // ink edges on anything with a silhouette the player has to read at a glance
     const inkAll = (root, k) => root.traverse((o) => {
       if (!o.isMesh) return;
@@ -54,13 +70,55 @@ export class Assets {
       });
       this.templates.set(child.name, child);
     }
+    for (const kit of [this.town, this.street]) if (kit) for (const child of [...kit.scene.children]) {
+      child.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; this.tuneMaterial(o.material); } });
+      this.templates.set(child.name, child);
+    }
     for (const [name, k] of [['Sleepwalker', 0.75], ['Unwatched', 0.45]]) if (this.templates.has(name)) inkAll(this.templates.get(name), k);
     this.makeTextures();
+  }
+
+  // Baked tileable PBR textures from Blender (assets/tex): any material named
+  // TX_<name> gets albedo, normal and ORM maps. UVs are in metres, so repeat = 1 / tile.
+  async loadTextureLibrary() {
+    this.texlib = null;
+    let manifest = null;
+    try { const r = await fetch('./assets/tex/manifest.json'); if (r.ok) manifest = await r.json(); } catch (e) { /* no library yet */ }
+    if (!manifest) return;
+    const loader = new THREE.TextureLoader();
+    const load = (url, srgb) => new Promise((res) => loader.load(url, (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; res(t); }, undefined, () => res(null)));
+    this.texlib = {};
+    await Promise.all(Object.entries(manifest).map(async ([name, info]) => {
+      const [albedo, normal, orm] = await Promise.all([load(`./assets/tex/${name}_albedo.jpg`, true), load(`./assets/tex/${name}_normal.jpg`), load(`./assets/tex/${name}_orm.jpg`)]);
+      const rep = 1 / (info.tile || 1);
+      for (const t of [albedo, normal, orm]) if (t) t.repeat.set(rep, rep);
+      this.texlib[name] = { albedo, normal, orm, info };
+    }));
+  }
+
+  applyTexture(m) {
+    const hit = /^TX_([a-z]+)/.exec(m.name || '');
+    const T = hit && this.texlib && this.texlib[hit[1]];
+    if (!T) return;
+    if (T.albedo) m.map = T.albedo;
+    if (T.normal) { m.normalMap = T.normal; m.normalScale = new THREE.Vector2(1, -1); } // glTF normal maps are +Y; flipY is off
+    if (T.orm) { m.roughnessMap = T.orm; m.metalnessMap = T.orm; m.aoMap = T.orm; m.roughness = 1; m.metalness = 1; m.aoMapIntensity = 0.8; }
+    // interior-only surfaces see less sky: rooms read as rooms, not as outdoors with a ceiling
+    if (/^(plaster|oak)$/.test(hit[1])) m.envMapIntensity = 0.45;
+    m.needsUpdate = true;
+  }
+
+  // a material from the texture library for geometry built in code (UVs in metres)
+  libMaterial(name, params = {}) {
+    const m = new THREE.MeshStandardMaterial({ roughness: 1, ...params, name: 'TX_' + name });
+    this.applyTexture(m);
+    return m;
   }
 
   tuneMaterial(m) {
     if (!m || m.userData.tuned) return;
     m.userData.tuned = true;
+    this.applyTexture(m);
     if (m.name === 'MirrorGlass') { m.metalness = 1; m.roughness = 0.03; m.envMapIntensity = 1.6; }
     if (/Flame|Seeds|DoorLight|EnemyCore|Iris/.test(m.name)) { m.toneMapped = true; }
   }
@@ -82,7 +140,8 @@ export class Assets {
 
   cloneFigure() {
     const o = SkeletonUtils.clone(this.figure.scene);
-    o.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.castShadow = true; m.receiveShadow = true; } });
+    this.figurePlan ??= rigidPlan(this.figure.scene);
+    if (!applyRigidPlan(o, this.figurePlan)) o.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.castShadow = true; m.receiveShadow = true; } });
     return o;
   }
 
@@ -149,6 +208,64 @@ export class Assets {
       g.fillStyle = 'rgba(255,255,255,0.95)'; g.fill();
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// The Figment is a wooden mannequin: 57 rigid parts riding its bones, one draw
+// call each (and again for shadows). A clone draws them as one skinned mesh per
+// material instead. Every part becomes an empty node with the same name and
+// transform, so animation and code still move it, and each vertex of the merged
+// mesh follows its part's node at full weight. (Not for enemies: their melting
+// droop works in object space, which skinning would change.)
+// ---------------------------------------------------------------------------
+function rigidPlan(template) {
+  const parts = [];
+  template.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh) parts.push(o); });
+  const groups = new Map();
+  parts.forEach((m) => {
+    const mat = m.material, g = m.geometry;
+    const key = mat.uuid + '|' + Object.keys(g.attributes).sort().join() + (g.index ? '|i' : '');
+    if (!groups.has(key)) groups.set(key, { mat, parts: [], geos: [] });
+    const gr = groups.get(key);
+    const n = g.attributes.position.count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+    for (let v = 0; v < n; v++) { si[v * 4] = gr.parts.length; sw[v * 4] = 1; }
+    const c = g.clone();
+    c.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+    c.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+    gr.parts.push(parts.indexOf(m)); gr.geos.push(c);
+  });
+  const out = [];
+  for (const gr of groups.values()) {
+    const geo = gr.geos.length === 1 ? gr.geos[0] : mergeGeometries(gr.geos, false);
+    if (!geo) return null;
+    out.push({ mat: gr.mat, parts: gr.parts, geo });
+  }
+  return { count: parts.length, groups: out };
+}
+
+function applyRigidPlan(root, plan) {
+  if (!plan) return false;
+  const parts = [];
+  root.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh) parts.push(o); });
+  if (parts.length !== plan.count) return false;
+  const nodes = parts.map((m) => {
+    const n = new THREE.Object3D();
+    n.name = m.name; n.position.copy(m.position); n.quaternion.copy(m.quaternion); n.scale.copy(m.scale);
+    for (const c of [...m.children]) n.add(c);
+    const p = m.parent;
+    p.children[p.children.indexOf(m)] = n; n.parent = p; m.parent = null;
+    return n;
+  });
+  for (const g of plan.groups) {
+    const bones = g.parts.map((i) => nodes[i]);
+    const sm = new THREE.SkinnedMesh(g.geo, g.mat.clone());
+    sm.name = 'Figment_' + (g.mat.name || 'part');
+    sm.bind(new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4())), new THREE.Matrix4());
+    sm.castShadow = true; sm.receiveShadow = true;
+    sm.frustumCulled = false; // it follows the parts, not its own transform
+    root.add(sm);
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------

@@ -201,6 +201,8 @@ export const CATALOG = {
   Rock_B: { kind: 'wall', anchored: true, hp: Infinity, group: G.WORLD, dust: '#c9a36a' },
   Rock_C: { kind: 'wall', anchored: true, hp: Infinity, group: G.WORLD, dust: '#c9a36a' },
   DeadTree: { kind: 'wall', anchored: true, hp: 80, flammable: true, group: G.WALL, dust: '#6b4a2c' },
+  // a breakable stretch of house wall, slotted into the town's buildings
+  TP_Stucco: { kind: 'wall', anchored: true, hp: 140, fracture: 'TP_Stucco_Fractured', group: G.WALL, dust: '#efe6d6', meltColor: '#e2d6c0' },
 };
 
 // build the Rapier collider desc(s) for a template, in the entity's local frame
@@ -212,11 +214,12 @@ function colliderDescs(name, obj, scale = 1) {
   }
   switch (name) {
     case 'Wall': return [C.cuboid(2, 1.5, 0.25).setTranslation(0, 1.5, 0)];
+    case 'TP_Stucco': return [C.cuboid(2, 1.8, 0.2).setTranslation(0, 1.8, 0)];
     case 'Column': return [C.cylinder(2, 0.34).setTranslation(0, 2, 0)];
     case 'Platform': return [C.cuboid(1.5, 0.25, 1.5).setTranslation(0, -0.25, 0)];
     case 'Drawers': return [C.cuboid(0.5, 0.55, 0.3).setTranslation(0, 0.55, 0)];
     case 'Mirror': return [C.cuboid(0.55, 1.0, 0.12).setTranslation(0, 1.0, 0)];
-    case 'Bed': return [C.cuboid(0.8, 0.3, 1.1).setTranslation(0, 0.3, 0), C.cuboid(0.8, 0.5, 0.06).setTranslation(0, 0.9, 1.05)];
+    case 'Bed': return [C.cuboid(0.8, 0.3, 1.1).setTranslation(0, 0.3, 0), C.cuboid(0.8, 0.5, 0.06).setTranslation(0, 0.9, -1.05)] // the headboard end;
     case 'DeadTree': return [C.cylinder(1.5, 0.22).setTranslation(0, 1.5, 0)];
     default: {
       const pts = collectPoints(obj, 200);

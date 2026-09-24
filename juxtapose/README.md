@@ -105,7 +105,11 @@ The full story bible is in [`docs/STORY.md`](docs/STORY.md) and the character sh
 
 ## Run structure
 
-1. **The Soft Desert** (Dalí): melting clocks on dead trees, ruined corridors built for wall-running, floating stairs, a four-poster bed in the sand, and rails on crutches. It stands for the time she let run down.
+1. **The Soft Desert** (Dalí): a fishing village half-buried in sand, modelled on Port Lligat. It sits in a valley closed by schist cliffs and opens south onto the sea. The layer stands for the time she let run down.
+   - **Buildings you can enter:** Odile's clock workshop, cottages with roof terraces and Dalí eggs, a two-storey house, a chapel whose bell tower you can climb, a leaning watchtower, a boathouse, and a market loggia.
+   - **The railway:** track comes out of a tunnel in the cliff, runs past the station where Théo caught the 6:40, and carries on into the sea. The train never stops.
+   - **The sand is real.** It deforms, craters and avalanches under you, and fills back in over time.
+   - **The rest of the dream:** melting clocks hang on dead trees on the beach, stairs float up toward the tower, grind rails run between the rooftops, and the way out is a door standing in the shallows.
 2. **Golconda Piazza** (de Chirico and Magritte): long shadows, arcades with rails along their tops, a train on the horizon, and men in bowler hats raining from the sky. It is the city he left for, where every crowd was the same man.
 3. **The Unwatched**, the boss: a giant eye on four impossible legs, animated with procedural two-bone IK stepping. You can only hurt it while you are *not* looking at it, and it only moves when you look away. Stare too long and it looks back. It attacks with orbs carrying your last three combos. Break its posture and it kneels for a deathblow.
 
@@ -136,6 +140,9 @@ juxtapose/
     portals.js               framed portals: placement, render-to-texture views, momentum transfer
     narrator.js              the Night-Light: companion lantern, typed subtitles, babble voice
     painting.js              L'Homme au Chapeau drawn procedurally (torn / finished)
+    town.js                  places the Blender town kit: box/trimesh colliders, SLOT_* props, breakable panels, lamp lights
+    sand.js                  deformable sand: tiled heightfield colliders, craters, trails, avalanches, sand spray
+    sea.js                   the sea: layered ripples, sky reflection, shallows and foam
     photo.js                 photo mode: frozen sim, free camera, exposure/vignette/grain, PNG capture
     ui.js, meta.js, input.js, config.js
   blender/
@@ -145,7 +152,16 @@ juxtapose/
                              vault, flips, grind, ground-pound, reload, take/give...)
     build_props.py           every prop, the environment kit, enemies, boss, Voronoi-fractured walls
     render_previews.py       Cycles contact sheets -> docs/previews/
-  assets/figure.glb, assets/props.glb
+    texlib.py                tileable PBR texture library (stucco, plaster, stone, terracotta, roof tile,
+                             painted wood, oak, schist, marble, sandstone, iron) -> assets/tex/
+    build_town.py            the village kit: nine enterable buildings with interiors, colliders and
+                             SLOT_* markers, baked ambient occlusion -> assets/town.glb
+    pack_glb.py              post-export: moves the AO bake into COLOR_0, quantizes normals, strips colliders
+    render_town.py           Cycles previews of the kit -> docs/previews/town_*.png
+    build_street.py          street dressing: well, lamps, benches, carts, garden walls, gate, boats,
+                             cypresses, olives, Dalí eggs -> assets/street.glb
+    render_street.py         Cycles contact sheet of the street props -> docs/previews/street_props.png
+  assets/figure.glb, assets/props.glb, assets/town.glb, assets/street.glb, assets/tex/
   vendor/                    three.js r170 (+ addons), Rapier 0.14 (compat build)
 ```
 
@@ -154,6 +170,19 @@ Rebuild the art with Blender's Python module (`pip install bpy==4.2.0`, Python 3
 ```bash
 python3 juxtapose/blender/build_figure.py            # add --preview (poses), --combat (combat poses), --sheet (character sheet)
 python3 juxtapose/blender/build_props.py
+python3 juxtapose/blender/texlib.py           # textures first: the kit and props use them by name (TX_<name>)
+python3 juxtapose/blender/build_town.py      # exports, packs and verifies assets/town.glb
+python3 juxtapose/blender/build_street.py    # imports build_town's helpers; exports assets/street.glb
 ```
 
+Hosts that won't serve binary `.glb` files can serve `<name>.glb.gz.b64.txt` instead (`gzip -9 -n -c x.glb | base64 -w0`): the loader falls back to it, and to plain `<name>.glb.b64.txt` after that. Gzip takes the town kit from 10.5 MB to about 2.5 MB.
+
 **Sound as structure.** The score is synthesized live with Web Audio: stems for pad, bass, music-box arpeggio, percussion and glass shimmer. It follows the chord progression of each layer, adds stems as combat intensifies, and warbles, drags and reverses as Lucidity rises. Weapon sounds snap to the 16th-note grid and are pitched to the current scale, so a good fight plays like a melody.
+
+**Keeping it smooth.**
+- **Draw calls:**
+  - Each kit building's hundred-odd pieces are merged by material the first time it is placed, and only the big pieces cast sun shadows.
+  - Props beyond view distance are hidden.
+  - The Figment's 57 rigid parts are drawn as one skinned mesh per material. They still ride their bones, and animation is unaffected.
+- **No shader stalls in a fight:** every shader a fight can need is compiled while each layer fades in. That covers enemies, debris, rings, decals, and the see-through and melting variants of every material. The warm-up compiles against the post chain's render target, because that target selects different shader variants than the canvas. Ring and decal materials are pooled rather than disposed, so a compiled program is never thrown away and rebuilt mid-fight.
+- **Crash handling:** quality defaults to what the GPU can handle, a lost WebGL context is recovered one quality step lower, and a frame that keeps failing shows its error instead of freezing silently.

@@ -187,6 +187,23 @@ export class FigureAnimator {
       const bone = b['scarf' + (i + 1)];
       if (bone) bone.quaternion.setFromEuler(_e.set(-this.scarf[i] * 1.2, 0, Math.sin(this.time * 5 + i) * 0.06 * (1 + Math.abs(v.x) * 0.1)));
     }
+    // the oversize coat: hem panels and sleeve drapes trail on damped springs, lower
+    // segments lagging the upper ones, so the cloth flows behind a run and settles after
+    if (!this.coat) {
+      this.coat = [];
+      for (const n of ['coatBackL1', 'coatBackL2', 'coatBackR1', 'coatBackR2', 'coatSideL1', 'coatSideR1', 'sleeveL1', 'sleeveR1']) {
+        const o = b[n];
+        if (o) this.coat.push({ o, rest: o.quaternion.clone(), x: 0, vx: 0, z: 0, vz: 0, lag: /2$/.test(n) ? 1.6 : 1, side: /L/.test(n) ? 1 : -1, sleeve: /sleeve/.test(n), ph: this.coat.length * 1.3 });
+      }
+    }
+    for (const c of this.coat) {
+      const tx = THREE.MathUtils.clamp(v.z * 0.06 * c.lag - v.y * 0.03, -0.35, 0.9) + Math.sin(this.time * 3 + c.ph) * 0.03;
+      const tz = THREE.MathUtils.clamp(-v.x * 0.05 * c.lag, -0.5, 0.5) * (c.sleeve ? 0.6 : 1);
+      const k = c.lag > 1 ? 34 : 48, d = 6;
+      c.vx += ((tx - c.x) * k - c.vx * d) * dt; c.x += c.vx * dt;
+      c.vz += ((tz - c.z) * k - c.vz * d) * dt; c.z += c.vz * dt;
+      c.o.quaternion.copy(c.rest).multiply(_q.setFromEuler(_e.set(c.x, 0, c.z)));
+    }
     // the apple hovers in front of the face
     if (b.appleFace) {
       b.appleFace.position.copy(this.appleRest);

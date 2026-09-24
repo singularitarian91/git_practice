@@ -6,6 +6,9 @@ import { G, ALL, TUNE, LAYERS, PROPS } from './config.js';
 import { spawnEntity } from './entities.js';
 import { rnd } from './vfx.js';
 import { drawPainting } from './painting.js';
+import { SandField } from './sand.js';
+import { Town } from './town.js';
+import { Sea } from './sea.js';
 
 // ---------------------------------------------------------------- noise
 function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
@@ -37,7 +40,7 @@ export const LOOKS = {
     zenith: '#0e3a3e', mid: '#3d8a7e', horizon: '#ecd999', ground: '#5a4a33', cloud: '#eef6dc', clouds: 0.3, haze: 0.5,
     sunDir: [0.85, 0.11, 0.25], sunColor: '#ffc46f', sunIntensity: 4.3,
     hemiSky: '#8fc6b4', hemiGround: '#8a6a42', hemiIntensity: 0.62,
-    fog: '#d3c890', fogDensity: 0.0048, fogFalloff: 0.05, fogSun: '#ffcf80', fogSunAmt: 0.55,
+    fog: '#d3c890', fogDensity: 0.0048, fogFalloff: 0.05, fogSun: '#ffcf80', fogSunAmt: 0.55, stucco: '#e9b872',
     exposure: 1.0, envIntensity: 0.7, tint: '#fff9ee', saturation: 1.1,
     sand: ['#c9a877', '#b39063', '#d9bc8b'],
   },
@@ -64,6 +67,47 @@ export const LOOKS = {
     hemiSky: '#dbe8f5', hemiGround: '#b8977a', hemiIntensity: 0.9,
     fog: '#f3e6d4', fogDensity: 0.002, fogFalloff: 0, fogSunAmt: 0, exposure: 1.1, envIntensity: 0.8, tint: '#fff8ee', saturation: 0.95,
   },
+};
+
+// ---------------------------------------------------------------- the Soft Desert, as a place
+// A fishing village half-buried in sand (Dali's Port Lligat), in a valley
+// closed by schist cliffs east, west and north, opening south onto the sea.
+// Doors face +Z rotated by rotY. Plots are flattened into the land.
+export const DESERT = {
+  seaY: -1.2,
+  trackX: 52,
+  buildings: [
+    ['B_Workshop', -15, -2, Math.PI / 2],
+    ['B_House', 15.5, -4, -Math.PI / 2],
+    ['B_Loggia', 0, -15.5, 0],
+    ['B_Cottage', -13, 15, Math.PI / 2],
+    ['B_Cottage', 13.5, 16, -Math.PI / 2],
+    ['B_House', 27, 28, -Math.PI / 2 - 0.35],
+    ['B_Chapel', -30, -33, 0.35],
+    ['B_Tower', 31, -37, -0.4],
+    ['B_Station', 42, 6, -Math.PI / 2],
+    ['B_StationPlatform', 47.6, 6, Math.PI / 2],
+    ['B_Boathouse', -19, 41, 0],
+  ],
+  // footprints (w, d) for flattening before the kit is measured
+  // plot sizes to flatten: the kit's real extents (the chapel's tower and apse overhang its nave)
+  sizes: { B_Workshop: [12.6, 9.7], B_House: [9, 14], B_Loggia: [17.5, 7], B_Cottage: [9.5, 9], B_Chapel: [20, 24], B_Tower: [7, 7.2], B_Station: [17, 8.5], B_StationPlatform: [34, 6.5], B_Boathouse: [11, 12] },
+  plaza: [0, 1, 11],
+  cliffs: [
+    // name, x, z, rotY, scale: a ring of headlands; the valley is inside them
+    ['H_Cliff_A', -74, -30, Math.PI / 2, 1.1], ['H_Cliff_B', -70, 22, Math.PI / 2 + 0.2, 1.0], ['H_Cliff_C', -64, 66, Math.PI / 2 + 0.6, 1.1],
+    ['H_Cliff_B', -40, -86, 0.1, 1.2], ['H_Cliff_A', 14, -90, -0.1, 1.2], ['H_Cliff_C', 62, -78, -0.5, 1.1],
+    ['H_Cliff_A', 76, -24, -Math.PI / 2, 1.1], ['H_Cliff_C', 74, 26, -Math.PI / 2 - 0.2, 1.0], ['H_Cliff_B', 66, 70, -Math.PI / 2 - 0.6, 1.1],
+  ],
+};
+
+// Golconda Piazza's palazzi: the same kit in de Chirico's ochre, around the square
+export const PIAZZA = {
+  buildings: [
+    ['B_Chapel', -59, 2, Math.PI / 2], ['B_Tower', 58, 6, -Math.PI / 2],
+    ['B_House', -15, -59, 0], ['B_House', 15, -59, 0], ['B_Loggia', 0, 64, Math.PI],
+    ['B_Workshop', 30, -52, -0.6], ['B_Cottage', -34, 50, Math.PI - 0.7],
+  ],
 };
 
 // ---------------------------------------------------------------- textures
@@ -198,22 +242,73 @@ export class Level {
     this.deco = [];
     this.time = 0;
     this.scrapSpots = [];
+    this.spawnPoints = [];
+  }
+
+  // undisturbed desert land before plots are flattened into it
+  desertBase(x, z) {
+    let h = (fbm(x * 0.04 + 11, z * 0.04 - 7, 4) - 0.5) * 1.2;
+    // drift dunes pile up north of the village, in long wind-combed ridges
+    const north = ss(-20, -62, z);
+    const ridge = Math.sin(z * 0.12 + x * 0.025 + fbm(x * 0.02, z * 0.02) * 4) * 0.5 + 0.5;
+    h += north * (1 - 0.75 * ss(-64, -80, z)) * (2 + ridge * ridge * 6 + fbm(x * 0.03 + 5, z * 0.03, 3) * 6); // thinning out at the cliff foot
+    // sand banks creeping into the streets
+    h += (1 - north) * ss(0.55, 0.85, fbm(x * 0.07 + 3, z * 0.07 + 9, 3)) * 1.6;
+    // a scree apron rises toward the headlands east, west and far north (the kit's cliffs stand on it)
+    const side = Math.max(ss(60, 92, Math.abs(x)), ss(-80, -104, z));
+    h += side * (4 + fbm(x * 0.05, z * 0.05, 3) * 4);
+    // the beach falls away south into the sea
+    const beach = ss(34, 78, z);
+    h = h * (1 - beach) + beach * (-3.2 - ss(78, 115, z) * 6);
+    // beyond the cliffs the land drops into the sea
+    h -= ss(112, 128, Math.hypot(x, z)) * 60;
+    return h;
+  }
+
+  desertHeight(x, z) {
+    if (!this._plots) {
+      // building plots, the plaza and the railway bed, each flattened at the land's height at its centre
+      this._plots = DESERT.buildings.map(([name, px, pz, rotY]) => {
+        const [w, d] = DESERT.sizes[name] || [8, 8];
+        return { x: px, z: pz, hw: w / 2 + 1.2, hd: d / 2 + 1.2, rotY, y: name === 'B_StationPlatform' ? this.desertBase(DESERT.trackX - 10, pz) : this.desertBase(px, pz) + (name === 'B_Tower' ? -1.5 : 0) };
+      });
+      this._plots.push({ x: DESERT.trackX, z: -18, hw: 3, hd: 58, rotY: 0, y: 0.4, soft: 6 });
+      const [px, pz, pr] = DESERT.plaza;
+      this._plots.push({ x: px, z: pz, hw: pr, hd: pr, rotY: 0, y: this.desertBase(px, pz), round: true });
+    }
+    let h = this.desertBase(x, z);
+    for (const P of this._plots) {
+      const dx = x - P.x, dz = z - P.z, c = Math.cos(-P.rotY), s = Math.sin(-P.rotY);
+      const lx = dx * c + dz * s, lz = -dx * s + dz * c;
+      const out = P.round ? Math.hypot(lx, lz) - P.hw : Math.max(Math.abs(lx) - P.hw, Math.abs(lz) - P.hd);
+      if (out > (P.soft || 5)) continue;
+      const w = 1 - ss(0, P.soft || 5, out);
+      h = h + (P.y - h) * w;
+    }
+    return h;
   }
 
   heightAt(x, z) {
     const r = Math.hypot(x, z);
     switch (this.key) {
-      case 'desert': case 'sandbox': {
+      case 'desert': return this.desertHeight(x, z);
+      case 'sandbox': {
         let h = (fbm(x * 0.035 + 11, z * 0.035 - 7, 4) - 0.5) * 1.4;
         const dune = Math.sin(x * 0.045 + fbm(x * 0.01, z * 0.01) * 6) * 0.5 + 0.5;
         h += ss(46, 90, r) * (5 + dune * 9 + fbm(x * 0.02, z * 0.02) * 8);
         h -= ss(108, 125, r) * 60;
-        if (this.key === 'sandbox') h *= 0.2 + 0.8 * ss(54, 70, r); // flat floor that rises smoothly into the dunes
+        h *= 0.2 + 0.8 * ss(54, 70, r); // flat floor that rises smoothly into the dunes
         return h;
       }
       case 'piazza': {
         let h = r < 64 ? 0 : (r - 64) * 0.15 + (fbm(x * 0.04, z * 0.04) - 0.5) * 2;
         h -= ss(100, 118, r) * 60;
+        for (const [name, px, pz, rotY] of PIAZZA.buildings) {
+          const [w, d] = DESERT.sizes[name] || [8, 8];
+          const dx = x - px, dz = z - pz, c = Math.cos(-rotY), sn = Math.sin(-rotY);
+          const out = Math.max(Math.abs(dx * c + dz * sn) - w / 2 - 1, Math.abs(-dx * sn + dz * c) - d / 2 - 1);
+          if (out < 5) h *= ss(0, 5, out);
+        }
         return h;
       }
       case 'boss': {
@@ -225,27 +320,20 @@ export class Level {
     }
   }
 
+  // the sand's colour at a point (vertex colours for the static terrain and the sand field)
+  sandColor(x, z, out = new THREE.Color()) {
+    const pal = this._pal || (this._pal = (LOOKS[this.key].sand || ['#c9a36a', '#b88a55', '#d8b27a']).map((c) => new THREE.Color(c)));
+    const n = fbm(x * 0.06, z * 0.06, 3);
+    return out.copy(pal[0]).lerp(pal[1], ss(0.35, 0.7, n)).lerp(pal[2], ss(0.6, 0.9, fbm(x * 0.2 + 3, z * 0.2, 2)) * 0.5);
+  }
+
   buildTerrain() {
     const game = this.game;
-    const size = 260, seg = 170;
-    const geo = new THREE.PlaneGeometry(size, size, seg, seg);
-    geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position;
-    const cols = new Float32Array(pos.count * 3);
-    const look = LOOKS[this.key];
-    const pal = (look.sand || ['#c9a36a', '#b88a55', '#d8b27a']).map((c) => new THREE.Color(c));
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      const y = this.heightAt(x, z);
-      pos.setY(i, y);
-      const n = fbm(x * 0.06, z * 0.06, 3);
-      const c = pal[0].clone().lerp(pal[1], ss(0.35, 0.7, n)).lerp(pal[2], ss(0.6, 0.9, fbm(x * 0.2 + 3, z * 0.2, 2)) * 0.5);
-      cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-    geo.computeVertexNormals();
+    const sandy = this.key === 'desert' || this.key === 'sandbox';
+    // sand.js continues this plane's ripple UVs; on sand layers it only carries the far dunes, so it can be coarser
+    const size = this.terrainSize = 260, seg = sandy ? 116 : 170;
     let mat;
-    if (this.key === 'piazza' || this.key === 'boss') {
+    if (!sandy) {
       const map = pavingTextures();
       map.repeat.set(size / 8, size / 8);
       mat = new THREE.MeshStandardMaterial({ map, vertexColors: true, roughness: 0.82, metalness: 0 });
@@ -255,7 +343,25 @@ export class Level {
       nm.repeat.set(size / 11, size / 11);
       mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0, normalMap: nm, normalScale: new THREE.Vector2(0.5, 0.5) });
       fadeNormalWithDistance(mat);
+      // the living sand: a deformable field over the play area; the static terrain
+      // below it only carries the far dunes and sinks out of the way inside its square
+      this.sandMat = mat;
+      this.sand = new SandField(game, this, this.sandOpts || { size: 150, cell: 0.4, center: new THREE.Vector3() });
     }
+    const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position;
+    const cols = new Float32Array(pos.count * 3);
+    const c = new THREE.Color();
+    const inset = (x, z) => this.sand && this.sand.active && this.sand.contains(x, z) && this.sand.contains(x + Math.sign(x - this.sand.center.x) * 2, z + Math.sign(z - this.sand.center.z) * 2);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      pos.setY(i, this.heightAt(x, z) - (inset(x, z) ? 4 : 0));
+      this.sandColor(x, z, c);
+      cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     this.group.add(mesh);
@@ -455,6 +561,11 @@ export class Level {
   // ------------------------------------------------------------ builders
   // clouds take a little of the layer's light into themselves instead of reading as grey lumps
   dressTemplates(look) {
+    const tint = new THREE.Color(look.stucco || '#ffffff');
+    for (const [name, tpl] of this.game.assets.templates) {
+      if (!/^(B_|T_|TP_)/.test(name)) continue;
+      tpl.traverse((m) => { if (m.isMesh && /^TX_(stucco|plaster)/.test(m.material.name)) m.material.color.copy(tint); });
+    }
     const t = this.game.assets.templates.get('Cloud');
     if (t) t.traverse((m) => {
       if (m.isMesh && m.material.name === 'Cloud') {
@@ -469,6 +580,11 @@ export class Level {
     const game = this.game;
     game.render.setLook(LOOKS[this.key]);
     this.dressTemplates(LOOKS[this.key]);
+    // the living sand covers the valley floor, not the cliff slopes or the sea bed
+    // grid density follows the graphics setting; fine prints come from the imprint texture either way
+    const q = game.render.qualityName, cell = q === 'low' ? 0.58 : q === 'medium' ? 0.48 : 0.4;
+    if (this.key === 'desert') this.sandOpts = { size: 124, cell, center: new THREE.Vector3(0, 0, -6) };
+    if (this.key === 'sandbox') this.sandOpts = { size: 150, cell: Math.max(cell, 0.46), center: new THREE.Vector3() };
     this.buildTerrain();
     this.skyDressing();
     const R = this.rng;
@@ -479,33 +595,121 @@ export class Level {
   }
 
   buildDesert(R) {
-    this.spawn = new THREE.Vector3(0, this.heightAt(0, -34) + 0.5, -34);
+    const game = this.game, T = this.town = new Town(this);
+    // the player comes over the north dunes and looks down on the roofs and the sea
+    this.spawn = new THREE.Vector3(0, this.heightAt(0, -48) + 0.6, -48);
     this.spawnYaw = 0;
-    const pieces = [this.clockGrove, this.ruins, this.floatingStairs, this.bedroomOutdoors, this.anvilGarden, this.ruins];
-    const slots = 6;
-    const off = R() * 6.28;
-    for (let i = 0; i < slots; i++) {
-      const a = off + (i / slots) * Math.PI * 2;
-      const d = 20 + R() * 10;
-      pieces[i].call(this, Math.cos(a) * d, Math.sin(a) * d, a + Math.PI / 2);
+    this.bound = 104;
+    this.sea = new Sea(this, { y: DESERT.seaY });
+    // buildings
+    for (const [name, x, z, rotY] of DESERT.buildings) T.place(name, x, z, rotY);
+    // headlands close the valley; a far ridge and islets finish the horizon
+    for (const [name, x, z, rotY, sc] of DESERT.cliffs) this.cliff(name, x, z, rotY, sc);
+    if (game.assets.has('H_Ridge')) for (const [x, z, r] of [[-60, -230, 0.1], [150, -160, -0.8], [-170, -120, 0.9]]) T.place('H_Ridge', x, z, r, { y: -2, lock: false, slots: false });
+    if (game.assets.has('H_Islet')) for (const [x, z, r, sc] of [[-38, 118, 0.4, 1], [52, 150, 2.1, 1.6], [-110, 170, 1, 2.2]]) T.place('H_Islet', x, z, r, { y: DESERT.seaY - 1.5, lock: false, slots: false, scale: sc });
+    // the plaza: a well, lamps, benches, a frame to hang
+    const P = (name, x, z, rotY = 0, o = {}) => (game.assets.has(name) ? T.place(name, x, z, rotY, o) : null); // street props lock the sand under them too
+    P('T_Well', -4, 5);
+    for (const [x, z] of [[-8, -8], [8, -9], [-8, 10], [9, 10], [-3, 26], [6, 36], [30, 2], [-26, 6]]) P('T_Lamp', x, z, Math.atan2(-x, -z));
+    P('T_Bench', 5, 7, -2.4); P('T_Bench', -6, -6, 0.8);
+    for (const [x, z, r] of [[-5, -18, 0.2], [4, -18.5, 1.1], [7, -17, 0.4], [-8, -13, 2]]) P(['T_Crate', 'T_Barrel', 'T_Amphora', 'T_Crate'][Math.floor(R() * 4)], x, z, r);
+    P('T_Cart', 6, -10, 0.7); P('T_Amphora', -10, 8, 0); P('T_Barrel', 10, -12, 0);
+    this.put('Frame', 3, -5, { rotY: 0.2 });
+    // lanes: garden walls, cypresses by the chapel, olives in the yards, eggs on the roofs
+    for (const [x, z, r] of [[-22, 8, 0], [-22, 20, 0], [21, 8, 0], [22, 20, 0], [-7, 22, Math.PI / 2], [7, 23, Math.PI / 2], [36, 20, 0.4], [-28, 30, 1.1]]) P('T_GardenWall', x, z, r);
+    for (const [x, z] of [[-40, -22], [-37, -44], [-20, -42], [-44, -30]]) P('T_Cypress', x, z, R() * 6);
+    for (const [x, z] of [[-24, 18], [22, 12], [34, 36], [-4, 30]]) P('T_Olive', x, z, R() * 6);
+    game.physics.world.updateSceneQueries?.(); // so rays see the roofs just built
+    for (const r of T.rects) {
+      if (!/House|Workshop/.test(r.name) || R() >= 0.7) continue;
+      const ex = r.x + Math.cos(r.rotY) * (r.hw - 1), ez = r.z - Math.sin(r.rotY) * (r.hw - 1);
+      P('T_Egg', ex, ez, R() * 6, { y: this.groundY(ex, ez) }); // on whatever roof is there: terrace, parapet or tiles
     }
-    // a long sweeping rail through the middle of the dunes
-    const pts = [];
-    for (let i = 0; i < 7; i++) {
-      const a = off + 0.5 + i * 0.42;
-      const d = 42 + Math.sin(i * 1.3) * 4;
-      const x = Math.cos(a) * d, z = Math.sin(a) * d;
-      pts.push(new THREE.Vector3(x, this.heightAt(x, z) + 2.2 + Math.sin(i * 0.9) * 1.6, z));
+    // the village gate, where the dunes come down into the streets
+    P('T_Gate', 0, -27, 0);
+    // the beach: boats hauled up and half-buried, the melting clocks on their dead trees
+    P('T_Boat', 5, 52, 0.7); P('T_Boat', -34, 50, 2.4, { y: this.heightAt(-34, 50) - 0.5 }); P('T_Boat', 28, 49, -0.4);
+    this.clockGrove(8, 45, 0.3);
+    this.bedroomOutdoors(-40, 20, 0.9);
+    // the dream is still a dream: stairs floating up toward the tower, anvils on the dunes
+    this.floatingStairs(18, -24, -0.6);
+    this.anvilGarden(-6, -44, 0.4);
+    // a railway from a tunnel in the north cliff, past the station, into the sea
+    this.railway();
+    // grind lines: across the plaza from roof to roof, and along the dune crest
+    const roof = (name) => T.rects.find((r) => r.name === name);
+    const w = roof('B_Workshop'), h = roof('B_House');
+    if (w && h) this.addRail([new THREE.Vector3(w.x + 3, w.top + 0.9, w.z), new THREE.Vector3(-2, Math.max(w.top, h.top) + 1.6, -3), new THREE.Vector3(h.x - 3, h.top + 0.9, h.z)]);
+    const crest = [];
+    for (let i = 0; i < 7; i++) { const x = -34 + i * 11, z = -52 + Math.sin(i * 0.9) * 5; crest.push(new THREE.Vector3(x, this.heightAt(x, z) + 2.4, z)); }
+    this.addRail(crest);
+    // rocks at the foot of the cliffs and along the shore
+    for (let i = 0; i < 14; i++) {
+      const side = i % 2 ? 1 : -1, z = -60 + R() * 110, x = side * (46 + R() * 10);
+      const e = this.put(['Rock_A', 'Rock_B', 'Rock_C'][i % 3], x, z, { rotY: R() * 6.28, dy: -0.3 });
+      e.immutable = true;
     }
-    this.addRail(pts);
-    this.scatterRocks(16, 48, 85);
-    this.decoration('Train', new THREE.Vector3(60, this.heightAt(60, 95), 95), -0.4, 1.4);
-    this.door = this.makeDoor(new THREE.Vector3(0, 0, 44), Math.PI);
-    for (const s of [this.stairsTop, this.ruinsTop, this.gardenTop]) if (s) this.scrapSpots.push(s);
+    // the way out: a door standing in the shallows
+    this.door = this.makeDoor(new THREE.Vector3(0, 0, 55), Math.PI);
+    // lore: prefer the kit's hidden spots, then the set pieces
+    const spots = [...this.scrapSpots];
+    const tower = roof('B_Tower');
+    if (tower) spots.push(new THREE.Vector3(tower.x, tower.top + 0.8, tower.z));
+    this.scrapSpots = [...spots, this.stairsTop, this.gardenTop].filter(Boolean).slice(0, 3);
     this.waves = [
       { n: 3, hp: 55 }, { n: 4, hp: 60 }, { n: 5, hp: 65 },
     ];
     this.objectiveName = 'Silence the anxieties';
+  }
+
+  // a headland from the kit; until it exists, a rough stack of stone
+  cliff(name, x, z, rotY, sc = 1) {
+    // stand the headland on the ground at its scree toe, which faces the valley
+    const tx = x + Math.sin(rotY) * 14 * sc, tz = z + Math.cos(rotY) * 14 * sc;
+    const y = Math.min(this.heightAt(tx, tz), this.heightAt(x, z)) - 1.5;
+    if (this.game.assets.has(name)) { this.town.place(name, x, z, rotY, { y, lock: false, slots: false, scale: sc }); return; }
+    const geo = new THREE.BoxGeometry(60 * sc, 34 * sc, 22 * sc, 24, 14, 8);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const vx = p.getX(i), vy = p.getY(i), vz = p.getZ(i);
+      const k = fbm(vx * 0.08 + x, vy * 0.08 + z, 4) - 0.5;
+      p.setXYZ(i, vx + k * 6, vy + Math.sin(vy * 0.6 + vx * 0.05) * 0.8, vz + k * 9 + Math.sin(vy * 0.5) * 1.5);
+    }
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: '#8a6f58', roughness: 0.95, flatShading: true }));
+    m.position.set(x, y + 17 * sc, z); m.rotation.y = rotY;
+    m.castShadow = true; m.receiveShadow = true;
+    this.group.add(m);
+    const body = this.game.physics.fixed({ x, y: y + 17 * sc, z }, new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotY, 0)));
+    this.game.physics.collider(RAPIER.ColliderDesc.cuboid(28 * sc, 17 * sc, 9 * sc), body, G.WORLD, ALL);
+    this.bodies.push(body);
+  }
+
+  // rails and sleepers from the north cliff to the sea; the train never stops
+  railway() {
+    const X = DESERT.trackX, z0 = -80, z1 = 90, n = Math.round((z1 - z0) / 0.9);
+    const sleepers = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.14, 0.24), new THREE.MeshStandardMaterial({ color: '#4a3526', roughness: 0.9 }), n);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion();
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+      const z = z0 + i * 0.9 + (this.rng() - 0.5) * 0.08;
+      const y = this.heightAt(X, z);
+      m.compose(new THREE.Vector3(X, y + 0.05, z), q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), (this.rng() - 0.5) * 0.06), new THREE.Vector3(1, 1, 1));
+      sleepers.setMatrixAt(k++, m);
+    }
+    sleepers.count = k; sleepers.receiveShadow = true; sleepers.castShadow = true;
+    this.group.add(sleepers);
+    const steel = new THREE.MeshStandardMaterial({ color: '#6d665e', metalness: 0.85, roughness: 0.35 });
+    for (const side of [-0.72, 0.72]) {
+      const pts = [];
+      for (let z = z0; z <= z1; z += 3) pts.push(new THREE.Vector3(X + side, this.heightAt(X, z) + 0.2, z));
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 3, 0.06, 5), steel);
+      tube.castShadow = true; tube.receiveShadow = true;
+      this.group.add(tube);
+    }
+    if (this.game.assets.has('T_Gate')) this.town.place('T_Gate', X, -72, 0, { lock: false, scale: 1.5, y: this.heightAt(X, -72) }); // the tunnel mouth
+    this.train = this.decoration('Train', new THREE.Vector3(X, this.heightAt(X, -80), -140), 0, 1.4);
+    this.trainAxis = 'z';
   }
 
   buildPiazza(R) {
@@ -531,6 +735,11 @@ export class Level {
     this.put('Mirror', -4, -6, { rotY: 0.4 });
     this.put('Mirror', 5, -5, { rotY: -0.5 });
     this.put('Frame', 0, -9, { rotY: 0 });
+    // palazzi you can walk into, if the town kit is here
+    if (this.game.assets.has('B_House')) {
+      this.town = new Town(this);
+      for (const [name, x, z, rotY] of PIAZZA.buildings) this.town.place(name, x, z, rotY, { y: 0 });
+    }
     const trainY = this.heightAt(0, 95);
     this.train = this.decoration('Train', new THREE.Vector3(-120, trainY, 92), Math.PI / 2, 1.6);
     this.door = this.makeDoor(new THREE.Vector3(0, 0, 50), Math.PI);
@@ -657,16 +866,24 @@ export class Level {
     const game = this.game;
     const extra = Math.floor(game.lucidity.k * 2.5);
     for (let i = 0; i < w.n + extra; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = 16 + Math.random() * 14;
-      const x = game.player.pos.x + Math.cos(a) * d, z = game.player.pos.z + Math.sin(a) * d;
-      const rr = Math.hypot(x, z);
-      const k = rr > 40 ? 40 / rr : 1;
-      const px = x * k, pz = z * k;
+      let px, pz, py = null;
+      for (let tries = 0; tries < 12; tries++) {
+        const a = Math.random() * Math.PI * 2;
+        const d = 16 + Math.random() * 14;
+        const x = game.player.pos.x + Math.cos(a) * d, z = game.player.pos.z + Math.sin(a) * d;
+        const rr = Math.hypot(x, z);
+        const k = rr > 40 ? 40 / rr : 1;
+        px = x * k; pz = z * k;
+        const sp = this.spawnPoints.length && Math.random() < 0.2 ? this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)] : null;
+        if (sp && sp.distanceTo(game.player.pos) > 10) { px = sp.x; pz = sp.z; py = sp.y; break; }
+        if (this.town?.inside(px, pz, 1)) continue;
+        if (this.sea && this.heightAt(px, pz) < this.sea.y + 0.2) continue;
+        break;
+      }
       if (w.rain) {
         game.spawnEnemy(new THREE.Vector3(px, 17 + Math.random() * 6, pz), { falling: true, gravity: 0.12, hp: w.hp, variant: 'golconda' });
       } else {
-        const y = this.groundY(px, pz);
+        const y = py ?? this.groundY(px, pz);
         game.spawnEnemy(new THREE.Vector3(px, y + 0.1, pz), { hp: w.hp });
         game.vfx.dust(new THREE.Vector3(px, y, pz), 1.4);
         game.vfx.ring(new THREE.Vector3(px, y + 0.1, pz), 0.2, 3, 0.8, 0x7ff7ff, 0.8);
@@ -682,6 +899,7 @@ export class Level {
   footprints(dt) {
     const game = this.game, p = game.player;
     if (!p || (this.key !== 'desert' && this.key !== 'sandbox')) return;
+    if (this.sand?.imprints) return; // the sand field presses real footprints
     if (!this.prints) {
       const c = document.createElement('canvas'); c.width = 64; c.height = 128;
       const g = c.getContext('2d');
@@ -757,11 +975,40 @@ export class Level {
     }
   }
 
+  // small props far from the camera stop drawing (and casting shadows): they are a
+  // few pixels at that range, and the dream is full of ten-thousand-triangle clocks
+  cullProps(dt) {
+    this._cullT = (this._cullT || 0) - dt;
+    if (this._cullT > 0) return;
+    this._cullT = 0.25;
+    const cam = this.game.render.camera.position;
+    for (const e of this.game.entities) {
+      if (e.kind === 'enemy' || e.kind === 'boss' || e.dead || !e.obj) continue;
+      const r = e._cullR ?? (e._cullR = e.radius ? e.radius() : 1);
+      const far = 42 + r * 18;
+      const vis = e.obj.position.distanceToSquared(cam) < far * far;
+      if (e.obj.visible !== vis && !e.hollowHidden) e.obj.visible = vis;
+    }
+  }
+
   update(dt) {
     const game = this.game;
     this.time += dt;
+    this.sand?.update(dt);
     for (const d of this.deco) { d.o.rotation.y += d.spin * dt; d.o.position.y += Math.sin(this.time * 0.2 + d.bob) * 0.01; }
-    if (this.train) { this.train.position.x += dt * 6; if (this.train.position.x > 140) this.train.position.x = -140; }
+    if (this.train && this.trainAxis === 'z') {
+      // out of the cliff, past the platform without slowing, and on into the sea
+      const t = this.train; t.position.z += dt * 9;
+      if (t.position.z > 150) t.position.z = -150;
+      t.position.y = this.heightAt(DESERT.trackX, Math.max(-80, Math.min(90, t.position.z))) + 0.1;
+      t.visible = t.position.z > -78;
+    } else if (this.train) { this.train.position.x += dt * 6; if (this.train.position.x > 140) this.train.position.x = -140; }
+    this.town?.update(dt);
+    this.sea?.update(dt);
+    this.cullProps(dt);
+    // the dream lets you wade, not swim
+    const pl = game.player;
+    if (this.sea && pl && !pl.dead && pl.pos.y < this.sea.y - 1.15) { game.vfx.dust(pl.pos.clone().setY(this.sea.y), 1.2, '#dfeef0'); pl.rescue(); }
     this.ambience(dt);
     this.footprints(dt);
     // waves
@@ -794,6 +1041,8 @@ export class Level {
   dispose() {
     const game = this.game;
     if (this.door?.glow) game.render.release(this.door.glow);
+    this.sand?.dispose();
+    for (const [, l] of this.town?.lit || []) game.render.release(l);
     for (const b of this.bodies) game.physics.remove(b);
     game.scene.remove(this.group);
     this.group.traverse((o) => { if (o.isMesh) { o.geometry.dispose?.(); } });
@@ -801,20 +1050,78 @@ export class Level {
 }
 
 // ---------------------------------------------------------------- bedroom
+// UVs in metres for library textures: each face is projected along its own axis
+function boxUV(geo) {
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i)), az = Math.abs(n.getZ(i));
+    if (ax >= ay && ax >= az) uv.setXY(i, p.getZ(i), p.getY(i));
+    else if (ay >= az) uv.setXY(i, p.getX(i), p.getZ(i));
+    else uv.setXY(i, p.getX(i), p.getY(i));
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
+// a faded wool rug: madder field, ochre borders, a lozenge medallion, worn in the middle
+function rugTexture() {
+  const W = 512, H = 336, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#5e2a25'; g.fillRect(0, 0, W, H);
+  const band = (inset, w, col) => { g.strokeStyle = col; g.lineWidth = w; g.strokeRect(inset, inset, W - inset * 2, H - inset * 2); };
+  band(14, 16, '#a2825a'); band(30, 5, '#2c3440'); band(44, 10, '#8f6d47'); band(58, 3, '#c4ad86');
+  g.save(); g.translate(W / 2, H / 2);
+  for (const [s, col] of [[118, '#8f6d47'], [96, '#2c3440'], [70, '#7a3a30'], [40, '#c4ad86'], [16, '#2c3440']]) {
+    g.fillStyle = col; g.beginPath(); g.moveTo(-s * 1.4, 0); g.lineTo(0, -s * 0.8); g.lineTo(s * 1.4, 0); g.lineTo(0, s * 0.8); g.closePath(); g.fill();
+  }
+  g.restore();
+  // hooked motifs in the field corners
+  g.fillStyle = '#a2825a';
+  for (const [x, y] of [[100, 95], [W - 100, 95], [100, H - 95], [W - 100, H - 95]]) { g.beginPath(); g.arc(x, y, 12, 0, Math.PI * 2); g.fill(); }
+  // wear: pale patches and fibre noise
+  const img = g.getImageData(0, 0, W, H), d = img.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * 4, dx = (x - W * 0.45) / W, dy = (y - H * 0.55) / H;
+    const wear = Math.exp(-(dx * dx + dy * dy) * 7) * 0.32 + (vnoise(x / 23, y / 23) - 0.5) * 0.2 + (hash(x * 0.37, y * 0.61) - 0.5) * 0.14 + (hash(Math.floor(x / 3), y) - 0.5) * 0.1;
+    const lum = (d[i] + d[i + 1] + d[i + 2]) / 3;
+    for (let k = 0; k < 3; k++) d[i + k] = Math.max(0, Math.min(255, (d[i + k] * 0.8 + lum * 0.2) * (1 + wear * 0.5) + wear * 34));
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+
 // The waking vignette: the dreamer's room, which fills in with each memory.
 export function buildBedroom(game, memories, opts = {}) {
   const g = new THREE.Group();
   const A = game.assets;
-  const wallMat = new THREE.MeshStandardMaterial({ color: '#e9dcc6', roughness: 0.92 });
-  const floorMat = new THREE.MeshStandardMaterial({ color: '#8a6446', roughness: 0.7 });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), floorMat); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; g.add(floor);
-  const back = new THREE.Mesh(new THREE.BoxGeometry(8, 3.4, 0.2), wallMat); back.position.set(0, 1.7, 2.6); back.receiveShadow = true; g.add(back);
-  const side = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.4, 8), wallMat); side.position.set(-3.2, 1.7, 0); side.receiveShadow = true; side.castShadow = true; g.add(side);
-  // window in the right wall: two panels leaving a gap for the sunlight
-  const r1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.4, 3), wallMat); r1.position.set(3.2, 1.7, 1.2); r1.castShadow = true; g.add(r1);
-  const r2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.4, 3), wallMat); r2.position.set(3.2, 1.7, -3.1); r2.castShadow = true; g.add(r2);
-  const r3 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.0, 1.6), wallMat); r3.position.set(3.2, 0.5, -0.95); r3.castShadow = true; g.add(r3);
-  const r4 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.8, 1.6), wallMat); r4.position.set(3.2, 3.0, -0.95); r4.castShadow = true; g.add(r4);
+  // lime plaster walls, oak boards, painted trim: the same baked materials as the village
+  const wallMat = A.libMaterial('plaster', { color: '#fff6ea' });
+  const floorMat = A.libMaterial('oak', { color: new THREE.Color(1.7, 1.6, 1.5) });
+  const trimMat = new THREE.MeshStandardMaterial({ color: '#efe7da', roughness: 0.55 });
+  const box = (mat, sx, sy, sz, x, y, z, shadow = true) => {
+    const m = new THREE.Mesh(boxUV(new THREE.BoxGeometry(sx, sy, sz).translate(x, y, z)), mat);
+    m.castShadow = shadow; m.receiveShadow = true; g.add(m); return m;
+  };
+  const floor = new THREE.Mesh(boxUV(new THREE.PlaneGeometry(8, 8).rotateX(-Math.PI / 2)), floorMat); floor.receiveShadow = true; g.add(floor);
+  box(wallMat, 8, 3.4, 0.2, 0, 1.7, 2.6, false); // back
+  box(wallMat, 0.2, 3.4, 8, -3.2, 1.7, 0);       // left
+  // the right wall has a window in it; the sun comes through the mullions onto the boards
+  box(wallMat, 0.2, 3.4, 3, 3.2, 1.7, 1.2); box(wallMat, 0.2, 3.4, 3, 3.2, 1.7, -3.1);
+  box(wallMat, 0.2, 1.0, 1.6, 3.2, 0.5, -0.95); box(wallMat, 0.2, 0.8, 1.6, 3.2, 3.0, -0.95);
+  const wz0 = -1.6, wz1 = -0.3, wy0 = 1.0, wy1 = 2.6, wzc = (wz0 + wz1) / 2;
+  box(trimMat, 0.26, wy1 - wy0, 0.07, 3.16, (wy0 + wy1) / 2, wz0 + 0.035); box(trimMat, 0.26, wy1 - wy0, 0.07, 3.16, (wy0 + wy1) / 2, wz1 - 0.035); // jambs
+  box(trimMat, 0.26, 0.07, wz1 - wz0, 3.16, wy1 - 0.035, wzc);                            // head
+  box(trimMat, 0.36, 0.05, wz1 - wz0 + 0.22, 3.08, wy0 - 0.005, wzc);                     // sill, proud of the wall
+  box(trimMat, 0.06, wy1 - wy0, 0.045, 3.2, (wy0 + wy1) / 2, wzc);                        // mullion
+  box(trimMat, 0.06, 0.045, wz1 - wz0, 3.2, wy0 + (wy1 - wy0) * 0.62, wzc);               // transom
+  // skirting boards
+  box(trimMat, 6.2, 0.13, 0.025, 0, 0.065, 2.4875, false);
+  box(trimMat, 0.025, 0.13, 6.5, -3.0875, 0.065, -0.75, false);
+  box(trimMat, 0.025, 0.13, 2.8, 3.0875, 0.065, 1.1, false); box(trimMat, 0.025, 0.13, 2.4, 3.0875, 0.065, -2.8, false);
+  // a worn rug by the bed
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 1.5).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: rugTexture(), roughness: 1 }));
+  rug.position.set(-0.6, 0.006, -0.35); rug.rotation.y = 0.06; rug.receiveShadow = true; g.add(rug);
   const add = (name, x, y, z, ry = 0, s = 1) => {
     const o = A.clone(name, { uniqueMaterials: false });
     o.position.set(x, y, z); o.rotation.y = ry; o.scale.setScalar(s);

@@ -17,6 +17,11 @@ Rig conventions (important for the game code):
     X = character's left, Y = up, Z = forward (character faces +Z in three.js).
   * Rotations in figure_anims.py are therefore written as (pitch X, yaw Y, roll Z)
     in those axes.
+  * The Figment wears an oversize Magritte overcoat cut like a haori over pleated
+    hakama. The hanging coat panels and sleeve drapes ride their own chain bones
+    (coatSide*/coatBack*/sleeve*): not keyed, hanging along local -Y from the bone
+    head; +X swings a panel backward, +Z swings the left panels outward (-Z the
+    right). The game drives them with springs; pose_cloth() mimics it for previews.
 """
 import bpy, bmesh, math, os, sys, random
 from mathutils import Vector, Matrix, Euler, Quaternion, noise
@@ -71,7 +76,9 @@ mat('WoodDark', '#5a3520', rough=0.45)
 mat('Brass', '#d6a84e', metal=1.0, rough=0.28)
 mat('Felt', '#16171b', rough=0.92)
 mat('Ribbon', '#2b1d24', rough=0.6)
-mat('Scarf', '#b3262b', rough=0.85)
+mat('TieRed', '#b3262b', rough=0.72)          # the red tie, and the scarf-tail that streams from the collar
+mat('SuitCloth', '#2e3647', rough=0.9)         # Magritte's overcoat, cut like a haori; hakama beneath
+mat('ShirtCloth', '#ebe6da', rough=0.82)
 mat('Apple', '#7cbc3a', rough=0.32, coat=0.4)
 mat('Leaf', '#3f7f26', rough=0.6)
 mat('Stem', '#4a321d', rough=0.7)
@@ -89,10 +96,12 @@ mat('Steel', '#c9ced6', metal=1.0, rough=0.18)
 # parented to one bone.
 # --------------------------------------------------------------------------
 class Part:
-    def __init__(self, name, bone):
+    def __init__(self, name, bone, tint=(1, 1, 1), axis=None):
         self.name, self.bone = name, bone
         self.bm = bmesh.new()
         self.mats = []
+        self.tint = tint    # vertex-colour tint for cloth
+        self.axis = axis    # (x, y) of the vertical axis the cloth wraps: faces pointing at it are the lining
 
     def slot(self, mname):
         if mname not in self.mats:
@@ -114,9 +123,9 @@ class Part:
 PARTS = {}
 
 
-def part(name, bone):
+def part(name, bone, tint=(1, 1, 1), axis=None):
     if name not in PARTS:
-        PARTS[name] = Part(name, bone)
+        PARTS[name] = Part(name, bone, tint, axis)
     return PARTS[name]
 
 
@@ -225,6 +234,67 @@ def torus(p, center, R, r, m, axis=(0, 0, 1), segs=28, rsegs=10, arc=2 * math.pi
     p.merge(bm, m, smooth)
 
 
+def clamp(x, a=0.0, b=1.0):
+    return a if x < a else b if x > b else x
+
+
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def ss(e0, e1, x):
+    t = clamp((x - e0) / (e1 - e0))
+    return t * t * (3 - 2 * t)
+
+
+def keys(table, z):
+    """Linear interpolation in a table of (z, a, b, ...) rows (any z order); returns (a, b, ...)."""
+    rows = sorted(table)
+    if z <= rows[0][0]:
+        return rows[0][1:]
+    if z >= rows[-1][0]:
+        return rows[-1][1:]
+    for r0, r1 in zip(rows, rows[1:]):
+        if r0[0] <= z <= r1[0]:
+            t = (z - r0[0]) / (r1[0] - r0[0])
+            return tuple(lerp(a, b, t) for a, b in zip(r0[1:], r1[1:]))
+
+
+def sheet(p, fn, nu, nv, m, thick=0.01, closed=False, out=None, smooth=True):
+    """Cloth panel: fn(u, v) -> point for u, v in 0..1 (u around, v down). The surface is the
+    outside of the cloth; it is given `thick`ness inward (hems and edges read as real fabric).
+    out(point) -> a vector pointing away from the body, used to orient the faces."""
+    bm = bmesh.new()
+    cols = nu if closed else nu + 1
+    grid = [[bm.verts.new(fn(i / nu, j / nv)) for i in range(cols)] for j in range(nv + 1)]
+    for j in range(nv):
+        for i in range(nu):
+            a, b = grid[j][i], grid[j][(i + 1) % cols]
+            c, d = grid[j + 1][(i + 1) % cols], grid[j + 1][i]
+            if len({a, b, c, d}) == 4:
+                bm.faces.new((a, b, c, d))
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.normal_update()
+    if out is not None:
+        vote = sum(f.normal.dot(out(f.calc_center_median())) * f.calc_area() for f in bm.faces)
+        if vote < 0:
+            bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    if thick:
+        bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=thick)
+    p.merge(bm, m, smooth)
+
+
+def radial(cx, cy):
+    return lambda c: Vector((c.x - cx, c.y - cy, 0.0))
+
+
+def pleat(ph, n, amp):
+    """Knife pleats: a sawtooth around the tube (sharp fold, then the pressed face)."""
+    f = (n * ph / (2 * math.pi)) % 1.0
+    return amp * f
+
+
 # --------------------------------------------------------------------------
 # Skeleton definition (name, parent, head position in Blender coords)
 # Character faces -Y in Blender (= +Z in three.js). Left side is +X.
@@ -259,9 +329,19 @@ BONES = [
     ('thighR', 'hips', (-0.1, 0, 0.93)),
     ('shinR', 'thighR', (-0.1, 0, 0.52)),
     ('footR', 'shinR', (-0.1, 0, 0.1)),
-    ('scarf1', 'chest', (0.02, 0.085, 1.49)),
-    ('scarf2', 'scarf1', (0.025, 0.1, 1.35)),
-    ('scarf3', 'scarf2', (0.03, 0.11, 1.21)),
+    # the scarf tail rises out of the coat collar at the nape and lies on the coat's back
+    ('scarf1', 'chest', (0.02, 0.105, 1.56)),
+    ('scarf2', 'scarf1', (0.03, 0.188, 1.38)),
+    ('scarf3', 'scarf2', (0.035, 0.198, 1.22)),
+    # cloth chains: hanging coat panels + kimono sleeve drapes (swung procedurally in game)
+    ('coatSideL1', 'hips', (0.2, -0.01, 0.995)),
+    ('coatSideR1', 'hips', (-0.2, -0.01, 0.995)),
+    ('coatBackL1', 'hips', (0.085, 0.15, 0.995)),
+    ('coatBackL2', 'coatBackL1', (0.1, 0.215, 0.66)),
+    ('coatBackR1', 'hips', (-0.085, 0.15, 0.995)),
+    ('coatBackR2', 'coatBackR1', (-0.1, 0.215, 0.66)),
+    ('sleeveL1', 'forearmL', (0.205, 0.07, 1.175)),
+    ('sleeveR1', 'forearmR', (-0.205, 0.07, 1.175)),
     ('gun', 'handR', tuple(G(0, 0, 0))),
     ('gunHammer', 'gun', tuple(G(0, 0.03, 0.095))),
     ('gunCylinder', 'gun', tuple(G(0, -0.062, 0.072))),
@@ -291,9 +371,6 @@ ellipsoid(ch, (0, 0.01, 1.365), (0.185, 0.12, 0.155), 'Wood', 28, 16)
 ellipsoid(ch, (0, -0.02, 1.38), (0.15, 0.1, 0.12), 'Wood', 24, 14)
 for sx in (0.205, -0.205):
     ellipsoid(ch, (sx, 0, 1.45), (0.055, 0.055, 0.055), 'Brass', 18, 12)
-torus(ch, (0, 0.008, 1.5), 0.072, 0.03, 'Scarf', axis=(0, 0.12, 1), segs=24, rsegs=10)
-# scarf knot at front
-ellipsoid(ch, (0.03, -0.075, 1.47), (0.035, 0.025, 0.035), 'Scarf', 12, 8)
 # neck
 nk = part('Fig_Neck', 'neck')
 capsule(nk, (0, 0, 1.5), (0, 0, 1.62), 0.042, 0.038, 'Wood', 16, 0.0)
@@ -340,14 +417,237 @@ for side, sx in (('L', 0.1), ('R', -0.1)):
     ellipsoid(ft, (sx, -0.045, 0.045), (0.05, 0.115, 0.045), 'Wood', 20, 12)
     box(ft, (sx, -0.045, 0.006), (0.09, 0.22, 0.012), 'WoodDark', 0.004)
 
-# scarf tail: three ribbon segments that trail behind (animated procedurally in game)
-for i, (b, a, z0, z1) in enumerate((('scarf1', 0.085, 1.49, 1.35), ('scarf2', 0.1, 1.35, 1.21), ('scarf3', 0.11, 1.21, 1.06))):
+# --------------------------------------------------------------------------
+# The suit: Magritte's overcoat, oversized and cut like a haori over wide
+# pleated hakama. White shirt, red tie; the red scarf-tail still streams
+# from the collar. Cloth is rigid too, so it is split across the bones that
+# move it: the coat body rides chest/spine, sleeves ride the arm bones, the
+# hakama legs ride thighs/shins, and the long hanging panels and sleeve
+# drapes get their own chain bones (coat*/sleeve*) that the game swings
+# with damped springs, like the scarf.
+# --------------------------------------------------------------------------
+TAU = 2 * math.pi
+HAKAMA = (0.68, 0.69, 0.72)     # tint: the hakama read a shade darker/greyer than the coat
+SASH = (0.5, 0.5, 0.54)
+BODY = radial(0, 0)
+
+# coat body cross-sections: (z, rx, ry, cy)  (outer surface, before lapel/fold offsets)
+COAT = [(1.565, 0.068, 0.066, 0.018), (1.53, 0.086, 0.083, 0.016), (1.505, 0.16, 0.116, 0.012),
+        (1.47, 0.235, 0.136, 0.008), (1.43, 0.245, 0.15, 0.005), (1.36, 0.228, 0.158, 0.0),
+        (1.28, 0.212, 0.158, 0.0), (1.2, 0.202, 0.156, 0.0), (1.1, 0.197, 0.153, 0.0),
+        (1.0, 0.2, 0.153, 0.0), (0.95, 0.204, 0.155, 0.0)]
+# front edge angle from the centre line: the kimono-style wrap crosses (left over right) at the waist
+EDGE = [(1.565, 0.95), (1.53, 0.8), (1.49, 0.56), (1.4, 0.33), (1.3, 0.14), (1.23, -0.05),
+        (1.15, -0.28), (1.03, -0.26), (0.95, 0.12)]
+
+
+def coat_pt(u, z, hem=False):
+    e = keys(EDGE, z)[0]
+    ph = e + u * (TAU - 2 * e)
+    rx, ry, cy = keys(COAT, z)
+    d_edge = min(ph - e, (TAU - e) - ph)
+    off = 0.007 * (1 - ss(0.1, 0.2, d_edge))                     # the collar band (eri) down both fronts
+    off += 0.014 * (1 - ss(0.35, 0.8, ph - e))                   # left panel laps over the right
+    off += 0.008 * ss(1.5, 1.53, z)                              # standing collar all round
+    back = max(0.0, -math.cos(ph))
+    off += 0.006 * math.sin(7 * ph + 0.6) * ss(1.44, 1.22, z) * back   # drape folds down the back
+    off += 0.004 * math.sin(3 * ph) * ss(1.44, 1.3, z)                 # soft sag under the arms
+    off += 0.0035 * math.sin(z * 120 + ph * 2) * ss(1.26, 1.18, z) * (1 - ss(1.0, 0.97, z))  # bunching at the waist
+    if hem:
+        off += 0.004 * ss(0.975, 0.955, z)
+    return Vector(((rx + off) * math.sin(ph), cy - (ry + off) * math.cos(ph), z))
+
+
+# coat body on chest (collar to under the sash) and on spine (sash to the hip line)
+ct = part('Fig_Coat', 'chest', axis=(0, 0))
+sheet(ct, lambda u, v: coat_pt(u, lerp(1.565, 1.14, v)), 56, 18, 'SuitCloth', 0.01, out=BODY)
+cw = part('Fig_CoatWaist', 'spine', axis=(0, 0))
+sheet(cw, lambda u, v: coat_pt(u, lerp(1.2, 0.955, v), hem=True), 48, 6, 'SuitCloth', 0.01, out=BODY)
+# sash (obi) over the seam, with a flat knot at the back
+sa = part('Fig_Sash', 'spine', tint=SASH, axis=(0, 0))
+
+
+def sash_pt(u, v):
+    ph = u * TAU
+    z = lerp(1.205, 1.085, v)
+    rx, ry, cy = keys(COAT, z)
+    o = 0.017 + 0.003 * math.sin(v * math.pi) + 0.0015 * math.sin(ph * 9)
+    return Vector(((rx + o) * math.sin(ph), cy - (ry + o) * math.cos(ph), z))
+
+
+sheet(sa, sash_pt, 40, 3, 'SuitCloth', 0.008, closed=True, out=BODY)
+ellipsoid(sa, (-0.07, 0.18, 1.148), (0.055, 0.022, 0.042), 'SuitCloth', 16, 10)
+for k, (x0, x1) in enumerate(((-0.085, -0.1), (-0.055, -0.045))):
+    sheet(sa, lambda u, v, x0=x0, x1=x1, k=k: Vector((lerp(x0, x1, v) + (u - 0.5) * 0.045, 0.19 + 0.006 * v + 0.004 * math.sin(u * 6),
+                                                    lerp(1.14, 1.03 - 0.02 * k, v))), 4, 4, 'SuitCloth', 0.006, out=lambda c: Vector((0, 1, 0)))
+
+
+# hanging coat panels (skirt), split haori-style at the sides and centre back
+def skirt_pt(ph, z, u, inner=0.0, zt=0.995, zb=0.335):
+    t = clamp((zt - z) / (zt - zb))
+    te = t ** 0.85
+    rx, ry = 0.19 + 0.11 * te, 0.145 + 0.125 * te
+    off = (0.003 + 0.016 * t) * math.sin(15 * ph + 1.3 * math.sin(3 * ph))   # gravity folds, wider toward the hem
+    off += 0.004 * ss(0.94, 1.0, t)                                           # turned hem
+    off += 0.006 * (1 - ss(0.0, 0.12, min(u, 1 - u))) * t                     # slit edges curl out a little
+    off += inner
+    return Vector(((rx + off) * math.sin(ph), -(ry + off) * math.cos(ph), z))
+
+
+for side, sg in (('L', 1), ('R', -1)):
+    def mir(ph, sg=sg):
+        return ph if sg > 0 else TAU - ph
+    sd = part('Fig_CoatSide' + side, 'coatSide%s1' % side, axis=(0, 0))
+    sheet(sd, lambda u, v, mir=mir: skirt_pt(mir(lerp(0.95, 2.12, u)), lerp(0.995, 0.335, v), u), 20, 16, 'SuitCloth', 0.01, out=BODY)
+    lap = 0.004 if sg > 0 else 0.0     # left back panel laps over the right at the centre-back slit
+    b1 = part('Fig_CoatBack%s1' % side, 'coatBack%s1' % side, axis=(0, 0))
+    sheet(b1, lambda u, v, mir=mir, lap=lap: skirt_pt(mir(lerp(2.02, math.pi + 0.04, u)), lerp(0.995, 0.64, v), u, 0.005 + lap),
+          18, 8, 'SuitCloth', 0.01, out=BODY)
+    b2 = part('Fig_CoatBack%s2' % side, 'coatBack%s2' % side, axis=(0, 0))
+    sheet(b2, lambda u, v, mir=mir, lap=lap: skirt_pt(mir(lerp(2.02, math.pi + 0.04, u)), lerp(0.685, 0.335, v), u,
+                                                      0.005 + lap - 0.007 * (1 - ss(0.0, 0.25, v))),
+          18, 9, 'SuitCloth', 0.01, out=BODY)
+
+# hakama: pleated waist on the hips, wide pleated legs on thighs + shins
+HW = [(1.07, 0.178, 0.13), (1.0, 0.19, 0.138), (0.92, 0.208, 0.15), (0.845, 0.226, 0.16)]
+
+
+def pleat_w(ph):
+    return max(0.0, -math.cos(ph)) ** 0.5 + 0.6 * max(0.0, math.cos(ph)) ** 0.5
+
+
+def hwaist_pt(u, v):
+    ph = u * TAU
+    z = lerp(1.07, 0.845, v)
+    rx, ry = keys(HW, z)
+    d = pleat(ph, 16, 0.008) * pleat_w(ph) * ss(1.02, 0.95, z)
+    return Vector(((rx + d) * math.sin(ph), -(ry + d) * math.cos(ph), z))
+
+
+hk = part('Fig_HakamaWaist', 'hips', tint=HAKAMA, axis=(0, 0))
+sheet(hk, hwaist_pt, 48, 6, 'SuitCloth', 0.01, closed=True, out=BODY)
+HL = [(0.98, 0.09, 0.112), (0.85, 0.1, 0.124), (0.7, 0.11, 0.135), (0.55, 0.12, 0.145),
+      (0.4, 0.128, 0.153), (0.25, 0.136, 0.16), (0.115, 0.143, 0.166)]
+
+
+def hleg_pt(cx, u, z, inner=0.0, hem=False):
+    ph = u * TAU
+    rx, ry = keys(HL, z)
+    d = pleat(ph, 16, 0.008) * pleat_w(ph) + inner
+    d += 0.004 * noise.noise(Vector((cx * 7, math.sin(ph) * 1.5, z * 5)))     # the cloth never hangs perfectly
+    if hem:
+        d += 0.004 * ss(0.14, 0.115, z)
+    return Vector((cx + (rx + d) * math.sin(ph), -(ry + d) * math.cos(ph), z))
+
+
+for side, sx in (('L', 0.118), ('R', -0.118)):
+    th = part('Fig_HakamaThigh' + side, 'thigh' + side, tint=HAKAMA, axis=(sx, 0))
+    sheet(th, lambda u, v, sx=sx: hleg_pt(sx, u, lerp(0.98, 0.455, v), 0.004 * ss(0.6, 0.455, lerp(0.98, 0.455, v))),
+          48, 9, 'SuitCloth', 0.009, closed=True, out=radial(sx, 0))
+    sh = part('Fig_HakamaShin' + side, 'shin' + side, tint=HAKAMA, axis=(sx, 0))
+    sheet(sh, lambda u, v, sx=sx: hleg_pt(sx, u, lerp(0.565, 0.115, v), -0.006 * (1 - ss(0.0, 0.3, v)), hem=True),
+          48, 10, 'SuitCloth', 0.01, closed=True, out=radial(sx, 0))
+
+# sleeves: wide upper sleeve with a soft cap over the shoulder, a square kimono sleeve on the
+# forearm (short on the gun arm), and the hanging sleeve bag (tamoto) on its own bone
+US = [(1.525, 0.01, 0.01), (1.515, 0.045, 0.05), (1.495, 0.068, 0.078), (1.465, 0.083, 0.094), (1.4, 0.09, 0.1),
+      (1.3, 0.093, 0.106), (1.2, 0.098, 0.113), (1.135, 0.101, 0.118)]
+FS = [(1.215, 0.084, 0.1), (1.16, 0.093, 0.112), (1.08, 0.099, 0.12), (1.0, 0.101, 0.123)]
+for side, sx, sg in (('L', 0.205, 1), ('R', -0.205, -1)):
+    cx = sx + sg * 0.01
+
+    def us_pt(u, v, cx=cx, sg=sg):
+        ph = u * TAU
+        z = lerp(1.525, 1.135, v)
+        rx, ry = keys(US, z)
+        cx -= sg * 0.035 * ss(1.44, 1.525, z)             # the cap leans in to continue the shoulder line
+        o = 0.004 * math.sin(5 * ph + 1) * ss(1.45, 1.3, z) + 0.005 * math.sin(z * 95) * ss(1.26, 1.16, z)
+        return Vector((cx + (rx + o) * math.sin(ph), 0.005 - (ry + o) * math.cos(ph), z))
+    ua = part('Fig_SleeveUpper' + side, 'upperarm' + side, axis=(cx, 0.005))
+    sheet(ua, us_pt, 24, 12, 'SuitCloth', 0.009, closed=True, out=radial(cx, 0.005))
+
+    cuff = 1.0 if sg > 0 else 1.075    # the gun hand's sleeve stops well above the wrist
+    fcx = sx + sg * 0.006
+
+    def fs_pt(u, v, fcx=fcx, cuff=cuff):
+        ph = u * TAU
+        z = lerp(1.215, cuff, v)
+        rx, ry = keys(FS, z)
+        o = 0.004 * math.sin(4 * ph + 2 + z * 30) + 0.005 * ss(0.85, 1.0, v)
+        return Vector((fcx + (rx + o) * math.sin(ph), 0.02 - (ry + o) * math.cos(ph), z))
+    fa = part('Fig_SleeveFore' + side, 'forearm' + side, axis=(fcx, 0.02))
+    sheet(fa, fs_pt, 28, 8, 'SuitCloth', 0.009, closed=True, out=radial(fcx, 0.02))
+
+    bottom = 0.88 if sg > 0 else 0.985
+
+    def bag_pt(u, v, sx=sx, bottom=bottom):
+        ph = u * TAU
+        z = lerp(1.175, bottom, v)
+        y0 = lerp(0.03, 0.05, v)
+        y1 = lerp(0.11, 0.185, ss(0.0, 0.45, v)) - 0.075 * ss(0.62, 1.0, v) ** 1.6    # rounded back-bottom corner
+        hx = 0.034 * (1 - 0.85 * ss(0.8, 1.0, v))
+        k = (1 - math.cos(ph)) / 2                                                   # 0 at front edge, 1 at back
+        hx *= 1 + 0.18 * math.sin(k * 3 * math.pi + v * 2)                          # soft vertical folds
+        return Vector((sx + hx * math.sin(ph), lerp(y0, y1, k), z))
+    bg = part('Fig_SleeveDrape' + side, 'sleeve%s1' % side, axis=(sx, 0.1))
+    sheet(bg, bag_pt, 20, 10, 'SuitCloth', 0.006, closed=True, out=radial(sx, 0.1))
+
+# shirt front, collar and red tie in the V of the coat
+SH = [(1.52, 0.066), (1.49, 0.09), (1.45, 0.109), (1.4, 0.127), (1.3, 0.131), (1.19, 0.131)]
+sr = part('Fig_Shirt', 'chest')
+sheet(sr, lambda u, v: (lambda z, ph: Vector((0.16 * math.sin(ph), -keys(SH, z)[0] * math.cos(ph), z)))(lerp(1.52, 1.19, v), lerp(-0.8, 0.8, u)),
+      12, 10, 'ShirtCloth', 0.004, out=lambda c: Vector((0, -1, 0)))
+sheet(sr, lambda u, v: (lambda ph, z, r: Vector((r * math.sin(ph), 0.005 - r * math.cos(ph), z)))(u * TAU, lerp(1.545, 1.49, v), lerp(0.05, 0.056, v)),
+      24, 3, 'ShirtCloth', 0.004, closed=True, out=radial(0, 0.005))
+for sg in (1, -1):   # collar points
+    A, B = Vector((sg * 0.006, -0.057, 1.51)), Vector((sg * 0.042, -0.048, 1.515))
+    D, C = Vector((sg * 0.016, -0.092, 1.462)), Vector((sg * 0.055, -0.083, 1.458))
+    sheet(sr, lambda u, v, A=A, B=B, C=C, D=D: (A.lerp(B, u)).lerp(D.lerp(C, u), v) + Vector((0, -0.006 * math.sin(math.pi * v), 0)),
+          3, 3, 'ShirtCloth', 0.004, out=lambda c: Vector((0, -1, 0.3)))
+ti = part('Fig_Tie', 'chest')
+ellipsoid(ti, (0, -0.068, 1.483), (0.02, 0.016, 0.023), 'TieRed', 14, 8)
+
+
+def tie_pt(u, v):
+    z = lerp(1.468, 1.235, v)
+    w = 0.02 + 0.021 * v
+    x = (u - 0.5) * 2 * w
+    z -= 0.03 * (1 - abs(u - 0.5) * 2) * v ** 10       # pointed tip
+    y = -keys(SH, z)[0] - 0.009 - 0.004 * math.sin(v * math.pi) - 0.004 * (1 - abs(u - 0.5) * 2)
+    return Vector((x, y, z))
+
+
+sheet(ti, tie_pt, 4, 10, 'TieRed', 0.006, out=lambda c: Vector((0, -1, 0)))
+# haori himo: a cream cord knot where the coat crosses
+hm = part('Fig_Himo', 'chest')
+ellipsoid(hm, (0.0, -0.19, 1.232), (0.019, 0.012, 0.014), 'ShirtCloth', 12, 8)
+for sg in (1, -1):
+    cylinder(hm, (sg * 0.006, -0.19, 1.225), (sg * 0.02, -0.192, 1.17), 0.004, 'ShirtCloth', 6)
+    ellipsoid(hm, (sg * 0.021, -0.192, 1.162), (0.008, 0.008, 0.014), 'ShirtCloth', 8, 6)
+
+
+# scarf tail: three red ribbon segments rising out of the collar (animated procedurally in game)
+def ribbon(p, a, b, w0, w1, bow, m, twist=0.0):
+    a, b = Vector(a), Vector(b)
+
+    def f(u, v):
+        c = a.lerp(b, v) + Vector((0, bow * math.sin(math.pi * v), 0))
+        tw = twist * v
+        return c + Vector((math.cos(tw), math.sin(tw) * 0.4, 0)) * ((u - 0.5) * lerp(w0, w1, v))
+    sheet(p, f, 3, 6, m, 0.008, out=lambda c: Vector((0, 1, 0)))
+
+
+SCARF = [('scarf1', (0.02, 0.105, 1.575), (0.03, 0.188, 1.37), 0.066, 0.068, 0.016, 0.1),
+         ('scarf2', (0.03, 0.188, 1.39), (0.035, 0.198, 1.21), 0.068, 0.062, 0.006, 0.12),
+         ('scarf3', (0.035, 0.198, 1.23), (0.04, 0.204, 1.06), 0.062, 0.056, 0.005, -0.1)]
+for i, (b, a, e, w0, w1, bow, tw) in enumerate(SCARF):
     sp = part('Fig_Scarf%d' % (i + 1), b)
-    w = 0.075 - i * 0.008
-    box(sp, (0.02 + i * 0.005, a + 0.008, (z0 + z1) / 2), (w, 0.018, (z0 - z1) + 0.02), 'Scarf', 0.007, segs=2)
+    ribbon(sp, a, e, w0, w1, bow, 'TieRed', tw)
     if i == 2:
         for k in range(4):  # frayed end tassels
-            cylinder(sp, (0.0 + k * 0.018 - 0.01 + 0.035, a + 0.008, z1 + 0.01), (0.0 + k * 0.018 - 0.01 + 0.035, a + 0.01, z1 - 0.035), 0.004, 'Scarf', 6)
+            x = e[0] - 0.024 + k * 0.016
+            cylinder(sp, (x, e[1], e[2] + 0.01), (x + 0.002, e[1] + 0.003, e[2] - 0.035), 0.004, 'TieRed', 6)
+
 
 # --------------------------------------------------------------------------
 # The Juxtaposition Gun (modelled in gun-local space, see G())
@@ -454,12 +754,44 @@ ellipsoid(vial, gl((0, -0.035, 0.19)), (0.008 * S, 0.008 * S, 0.008 * S), 'Brass
 
 
 # --------------------------------------------------------------------------
-# Vertex colours: subtle wood grain + fake AO on the wooden parts
+# Vertex colours: subtle wood grain + fake AO on the wooden parts; on the cloth
+# a faint weave, darker fold valleys, and a darker lining on the inside faces
 # --------------------------------------------------------------------------
-def add_vcols(me, part_obj_mats):
+CLOTH = {'SuitCloth', 'ShirtCloth', 'TieRed'}
+
+
+def cloth_shade(me):
+    """Per-vertex fold shading: concave (valley) vertices darken, ridges catch a little light."""
+    n = len(me.vertices)
+    acc = [Vector() for _ in range(n)]
+    cnt = [0] * n
+    elen = [0.0] * n
+    for e in me.edges:
+        a, b = e.vertices
+        ca, cb = me.vertices[a].co, me.vertices[b].co
+        acc[a] += cb; acc[b] += ca
+        cnt[a] += 1; cnt[b] += 1
+        L = (ca - cb).length
+        elen[a] += L; elen[b] += L
+    out = [1.0] * n
+    for i, v in enumerate(me.vertices):
+        if not cnt[i]:
+            continue
+        lap = acc[i] / cnt[i] - v.co
+        conc = lap.dot(v.normal) / max(1e-5, elen[i] / cnt[i])
+        out[i] = clamp(1.0 - 1.6 * conc, 0.62, 1.1)
+    return out
+
+
+def add_vcols(me, part_obj_mats, p=None):
     attr = me.color_attributes.new('Col', 'BYTE_COLOR', 'CORNER')
+    fold = cloth_shade(me) if any(m in CLOTH for m in part_obj_mats) else None
     for poly in me.polygons:
         mname = part_obj_mats[poly.material_index] if poly.material_index < len(part_obj_mats) else ''
+        lining = False
+        if mname in CLOTH and p is not None and p.axis is not None:
+            c = poly.center
+            lining = poly.normal.dot(Vector((c.x - p.axis[0], c.y - p.axis[1], 0))) < -0.2 * Vector((c.x - p.axis[0], c.y - p.axis[1], 0)).length
         for li in poly.loop_indices:
             v = me.vertices[me.loops[li].vertex_index]
             if mname == 'Wood':
@@ -469,6 +801,13 @@ def add_vcols(me, part_obj_mats):
                 k = 0.9 + 0.08 * g + n
                 ao = 0.85 + 0.15 * max(0.0, min(1.0, v.normal.z * 0.5 + 0.6))
                 c = (k * ao, k * ao * 0.98, k * ao * 0.95, 1)
+            elif mname in CLOTH:
+                co = v.co
+                weave = 1.0 + 0.045 * noise.noise(co * 90) + 0.035 * noise.noise(co * 8)
+                k = weave * fold[v.index] * (0.5 if lining else 1.0)
+                k *= 0.9 + 0.1 * clamp(v.normal.z * 0.5 + 0.7)     # undersides a touch darker
+                t = p.tint if p is not None else (1, 1, 1)
+                c = (clamp(k * t[0]), clamp(k * t[1]), clamp(k * t[2]), 1)
             else:
                 c = (1, 1, 1, 1)
             attr.data[li].color = c
@@ -500,7 +839,7 @@ for p in PARTS.values():
     p.bm.free()
     for mname in p.mats:
         me.materials.append(MATS[mname])
-    add_vcols(me, p.mats)
+    add_vcols(me, p.mats, p)
     ob = bpy.data.objects.new(p.name, me)
     scene.collection.objects.link(ob)
     bpy.context.view_layer.update()
@@ -527,7 +866,42 @@ arm.rotation_mode = 'XYZ'
 for pb in arm.pose.bones:
     pb.rotation_mode = 'QUATERNION'
 
-KEYED = [n for n, _, _ in BONES if n not in FA.PROCEDURAL_BONES]
+# cloth chain bones are not keyed: the game swings them procedurally (see pose_cloth)
+CLOTH_BONES = ['coatSideL1', 'coatSideR1', 'coatBackL1', 'coatBackL2', 'coatBackR1', 'coatBackR2', 'sleeveL1', 'sleeveR1']
+KEYED = [n for n, _, _ in BONES if n not in FA.PROCEDURAL_BONES and n not in CLOTH_BONES]
+CLOTH_PREVIEW = [False]   # turned on after the clips are baked, so previews show the cloth hanging
+
+
+def _q(rx, ry=0.0, rz=0.0):
+    return Euler((math.radians(rx), math.radians(ry), math.radians(rz)), 'XYZ').to_quaternion()
+
+
+def pose_cloth(pose):
+    """Preview stand-in for the game's cloth springs. Same rules the game should use:
+    gravity-compensate each panel toward the character's vertical, then swing it back
+    (+X) by max(speed trail, thigh back-swing) and out (Z) by the thigh's abduction."""
+    bpy.context.view_layer.update()
+    lean = pose.get('spine', (0, 0, 0))[0]
+    low = pose.get('hips@loc', (0, 0, 0))[1] < -0.3
+    trail = 70.0 if low else clamp(lean * 1.4, 0.0, 35.0)
+    R0 = arm.data.bones['hips'].matrix_local.to_quaternion()
+    for n in CLOTH_BONES:
+        pb = arm.pose.bones[n]
+        if n.endswith('2'):          # second link: a little extra curl on top of its parent
+            pb.rotation_quaternion = _q(0.3 * trail + 4)
+            continue
+        side = 'L' if 'L' in n[-2:] else 'R'
+        sg = 1 if side == 'L' else -1
+        thx, _, thz = pose.get('thigh' + side, (0, 0, 0))
+        if n.startswith('sleeve'):
+            qs, k = _q(0), 0.35
+        elif n.startswith('coatBack'):
+            qs, k = _q(max(trail, 0.85 * max(0.0, thx)) + 3), 1.0
+        else:
+            qs, k = _q(0.7 * trail, 0, sg * (4 + max(0.0, sg * thz))), 1.0
+        qp = pb.parent.matrix.to_quaternion()
+        qg = qp.inverted() @ R0 @ qs
+        pb.rotation_quaternion = qs.slerp(qg, k)
 
 
 def apply_pose(pose):
@@ -536,6 +910,8 @@ def apply_pose(pose):
         rx, ry, rz = pose.get(n, FA.DEFAULTS.get(n, (0, 0, 0)))
         pb.rotation_quaternion = Euler((math.radians(rx), math.radians(ry), math.radians(rz)), 'XYZ').to_quaternion()
         pb.location = pose.get(n + '@loc', (0, 0, 0))
+    if CLOTH_PREVIEW[0]:
+        pose_cloth(pose)
 
 
 def bake_clip(name, fn, frames, loop):
@@ -573,6 +949,7 @@ for name, (fn, seconds, loop) in FA.CLIPS.items():
     bake_clip(name, fn, frames, loop)
     print('clip', name, frames, 'frames')
 
+CLOTH_PREVIEW[0] = True
 # rest pose for export
 for pb in arm.pose.bones:
     pb.rotation_quaternion = (1, 0, 0, 0)
@@ -609,6 +986,96 @@ bpy.ops.export_scene.gltf(
     export_rest_position_armature=True, export_skins=True,
 )
 print('exported', OUT, os.path.getsize(OUT) // 1024, 'KB')
+
+
+def strip_channels(path, names):
+    """Drop the exporter's constant rest-pose channels for bones the game drives itself (the cloth
+    chains), then compact the binary chunk. Keeps the file well under budget."""
+    import json, struct
+    d = open(path, 'rb').read()
+    jl = struct.unpack('<I', d[12:16])[0]
+    j = json.loads(d[20:20 + jl])
+    bin_ = d[20 + jl + 8:]
+    drop = {i for i, n in enumerate(j['nodes']) if n.get('name') in names}
+    for an in j['animations']:
+        keep = [c for c in an['channels'] if c['target'].get('node') not in drop]
+        used = sorted({c['sampler'] for c in keep})
+        remap = {o: i for i, o in enumerate(used)}
+        an['samplers'] = [an['samplers'][i] for i in used]
+        for c in keep:
+            c['sampler'] = remap[c['sampler']]
+        an['channels'] = keep
+    # which accessors are still referenced anywhere?
+    refs = set()
+
+    def walk(o, key=None):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in ('indices', 'input', 'output', 'inverseBindMatrices') and isinstance(v, int):
+                    refs.add(v)
+                elif k == 'attributes':
+                    refs.update(v.values())
+                else:
+                    walk(v, k)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v, key)
+    walk({k: v for k, v in j.items() if k not in ('accessors', 'bufferViews', 'buffers')})
+    acc_map, accs = {}, []
+    for i, a in enumerate(j['accessors']):
+        if i in refs:
+            acc_map[i] = len(accs)
+            accs.append(a)
+    views_used = sorted({a['bufferView'] for a in accs if 'bufferView' in a} |
+                        {img['bufferView'] for img in j.get('images', []) if 'bufferView' in img})
+    out, view_map, views = bytearray(), {}, []
+    for vi in views_used:
+        v = dict(j['bufferViews'][vi])
+        chunk = bin_[v.get('byteOffset', 0):v.get('byteOffset', 0) + v['byteLength']]
+        while len(out) % 4:
+            out.append(0)
+        v['byteOffset'] = len(out)
+        out += chunk
+        view_map[vi] = len(views)
+        views.append(v)
+    for a in accs:
+        if 'bufferView' in a:
+            a['bufferView'] = view_map[a['bufferView']]
+    for img in j.get('images', []):
+        if 'bufferView' in img:
+            img['bufferView'] = view_map[img['bufferView']]
+    j['accessors'], j['bufferViews'] = accs, views
+    while len(out) % 4:
+        out.append(0)
+    j['buffers'] = [{'byteLength': len(out)}]
+
+    def fix(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in ('indices', 'input', 'output', 'inverseBindMatrices') and isinstance(v, int):
+                    o[k] = acc_map[v]
+                elif k == 'attributes':
+                    for kk in v:
+                        v[kk] = acc_map[v[kk]]
+                else:
+                    fix(v)
+        elif isinstance(o, list):
+            for v in o:
+                fix(v)
+    for k in j:
+        if k not in ('accessors', 'bufferViews', 'buffers'):
+            fix(j[k])
+    js = json.dumps(j, separators=(',', ':')).encode()
+    js += b' ' * ((4 - len(js) % 4) % 4)
+    total = 12 + 8 + len(js) + 8 + len(out)
+    with open(path, 'wb') as f:
+        f.write(struct.pack('<III', 0x46546C67, 2, total))
+        f.write(struct.pack('<II', len(js), 0x4E4F534A) + js)
+        f.write(struct.pack('<II', len(out), 0x004E4942) + bytes(out))
+
+
+strip_channels(OUT, set(CLOTH_BONES))
+print('stripped cloth channels ->', os.path.getsize(OUT) // 1024, 'KB')
 
 # --------------------------------------------------------------------------
 # Character sheet (optional): hero portrait, turnaround, moveset, gun

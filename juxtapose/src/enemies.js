@@ -230,8 +230,18 @@ export class Sleepwalker extends Entity {
       if (want.lengthSq() > 0) want.normalize();
       // steer around walls
       if (want.lengthSq() > 0) {
-        const ahead = game.physics.ray({ x: t.x, y: t.y + 0.9, z: t.z }, { x: want.x, y: 0, z: want.z }, 1.8, G.WALL | G.WORLD | G.PROP);
-        if (ahead) want.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.strafeDir * 1.2);
+        // three whiskers: straight on, and 40 degrees either side. Slopes (sand, ramps) are not walls.
+        const blocked = (dir, len) => {
+          const h = game.physics.ray({ x: t.x, y: t.y + 0.9, z: t.z }, { x: dir.x, y: 0, z: dir.z }, len, G.WALL | G.WORLD | G.PROP);
+          return h && Math.abs(h.normal.y) < 0.6 ? h : null;
+        };
+        if (blocked(want, 2.2)) {
+          const up = new THREE.Vector3(0, 1, 0);
+          const l = want.clone().applyAxisAngle(up, 0.7), r = want.clone().applyAxisAngle(up, -0.7);
+          const bl = blocked(l, 2.6), br = blocked(r, 2.6);
+          if (!bl && br) this.strafeDir = 1; else if (bl && !br) this.strafeDir = -1;
+          want.applyAxisAngle(up, this.strafeDir * (bl && br ? 1.6 : 0.9));
+        }
       }
       const tx = want.x * speed, tz = want.z * speed;
       const k = Math.min(1, dt * 6);
