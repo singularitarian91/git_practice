@@ -5,6 +5,24 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { DREAM } from './render.js';
 
+// Fetch a .glb; hosts that won't serve binary models get a base64 text copy instead
+async function fetchModel(url) {
+  try {
+    const r = await fetch(url);
+    if (r.ok) {
+      const buf = await r.arrayBuffer();
+      const magic = new Uint8Array(buf, 0, 4);
+      if (magic[0] === 0x67 && magic[1] === 0x6c && magic[2] === 0x54 && magic[3] === 0x46) return buf; // 'glTF'
+    }
+  } catch (e) { /* fall through to the text copy */ }
+  const r2 = await fetch(url + '.b64.txt');
+  if (!r2.ok) throw new Error(`Could not load ${url}`);
+  const bin = atob((await r2.text()).trim());
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
 export class Assets {
   constructor() {
     this.loader = new GLTFLoader();
@@ -15,9 +33,12 @@ export class Assets {
   async load(onProgress) {
     const files = [['props', './assets/props.glb'], ['figure', './assets/figure.glb']];
     let done = 0;
-    const results = await Promise.all(files.map(([k, url]) => new Promise((res, rej) => {
-      this.loader.load(url, (g) => { done++; onProgress && onProgress(done / files.length); res([k, g]); }, undefined, rej);
-    })));
+    const results = await Promise.all(files.map(async ([k, url]) => {
+      const buf = await fetchModel(url);
+      const g = await this.loader.parseAsync(buf, './assets/');
+      done++; onProgress && onProgress(done / files.length);
+      return [k, g];
+    }));
     for (const [k, g] of results) this[k] = g;
     this.figure.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     // index every top-level prop object by name
