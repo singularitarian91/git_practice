@@ -954,6 +954,7 @@ export class SandField {
       const step = Math.min(0.5, this.time - (t.settleT ?? this.time - 0.2));
       t.settleT = this.time;
       world.contactPairsWith(t.col, (other) => { try {
+        if (!other) return; // removed this frame; the narrow phase forgets it at the next step
         const b = other.parent();
         if (!b || !b.isDynamic() || seen.has(b.handle)) return;
         seen.add(b.handle);
@@ -1481,6 +1482,7 @@ export class SandField {
       const m = 1.2, bx0 = cb ? this.x0 + cb[0] * this.cell - m : 1, bx1 = cb ? this.x0 + cb[2] * this.cell + m : 0;
       const bz0 = cb ? this.z0 + cb[1] * this.cell - m : 1, bz1 = cb ? this.z0 + cb[3] * this.cell + m : 0;
       world.contactPairsWith(t.col, (o) => { try {
+        if (!o) return;
         const b = o.parent();
         if (!b || !b.isDynamic()) return;
         const e = this.game.physics.ownerOf(o);

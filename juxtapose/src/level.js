@@ -869,6 +869,34 @@ export class Level {
     this.knots = this.knotSpots.map((k) => new Knot(this, k.def, k.pos));
     this.knots.forEach((k, i) => k.spawnGuards(this.knotSpots[i].hp + this.game.depth * 5, this.knotSpots[i].variant));
     this.knotsNeeded = Math.min(KNOTS_NEEDED, this.knots.length);
+    // patrols: pairs walking loops through the streets between the memories; a lost
+    // patrol is replaced, slowly, from somewhere out of sight
+    const hub = this.key === 'desert' ? new THREE.Vector3(...DESERT.plaza.slice(0, 1), 0, DESERT.plaza[1]) : new THREE.Vector3();
+    // beats run door to door through the plaza: a little short of each memory, never inside a wall
+    const near = (k) => k.pos.clone().lerp(hub, 5 / Math.max(5, k.pos.distanceTo(hub)));
+    const street = (p) => { for (let i = 0; i < 40 && this.town?.inside(p.x, p.z, 1.5); i++) p.lerp(hub, 0.08); return p; };
+    const K = this.knots;
+    const routes = this.key === 'desert' && K.length >= 5
+      ? [[near(K[0]), hub.clone(), near(K[1]), hub.clone().add(new THREE.Vector3(-3, 0, -3)), near(K[2])], [near(K[3]), hub.clone().add(new THREE.Vector3(3, 0, 6)), near(K[4])]]
+      : [[0, 1, 2, 3].map((i) => new THREE.Vector3(Math.cos(i * 1.57 + 0.8) * 33, 0, Math.sin(i * 1.57 + 0.8) * 33)), [0, 1, 2, 3].map((i) => new THREE.Vector3(Math.cos(-i * 1.57 + 2.4) * 16, 0, Math.sin(-i * 1.57 + 2.4) * 16))];
+    for (const r of routes) for (const p of r) { street(p); p.y = this.groundY(p.x, p.z); }
+    this.patrols = routes.map((route) => ({ route, members: [], wait: 0 }));
+    for (const pt of this.patrols) this.spawnPatrol(pt, 0);
+  }
+  spawnPatrol(pt, at) {
+    const hp = 55 + this.game.depth * 5, variant = this.key === 'piazza' ? 'golconda' : undefined;
+    for (let i = 0; i < 2; i++) {
+      const p = pt.route[at].clone().add(new THREE.Vector3(i * 1.4, 0.1, i * 0.8));
+      const e = this.game.spawnEnemy(p.setY(this.groundY(p.x, p.z) + 0.1), { hp, variant, patrol: { route: pt.route, i: Math.min(at + 1, pt.route.length - 1), dir: at + 1 < pt.route.length ? 1 : -1 } });
+      if (e) pt.members.push(e);
+    }
+  }
+  // a wave only when something calls it: a memory taken, a scrap found, a lucid threshold crossed
+  surge(n, msg) {
+    if (this.pendingWave || this.key === 'boss' || this.key === 'sandbox') return;
+    this.game.ui.toast(msg, 'warn');
+    this.pendingWave = { n, hp: 55 + this.game.depth * 5, rain: this.key === 'piazza', msg: this.key === 'piazza' ? 'It begins to rain men.' : 'They surface from the sand.' };
+    this.waveDelay = 2.5;
   }
   get knotsFreed() { return this.knots ? this.knots.filter((k) => k.state === 'taken').length : 0; }
   nextWave() {
@@ -905,7 +933,7 @@ export class Level {
         game.vfx.ring(new THREE.Vector3(px, y + 0.1, pz), 0.2, 3, 0.8, 0x7ff7ff, 0.8);
       }
     }
-    game.ui.toast(w.rain ? 'It begins to rain men.' : 'Anxieties surface from the sand.', 'warn');
+    game.ui.toast(w.msg || (w.rain ? 'It begins to rain men.' : 'Anxieties surface from the sand.'), 'warn');
     game.audio.sfx('bossRoar', { gain: 0.25, pitch: 12 });
   }
 
@@ -1039,6 +1067,16 @@ export class Level {
     else if (this.key === 'sandbox') this.objective = 'Lucid sandbox · infinite charges · B for the spawn menu';
     else if (this.knots) {
       for (const k of this.knots) k.update(dt);
+      for (const pt of this.patrols || []) {
+        if (pt.members.some((e) => !e.dead)) { pt.wait = 0; continue; }
+        pt.wait += dt;
+        if (pt.wait > 45) { // come back from the far end of the route, out of sight
+          const pl = game.player;
+          let at = 0, far = -1;
+          pt.route.forEach((p, i) => { const d = pl ? p.distanceTo(pl.pos) : 0; if (d > far) { far = d; at = i; } });
+          if (far > 22) { pt.members = []; pt.wait = 0; this.spawnPatrol(pt, at); }
+        }
+      }
       const f = this.knotsFreed;
       if (!this.doorOpen && f >= this.knotsNeeded) this.openDoor();
       this.objective = !this.doorOpen ? `${this.objectiveName} · ${f}/${this.knotsNeeded} freed`

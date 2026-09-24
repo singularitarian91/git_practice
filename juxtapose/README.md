@@ -99,6 +99,8 @@ Properties interact through shared channels instead of hand-written pairs, so co
 - **In the desert:** the unfinished clock at the workshop, the Saturday pomegranate at the loggia, the Sunday candle at the chapel, the hat on the rack at the station, and the finch at the boathouse.
 - **In the piazza:** four memories of the city he left for.
 - **Guards:** they idle half-asleep around the knot until you come close, or until one of them is hit. The more lucid the dream, the more come to its defence.
+- **Patrols:** pairs of anxieties walk beats through the streets between the memories, and turn on you when you cross their path. A lost patrol is replaced slowly, from out of sight.
+- **Surges:** waves come only when something provokes them. Taking back the memory that opens the door, picking up a lore scrap, or pushing Lucidity past 50, 75 or 90 each makes the dream send them after you, with a warning first.
 - **Freeing a memory:** silence its guards and walk into it. You get the memory's story back, a whim, and Clarity. Free three and the door opens.
 
 **Clarity** is kept between nights. Every anxiety silenced adds to it, deathblows more, and freed memories and the boss most of all. Each rank is a small permanent perk, from *Stirring* (+10 Figment) to *Self-actualized* (deathblows mend more).

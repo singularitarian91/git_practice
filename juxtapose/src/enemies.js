@@ -51,7 +51,8 @@ export class Sleepwalker extends Entity {
     });
     const body = game.physics.dynamic(pos, null, { linDamp: 0.3, angDamp: 1, gravityScale: opts.gravity ?? 1, ccd: true });
     body.lockRotations(true, true);
-    const col = game.physics.collider(RAPIER.ColliderDesc.capsule(0.55, 0.34).setTranslation(0, 0.95, 0), body, G.ENEMY, ALL, { friction: 0.0, restitution: 0.0, density: 1 });
+    // Min combine: its zero friction wins, or sand and stone grip its feet
+    const col = game.physics.collider(RAPIER.ColliderDesc.capsule(0.55, 0.34).setTranslation(0, 0.95, 0).setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min), body, G.ENEMY, ALL, { friction: 0.0, restitution: 0.0, density: 1 });
     this.attachBody(body, [col]);
     this.localCenter.set(0, 0.95, 0);
     this.extent.set(0.35, 0.95, 0.35);
@@ -68,6 +69,7 @@ export class Sleepwalker extends Entity {
     // a guard idles around the memory it keeps until someone comes for it
     this.guard = opts.guard || null;
     this.dormant = !!this.guard;
+    this.patrol = opts.patrol || null; // { route, i }: a beat through the streets
     this.losT = 0; this.canSee = false;
     this.meleeT = 0;
     this.speedMul = opts.speed || 1;
@@ -206,7 +208,10 @@ export class Sleepwalker extends Entity {
       const d = tgt.clone().sub(eye);
       const L = d.length();
       const hit = game.physics.ray(eye, d.normalize(), L, G.WORLD | G.WALL);
-      this.canSee = !hit && L < 48 && !pl.dead && !pl.self.has('sleeping') && !pl.self.has('hollow');
+      // a patrol notices you at street distance, then keeps after you until you're well away
+      const sight = this.patrol && !this.engaged ? 24 : this.patrol ? 40 : 48;
+      this.canSee = !hit && L < sight && !pl.dead && !pl.self.has('sleeping') && !pl.self.has('hollow');
+      if (this.canSee) this.engaged = true; else if (L > 40) this.engaged = false;
       if (pl.decoys && pl.decoys.length) this.decoy = pl.decoys[Math.floor(Math.random() * pl.decoys.length)];
       else this.decoy = null;
     }
@@ -232,9 +237,16 @@ export class Sleepwalker extends Entity {
         else want.copy(side).addScaledVector(toT, 0.15);
       } else {
         const home = this.dormant ? this.guard.pos : null, span = home ? 4 : 10;
-        if (pos.distanceTo(this.wander) < 2 || Math.random() < dt * 0.1) { const c = home || pos; this.wander.set(c.x + rnd(-span, span), 0, c.z + rnd(-span, span)); }
+        if (this.patrol && !home) {
+          const P = this.patrol, wp = P.route[P.i];
+          if (Math.hypot(wp.x - pos.x, wp.z - pos.z) < 3) { // walk the beat there and back
+            if (P.i + P.dir < 0 || P.i + P.dir >= P.route.length) P.dir = -P.dir;
+            P.i += P.dir;
+          }
+          this.wander.copy(P.route[P.i]);
+        } else if (pos.distanceTo(this.wander) < 2 || Math.random() < dt * 0.1) { const c = home || pos; this.wander.set(c.x + rnd(-span, span), 0, c.z + rnd(-span, span)); }
         want.copy(this.wander).sub(pos).setY(0);
-        speed *= home ? 0.25 : 0.45;
+        speed *= home ? 0.25 : this.patrol ? 0.5 : 0.45;
       }
       if (want.lengthSq() > 0) want.normalize();
       // steer around walls

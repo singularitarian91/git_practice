@@ -348,6 +348,7 @@ export class ScrapPickup {
         game.audio.sfx('lore');
         game.vfx.propertyBurst(this.obj.position, 'multiplying', 1.2);
         game.stats.scraps = (game.stats.scraps || 0) + 1;
+        game.level?.surge(2, 'Something was watching over that scrap.');
       }
     }
   }

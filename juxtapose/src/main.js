@@ -313,6 +313,8 @@ class Game {
   // a memory taken back: a whim to choose, and the door once enough are free
   onKnotFreed(knot) {
     this.stats.memoriesFreed = (this.stats.memoriesFreed || 0) + 1;
+    const lvl = this.level;
+    if (lvl && lvl.knotsFreed === lvl.knotsNeeded) lvl.surge(3 + this.depth, 'The dream notices what you took back. It sends them after you.');
     setTimeout(() => {
       if (this.state !== 'playing' || this.player?.dead || WHIMS.length <= this.run.whims.length) return;
       this.input.exitLock();
@@ -727,7 +729,7 @@ class Game {
     this.layerT = (this.layerT || 0) + dt;
     const L = this.lucidity.value;
     const prev = this._prevLucid || 0;
-    for (const th of [50, 75, 90]) if (prev < th && L >= th && !this.sandbox) n.event('lucid' + th);
+    for (const th of [50, 75, 90]) if (prev < th && L >= th && !this.sandbox) { n.event('lucid' + th); this.level?.surge(th === 50 ? 2 : th === 75 ? 3 : 4, 'The dream grows lucid, and anxious.'); }
     this._prevLucid = L;
     if (this.sandbox) return;
     if (this.depth === 0 && this.layerT > 7 && this.stats.takes === 0) n.event2('hintTake');
