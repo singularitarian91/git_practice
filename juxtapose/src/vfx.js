@@ -145,6 +145,10 @@ export class VFX {
     this.zs = new ParticleLayer(200, textures.z, false, scene);
     this.rings = [];
     this.decals = [];
+    // rings and decals are pooled, never disposed: disposing the last material of a
+    // kind deletes its compiled shader, and the next ring would stall to rebuild it
+    this.ringPool = [];
+    this.decalPool = [];
     this.ringGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
     this.shake = 0;
   }
@@ -158,46 +162,55 @@ export class VFX {
       const s = r.r0 + (r.r1 - r.r0) * (1 - Math.pow(1 - Math.min(k, 1), 3));
       r.mesh.scale.set(s, s, s);
       r.mesh.material.opacity = (1 - k) * r.alpha;
-      if (k >= 1) { this.scene.remove(r.mesh); r.mesh.material.dispose(); this.rings.splice(i, 1); }
+      if (k >= 1) { this.scene.remove(r.mesh); this.ringPool.push(r.mesh); this.rings.splice(i, 1); }
     }
     for (let i = this.decals.length - 1; i >= 0; i--) {
       const d = this.decals[i];
       d.t += dt;
       if (d.t > d.life) {
         d.mesh.material.opacity = Math.max(0, d.alpha * (1 - (d.t - d.life) / 3));
-        if (d.t > d.life + 3) { this.scene.remove(d.mesh); d.mesh.material.dispose(); this.decals.splice(i, 1); }
+        if (d.t > d.life + 3) { this.scene.remove(d.mesh); this.decalPool.push(d.mesh); this.decals.splice(i, 1); }
       }
     }
   }
 
   clear() {
     for (const L of [this.add, this.sparks, this.smoke, this.zs]) L.clear();
-    for (const r of this.rings) this.scene.remove(r.mesh);
-    for (const d of this.decals) this.scene.remove(d.mesh);
+    for (const r of this.rings) { this.scene.remove(r.mesh); this.ringPool.push(r.mesh); }
+    for (const d of this.decals) { this.scene.remove(d.mesh); this.decalPool.push(d.mesh); }
     this.rings = []; this.decals = [];
   }
 
+  ringMesh() {
+    return this.ringPool.pop() || new THREE.Mesh(this.ringGeo, new THREE.MeshBasicMaterial({ map: this.tex.ring, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false }));
+  }
+  decalMesh() {
+    const m = this.decalPool.pop() || new THREE.Mesh(this.ringGeo, new THREE.MeshStandardMaterial({ map: this.tex.ring, transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -4 }));
+    m.receiveShadow = true;
+    return m;
+  }
+
   ring(pos, r0, r1, life, color, alpha = 1, normal = null) {
-    const mat = new THREE.MeshBasicMaterial({ map: this.tex.ring, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: alpha, side: THREE.DoubleSide, toneMapped: false });
-    const m = new THREE.Mesh(this.ringGeo, mat);
+    const m = this.ringMesh();
+    m.material.color.set(color); m.material.opacity = alpha;
     m.position.copy(pos);
-    if (normal) m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+    if (normal) m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal); else m.quaternion.identity();
+    m.scale.setScalar(r0);
     m.renderOrder = 6;
     this.scene.add(m);
     this.rings.push({ mesh: m, t: 0, life, r0, r1, alpha });
   }
 
   decal(pos, normal, size, tex, color = 0xffffff, alpha = 1, life = 30) {
-    const mat = new THREE.MeshStandardMaterial({ map: tex, color, transparent: true, depthWrite: false, opacity: alpha, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -4 });
-    const m = new THREE.Mesh(this.ringGeo, mat);
+    const m = this.decalMesh();
+    m.material.map = tex; m.material.color.set(color); m.material.opacity = alpha;
     m.position.copy(pos).addScaledVector(normal, 0.03);
     m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
     m.rotateY(Math.random() * 6.28);
     m.scale.setScalar(size);
-    m.receiveShadow = true;
     this.scene.add(m);
     this.decals.push({ mesh: m, t: 0, life, alpha });
-    if (this.decals.length > 60) { const d = this.decals.shift(); this.scene.remove(d.mesh); }
+    if (this.decals.length > 60) { const d = this.decals.shift(); this.scene.remove(d.mesh); this.decalPool.push(d.mesh); }
     return m;
   }
 

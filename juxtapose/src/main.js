@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { Renderer, DREAM, suggestQuality } from './render.js';
 import { Physics } from './physics.js';
-import { Assets } from './assets.js';
+import { Assets, makeDreamMaterial } from './assets.js';
 import { Input } from './input.js';
 import { VFX } from './vfx.js';
 import { DreamAudio } from './audio.js';
@@ -95,29 +95,67 @@ class Game {
   }
 
   // ------------------------------------------------------------ robustness
-  // Compile every shader the first shots, hits and kills will need while the layer
-  // fades in, instead of stalling the first time something is hit.
+  // Compile every shader a fight can need before the fight: the first hit, kill,
+  // explosion, ring or melt must not stall while the driver compiles (on Windows
+  // that can take a second). The scene renders into the post chain's target, which
+  // selects different shader variants (no tone mapping, linear output) than the
+  // canvas does, so that target is bound while compiling.
   warmShaders() {
     const r = this.render.renderer;
     if (!r.compileAsync || this.render.contextLost) return;
     const warm = new THREE.Group();
     warm.position.set(0, -400, 0);
+    const pooled = [];
     try {
       warm.add(new THREE.Mesh(this.projectiles.geoRound, this.projectiles.mat('#fff2c8', 5)));
       if (this.projectiles.orbMat) warm.add(new THREE.Mesh(this.projectiles.geoOrb, this.projectiles.orbMat('#7ff7ff')));
-      for (const name of ['Wall_Fractured', 'Column_Fractured', 'Drawers_Fractured', 'TP_Stucco_Fractured', 'Sleepwalker']) {
+      for (const name of ['Wall_Fractured', 'Column_Fractured', 'Drawers_Fractured', 'TP_Stucco_Fractured', 'Sleepwalker', 'Apple']) {
         const t = this.assets.templates.get(name);
         if (t) warm.add(t.clone(true));
       }
+      // rings and decals come from pools that outlive the fight
+      const ring = this.vfx.ringMesh(), decal = this.vfx.decalMesh();
+      pooled.push([this.vfx.ringPool, ring], [this.vfx.decalPool, decal]);
+      warm.add(ring, decal);
+      // what properties turn materials into mid-fight: see-through (hollow), the melting
+      // shader, the hollow wireframe; one of each per distinct material and geometry
+      this.warmKeep = [];
+      const seen = new Set();
+      const variants = (o) => {
+        if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh) return;
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          if (!m || !m.isMeshStandardMaterial || m.userData.dream) continue;
+          const a = o.geometry.attributes;
+          const sig = [m.type, m.vertexColors, !!m.map, !!m.normalMap, !!m.roughnessMap, !!m.emissiveMap, !!m.aoMap, m.side, m.transparent, JSON.stringify(m.defines || {}), !!a.color, !!a.uv, !!a.tangent, o.receiveShadow].join('|');
+          if (seen.has(sig)) continue;
+          seen.add(sig);
+          const see = m.clone(); see.transparent = true; see.depthWrite = false;
+          const melt = m.clone(); makeDreamMaterial(melt, 1, 0);
+          for (const v of [see, melt]) { const w = new THREE.Mesh(o.geometry, v); w.receiveShadow = o.receiveShadow; warm.add(w); this.warmKeep.push(v); }
+        }
+      };
+      for (const e of this.entities) e.obj?.traverse(variants);
+      this.assets.templates.get('Sleepwalker')?.traverse(variants);
+      const wire = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: 0x5effd0, transparent: true, opacity: 0.55 }));
+      warm.add(wire); this.warmKeep.push(wire.material);
+      // the Figment's decoys are see-through skinned copies of it
+      const decoy = this.assets.cloneFigure();
+      decoy.traverse((m) => { if (m.isMesh) { m.material.transparent = true; m.material.opacity = 0.5; } });
+      warm.add(decoy);
       const hud = this.combatHUD.make({ id: '__warm' });
       hud.grp.position.set(0, -400, 0);
       this.scene.add(warm);
       const cleanup = () => {
         this.scene.remove(warm);
+        for (const [pool, m] of pooled) { warm.remove(m); pool.push(m); }
         hud.grp.parent?.remove(hud.grp);
         this.combatHUD.items.delete('__warm');
       };
-      r.compileAsync(this.scene, this.render.camera).then(cleanup, cleanup);
+      const target = r.getRenderTarget();
+      r.setRenderTarget(this.render.composer?.readBuffer || null);
+      const done = r.compileAsync(this.scene, this.render.camera);
+      r.setRenderTarget(target);
+      done.then(cleanup, cleanup);
     } catch (e) { console.warn('shader warm-up skipped', e); this.scene.remove(warm); }
   }
 
