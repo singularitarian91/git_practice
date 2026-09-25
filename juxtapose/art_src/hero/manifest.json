@@ -1,14 +1,93 @@
 {
-  "_readme": "Sources go in src/ (raw image-to-3D GLBs). Build: python3 juxtapose/blender/build_hero.py. Entries whose source is missing are skipped.",
-  "Clock":       { "src": "melting_clock.glb", "tris": 2500, "tex": 1024, "yaw": 0, "fit": "box",    "rough": 0.45, "metal": 0.6 },
-  "Bed":         { "src": "bed.glb",           "tris": 6000, "tex": 1024, "yaw": 0, "fit": "box",    "hide": ["Bed_Pillow"] },
-  "Candle":      { "src": "candle.glb",        "tris": 1200, "tex": 512,  "yaw": 0, "fit": "height" },
-  "Mirror":      { "src": "mirror.glb",        "tris": 3000, "tex": 1024, "yaw": 0, "fit": "box" },
-  "BowlerHat":   { "src": "bowler_hat.glb",    "tris": 1200, "tex": 512,  "yaw": 0, "fit": "box" },
-  "Birdcage":    { "src": "birdcage.glb",      "tris": 3000, "tex": 1024, "yaw": 0, "fit": "height", "metal": 0.8, "rough": 0.35 },
-  "Pomegranate": { "src": "pomegranate.glb",   "tris": 1200, "tex": 512,  "yaw": 0, "fit": "box" },
-  "Anvil":       { "src": "anvil.glb",         "tris": 2000, "tex": 512,  "yaw": 0, "fit": "box",    "metal": 0.9, "rough": 0.5 },
-  "Drawers":     { "src": "drawers.glb",       "tris": 3000, "tex": 1024, "yaw": 0, "fit": "box" },
-  "NightLight":  { "src": "night_light.glb",   "tris": 2000, "tex": 512,  "yaw": 0, "fit": "height" },
-  "Easel":       { "src": "easel.glb",         "tris": 2500, "tex": 1024, "yaw": 0, "fit": "box" }
+ "_readme": "Sources go in src/ (raw image-to-3D GLBs; jobs.json maps each to its Higgsfield job). Concepts in ../concept/. Build: python3 juxtapose/blender/build_hero.py. Entries whose source is missing are skipped.",
+ "Clock": {
+  "src": "melting_clock.glb",
+  "tris": 2500,
+  "tex": 1024,
+  "yaw": 180,
+  "fit": "height",
+  "rough": 0.45,
+  "metal": 0.6,
+  "hide": [
+   "Clock_HandHour",
+   "Clock_HandMinute"
+  ]
+ },
+ "Bed": {
+  "src": "bed.glb",
+  "tris": 6000,
+  "tex": 1024,
+  "yaw": -90,
+  "fit": "box",
+  "hide": [
+   "Bed_Pillow"
+  ]
+ },
+ "Candle": {
+  "src": "candle.glb",
+  "tris": 1200,
+  "tex": 512,
+  "yaw": -90,
+  "fit": "height",
+  "metal": 0.7,
+  "rough": 0.4
+ },
+ "Mirror": {
+  "src": "mirror.glb",
+  "tris": 3000,
+  "tex": 1024,
+  "yaw": -90,
+  "fit": "box",
+  "hide": [
+   "Mirror_Glass"
+  ],
+  "metal": 0.2
+ },
+ "BowlerHat": {
+  "src": "bowler_hat.glb",
+  "tris": 1200,
+  "tex": 512,
+  "yaw": -90,
+  "fit": "box"
+ },
+ "Birdcage": {
+  "src": "birdcage.glb",
+  "tris": 9000,
+  "tex": 1024,
+  "yaw": -90,
+  "fit": "height",
+  "metal": 0.8,
+  "rough": 0.35
+ },
+ "Pomegranate": {
+  "src": "pomegranate.glb",
+  "tris": 1200,
+  "tex": 512,
+  "yaw": -90,
+  "fit": "box"
+ },
+ "Anvil": {
+  "src": "anvil.glb",
+  "tris": 2000,
+  "tex": 512,
+  "yaw": -90,
+  "fit": "box",
+  "metal": 0.9,
+  "rough": 0.5
+ },
+ "Drawers": {
+  "src": "drawers.glb",
+  "tris": 3000,
+  "tex": 1024,
+  "yaw": -90,
+  "fit": "box"
+ },
+ "NightLight": {
+  "src": "night_light.glb",
+  "tris": 2000,
+  "tex": 512,
+  "yaw": -90,
+  "fit": "height",
+  "metal": 0.5
+ }
 }

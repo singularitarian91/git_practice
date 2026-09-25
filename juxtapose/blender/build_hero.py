@@ -281,8 +281,10 @@ def final_material(lo, name, maps, spec):
 def build(name, spec, ref):
     t0 = time.time()
     path = os.path.join(SRC, 'src', spec['src'])
+    # clear the last source away, but keep the finished pieces (tagged 'hero')
     for o in list(bpy.data.objects):
-        bpy.data.objects.remove(o, do_unlink=True)
+        if not o.get('hero'):
+            bpy.data.objects.remove(o, do_unlink=True)
     hi = join_all(import_glb(path))
     raw = tris(hi)
     fit(hi, ref, spec.get('fit', 'height'), spec.get('yaw', 0))
@@ -291,6 +293,14 @@ def build(name, spec, ref):
     size = spec.get('tex', 1024)
     have = source_maps(hi)
     maps = {}
+    # Cycles' diffuse pass is black on metal: bake the base colour with metalness off
+    # (the metal comes back as a constant in the ORM map, per the manifest)
+    for slot in hi.material_slots:
+        m = slot.material
+        bsdf = m and m.use_nodes and next((n for n in m.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        if bsdf:
+            for l in list(bsdf.inputs['Metallic'].links): m.node_tree.links.remove(l)
+            bsdf.inputs['Metallic'].default_value = 0.0
     maps['albedo'] = bake(hi, lo, 'albedo', size, name)
     if spec.get('normal', True):
         maps['normal'] = bake(hi, lo, 'normal', size, name)
@@ -301,6 +311,8 @@ def build(name, spec, ref):
     final_material(lo, name, maps, spec)
     bpy.data.objects.remove(hi, do_unlink=True)
     lo.name = name; lo.data.name = name
+    lo['hero'] = 1
+    lo.hide_render = True  # finished pieces stay out of the next piece's bakes
     lo.location = (0, 0, 0)
     if spec.get('hide'):
         lo['hide'] = ','.join(spec['hide'])

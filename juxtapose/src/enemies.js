@@ -412,7 +412,13 @@ export class Sleepwalker extends Entity {
 
     // ---- procedural animation
     const hs = Math.hypot(v.x, v.z);
+    const ph0 = this.phase;
     this.phase += dt * (1.2 + hs * 1.7);
+    // a wardrobe's weight in every step
+    if (this.variant === 'wardrobe' && hs > 0.6 && Math.floor(ph0 / Math.PI) !== Math.floor(this.phase / Math.PI)) {
+      game.audio.sfx('stomp', { position: pos, gain: 0.8 });
+      if (pl && pl.pos.distanceTo(pos) < 10) game.vfx.shake = Math.min(1, game.vfx.shake + 0.08);
+    }
     const s = Math.sin(this.phase), c = Math.cos(this.phase);
     const amp = Math.min(1, hs / 3);
     this.flinch = Math.max(0, this.flinch - dt * 4);

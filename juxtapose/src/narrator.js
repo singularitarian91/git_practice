@@ -56,6 +56,9 @@ export const LINES = {
   meet_wardrobe: ["The wardrobe. His coats are still in it. It won't open for bullets. It'll open when it's too tired to hold shut."],
   scrapNear: ["Wait. Up there. That glint. That's a piece of the painting.", "Another scrap, close by. I can feel it. It hums.", "There. Follow the motes. I'm pointing, I just don't have hands."],
   dark: ["Dark in here. Stay close, I'll light it.", "Indoors. She never liked the house after dark. I was always on the landing."],
+  tut_take: ["First things first. That clock is soft in the middle. Aim at it and press Q: take its melting. Clocks don't need it, whatever they tell you."],
+  tut_blade: ["Oh. One of her worries has come up the dune to see you. Just the one. F cuts it. And when it winds up to lunge, right mouse, just as it comes: turn it back."],
+  tut_give: ["Now the gate. Someone has walled it up. You have melting. Aim at the wall, press E, and give it something to think about."],
   puzzleSolved: ["There. The dream has its own logic. You just speak it better than she does.", "See? Wrong in exactly the right way.", "She'd have laughed at that. She used to laugh."],
 };
 

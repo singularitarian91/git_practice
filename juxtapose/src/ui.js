@@ -789,7 +789,8 @@ export class UI {
     const b = $('#btn-continue'), cp = this.game.meta.data.checkpoint;
     if (!b) return;
     b.hidden = !cp;
-    if (cp) b.textContent = `Continue the night · ${LAYERS[cp.depth]?.name || ''}`;
+    const n = cp?.progress?.taken?.length || 0;
+    if (cp) b.textContent = `Continue the night · ${LAYERS[cp.depth]?.name || ''}${n ? ` · ${n} ${n === 1 ? 'memory' : 'memories'} back` : ''}`;
   }
 
   // the Clarity tree: four branches, bought from the top down, one point per rank

@@ -84,6 +84,7 @@ export class Lock {
     game.stats.puzzles = (game.stats.puzzles || 0) + 1;
     game.lucidity.gain(4, 'a dream logic');
     game.gainClarity?.(12, this.focus);
+    game.saveProgress?.();
     if (this.hides) knot.hide(false);
     game.narrator?.say('puzzleSolved');
     const p = game.player;
@@ -151,6 +152,8 @@ export function drift(level, knot) {
   // a clock nearby, in case you arrive with no melting left
   const s = c.clone().add(new THREE.Vector3(4.5, 0, 3));
   level.put('Clock', s.x, s.z, { rotY: rnd(0, 6) });
+  // a saved night picks up with this already solved
+  lock.restore = () => { if (!t.dead) t.die({ type: 'melt', silent: true }); };
   return lock;
 }
 
@@ -215,6 +218,8 @@ export function boat(level, knot, { beach, mooring }) {
   lock.tick = t.tick;
   // floating is right there, in the clouds over the beach
   level.put('Cloud', beach.x - 3, beach.z - 5, { y: ground + 3.2 });
+  // a saved night picks up with this already solved
+  lock.restore = () => { state = 'moored'; };
   return lock;
 }
 
@@ -272,6 +277,8 @@ export function train(level, knot, { stopZ }) {
   // an anvil on the platform, for anyone who came without heavy
   const ax = level.trainX - 3.2;
   level.put('Anvil', ax, stopZ + 9, { y: level.groundY(ax, stopZ + 9) });
+  // a saved night picks up with this already solved
+  lock.restore = () => { obj.position.z = stopZ - centre; };
   return lock;
 }
 
@@ -335,6 +342,8 @@ export function bell(level, knot, { at, rotY = 0 }) {
   lock.tick = t.tick;
   const c = at.clone().add(new THREE.Vector3(Math.cos(rotY) * 4, 0, -Math.sin(rotY) * 4));
   level.put('Cloud', c.x, c.z, { y: gy + 2.6 });
+  // a saved night picks up with this already solved
+  lock.restore = () => {};
   return lock;
 }
 
@@ -393,6 +402,8 @@ export function sunEgg(level, knot, { at }) {
       if (burn > 1.8) lock.solve();
     }
   };
+  // a saved night picks up with this already solved
+  lock.restore = () => { t.addProp('reflecting', { quiet: true }); };
   return lock;
 }
 
@@ -426,6 +437,8 @@ export function waxSeal(level, knot, { at, rotY = 0 }) {
   t.damage = (amount, o = {}) => { if (o.type === 'fire' || o.type === 'melt') dmg(amount, o); };
   const c = at.clone().add(new THREE.Vector3(Math.cos(rotY) * 2.5, 0, -Math.sin(rotY) * 2.5));
   level.put('Candle', c.x, c.z, {});
+  // a saved night picks up with this already solved
+  lock.restore = () => { if (!t.dead) t.die({ type: 'fire', silent: true }); };
   return lock;
 }
 
@@ -477,6 +490,8 @@ export function counterweight(level, knot, { at }) {
   // anvils in the square, for the weight
   const a = at.clone().addScaledVector(side, -3).addScaledVector(face, 2);
   level.put('Anvil', a.x, a.z, {});
+  // a saved night picks up with this already solved
+  lock.restore = () => { drop = 1; struck = true; };
   return lock;
 }
 
@@ -532,5 +547,7 @@ export function vitrine(level, knot) {
     }
     if (Math.abs(p.x - c.x) < W + 0.3 && Math.abs(p.z - c.z) < W + 0.3 && p.y < c.y + H + 1.2 && v.y < -4) smash();
   };
+  // a saved night picks up with this already solved
+  lock.restore = () => { broke = true; if (!t.dead) t.die({ type: 'shatter', silent: true }); if (!anvil.dead) anvil.removeProp('floating', { quiet: true }); };
   return lock;
 }

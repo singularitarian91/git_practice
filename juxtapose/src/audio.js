@@ -649,7 +649,26 @@ export class DreamAudio {
   }
 
   setIntensity(v) {
-    this._intTarget = clamp(num(v, 0));
+    // the region you're in sets a floor: the deeper into the dream, the fuller the score
+    this._intTarget = clamp(Math.max(num(v, 0), (this._regionFloor || 0)));
+  }
+
+  /** How hard the current region fights (-1..5): raises the score's resting intensity. */
+  setRegion(tier) {
+    this._regionFloor = clamp(num(tier, 0) * 0.07);
+  }
+
+  /** 0..1: a Hush is near. The score closes down to a murmur and a hiss. */
+  setMuffle(k) {
+    try {
+      if (!this._ready || !this._muffle) return;
+      const m = clamp(num(k, 0));
+      if (Math.abs(m - (this._muf || 0)) < 0.01) return;
+      this._muf = m;
+      const t = this._ctx.currentTime;
+      this._muffle.frequency.setTargetAtTime(20000 * Math.pow(420 / 20000, m), t, 0.25);
+      this._dip.gain.setTargetAtTime(1 - m * 0.45, t, 0.25);
+    } catch (e) { this._warn(e); }
   }
 
   setLucidity(v) {
@@ -957,6 +976,7 @@ export class DreamAudio {
     // Music chain: musicIn → dip → lucidity filter → (dry | comb/flanger) → world → musicSum.
     const musicIn = G(1);
     const dip = G(1);
+    const muffle = F('lowpass', 20000, 0.6); // a Hush nearby: the score heard through a pillow
     const lucFilter = F('lowpass', 18000, 0.7);
     const sweepLfo = ctx.createOscillator();
     sweepLfo.frequency.value = 0.07;
@@ -979,7 +999,8 @@ export class DreamAudio {
     const world = G(1);
 
     musicIn.connect(dip);
-    dip.connect(lucFilter);
+    dip.connect(muffle);
+    muffle.connect(lucFilter);
     lucFilter.connect(dry);
     dry.connect(world);
     lucFilter.connect(flDelay);
@@ -1007,7 +1028,7 @@ export class DreamAudio {
     musicRev.connect(revIn);
 
     Object.assign(this, {
-      _musicIn: musicIn, _dip: dip, _lucFilter: lucFilter, _sweepLfo: sweepLfo, _sweepDepth: sweepDepth,
+      _musicIn: musicIn, _dip: dip, _muffle: muffle, _lucFilter: lucFilter, _sweepLfo: sweepLfo, _sweepDepth: sweepDepth,
       _flDepth: flDepth, _flFb: flFb, _flWet: flWet, _world: world, _stingerBus: stingerBus, _fxBus: fxBus,
       _musicVol: musicVol, _pauseGain: pauseGain, _pauseLP: pauseLP, _musicRev: musicRev,
     });
@@ -2489,6 +2510,19 @@ const SFX = {
     for (let i = 0; i < 4; i++) v.fm(mtof(e._ct(i % 2 ? 4 : 0, 1)), t + i * 0.55, 0.14, 0.002, 1.8, { ratio: 3.01, index: 1.6 });
     v.send(0.45);
     v.keep(t + 4);
+  },
+  region(e, v, t) {
+    // crossing into a new part of the dream: two soft bells, a fifth apart, far off
+    v.fm(mtof(e._ct(0, 1)), t, 0.07, 0.004, 2.2, { ratio: 3.5, index: 1.2 });
+    v.fm(mtof(e._ct(4, 1)), t + 0.35, 0.06, 0.004, 2.6, { ratio: 3.5, index: 1.2 });
+    v.send(0.7);
+    v.keep(t + 3.5);
+  },
+  stomp(e, v, t) {
+    // a wardrobe's footfall: a dull wooden thump, and its hangers rattling inside
+    v.tone('sine', 62, t, 0.5, 0.003, 0.28, { to: 38 });
+    v.noiseHit('brown', t, 0.3, 0.003, 0.18, { type: 'lowpass', f: 500 });
+    for (let i = 0; i < 3; i++) v.tone('triangle', 1900 + i * 340, t + 0.05 + i * 0.03, 0.012, 0.001, 0.12);
   },
   solve(e, v, t) {
     // Something in the dream gives way: a rising arpeggio and a soft thump.

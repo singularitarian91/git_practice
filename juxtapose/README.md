@@ -71,7 +71,7 @@ Choose **Lucid sandbox** on the title screen to test mechanics freely. It has ev
 - **Controls:** mouse and controller look speed, toggle or hold guard, auto-reload, and **difficulty**. *Gentle dream* has them hit softer and fall faster; *Nightmare* is the opposite.
 - **Interface and sound:** HUD scale, subtitle size, Night-Light tips (the story lines always play), and separate master, music and effects volumes.
 
-Everything applies live and has a reset. **Continue the night** appears on the title screen when you leave a run mid-way. It resumes at the start of the layer you reached, with what you carried into it.
+Everything applies live and has a reset. **Continue the night** appears on the title screen when you leave a run mid-way. It picks up where you were: the memories you took back, the puzzles you solved, the veils already parted, and what you were carrying.
 
 **In-fight feedback:**
 - Hit markers distinguish hits, heavy hits, kills, posture breaks and deflects.
@@ -132,6 +132,8 @@ Properties interact through shared channels instead of hand-written pairs, so co
 | Chapel Hill | ✦✦✦✦ off the path, for later | | |
 
 The tier sets how many guards there are, their health, how often they shoot, and whether their lunges can be perilous. In the first region nothing is perilous. The first region's guards wake one at a time, and there are no patrols until the first memory is back. Surges are capped to fit the region you're in.
+
+**The first night** begins with a short lesson in the Dunes, behind a walled-up gate: take melting from a clock (the gun starts empty), meet one slow anxiety with the blade (its first lunge plays in slow motion, so you can see when to deflect), then give the melting to the wall across the gate. After the first time, the Dunes are just the Dunes.
 
 **Learning as you go.** A first night shows only what you need. Lucidity, reverie and Clarity appear on the HUD the first time they mean something. Locked property slots stay hidden until you have a memory, and the self and rounds keys appear after a couple of gives. The Night-Light gives one tip at a time, at least 16 seconds apart; a tip whose moment has passed is dropped.
 
@@ -267,9 +269,13 @@ python3 juxtapose/blender/build_hero.py      # optional: sculpted props from art
 - bakes albedo, normal and roughness/metal from the full-detail source into the low mesh at game resolution;
 - writes everything to `assets/hero.glb`.
 
+The ten props in the manifest (bed, clock, candle, mirror, bowler hat, birdcage, pomegranate, anvil, chest of drawers, night-light) are built this way. Each started as a Higgsfield concept image (`art_src/concept/`), went through Tripo H3.1 image-to-3D, then build_hero.py; `art_src/hero/jobs.json` records each job, so the raw sources (100 MB, not in git) can be fetched again. Cycles' diffuse bake is black on metal, so the colour is baked with metalness off and the metal comes back as a constant from the manifest.
+
 At load, each hero mesh replaces the look of the template with the same name. Named child parts (clock hands, flames) stay unless the entry lists them under `hide`. Without `hero.glb`, the game uses the procedural props.
 
 Hosts that won't serve binary `.glb` files can serve `<name>.glb.gz.b64.txt` instead (`gzip -9 -n -c x.glb | base64 -w0`): the loader falls back to it, and to plain `<name>.glb.b64.txt` after that. Gzip takes the town kit from 10.5 MB to about 2.5 MB.
+
+**Sound for the dream's logic.** A Hush close by muffles the whole score to a murmur. Each region sets a resting intensity, so the music fills out as the fights get harder, and crossing into a new region rings two far-off bells. A Wardrobe's footfalls thump, with its hangers rattling inside. Solved puzzles, the train's brakes, the chapel bell and Paris time's chime each have their own sound.
 
 **Sound as structure.** The score is synthesized live with Web Audio: stems for pad, bass, music-box arpeggio, percussion and glass shimmer. It follows the chord progression of each layer, adds stems as combat intensifies, and warbles, drags and reverses as Lucidity rises. Weapon sounds snap to the 16th-note grid and are pitched to the current scale, so a good fight plays like a melody.
 

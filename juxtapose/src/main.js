@@ -89,7 +89,7 @@ class Game {
     const say = this.narrator.say.bind(this.narrator);
     this.tipQueue = []; this.lastTip = -99;
     this.narrator.say = (key, o) => {
-      if (STORY_LINES.has(key) || key.startsWith('puzzle') || key.startsWith('meet_')) { say(key, o); return; }
+      if (STORY_LINES.has(key) || key.startsWith('puzzle') || key.startsWith('meet_') || key.startsWith('tut_')) { say(key, o); return; }
       if (!this.opts.tips) return;
       if (this.time - this.lastTip >= TIP_GAP && !this.narrator.cur && !this.narrator.queue.length) { this.lastTip = this.time; say(key, o); }
       else if (!this.tipQueue.some((t) => t.key === key)) this.tipQueue.push({ key, o, at: this.time });
@@ -362,8 +362,19 @@ class Game {
       this.narrator.obj && { dur: 3.6, pos: [this.narrator.obj.position.clone().add(V(1.4, 0.3, 1.4)), this.narrator.obj.position.clone().add(V(0.9, 0.1, 0.9))], look: this.narrator.obj.position.clone(), fov: 38, caption: 'Night-Light: He came here to be nobody in particular. It worked. Keep your eyes open.' },
       { dur: 2.6, pos: [V(0, 12, -20), eye.clone().add(V(0, 2.2, -5))], look: eye, fov: [50, 60] },
     ];
-    this.playCutscene(shots, { onEnd: () => first && lvl.guide(p.pos.clone(), first.pos) });
+    this.playCutscene(shots, { onEnd: () => { if (!this.beginTutorial(lvl) && first) lvl.guide(p.pos.clone(), first.pos); } });
   }
+  // the lesson in the Dunes, if this night has one; the Night-Light's own tips for
+  // the same things stand down so nothing is said twice
+  beginTutorial(lvl) {
+    const T = lvl?.tutorial;
+    if (!T || T.step >= 0 || T.done) return false;
+    for (const k of ['k:hintTake', 'k:hintGive']) this.narrator.done.add(k);
+    for (const k of ['enemiesNear', 'lungeSeen']) this.narrator.done.add(k);
+    T.start();
+    return true;
+  }
+
   // the last room: the ring of mirrors, the candles, and the eye, which opens
   playBossIntro() {
     const lvl = this.level, p = this.player, b = this.boss;
@@ -407,7 +418,7 @@ class Game {
       { dur: 5, pos: [V(-6, 5, 70), V(-3, 3, 60)], look: [V(0, 2, 55), V(0, 1.5, 50)], fov: 50, caption: 'Somewhere below is the painting. Reach it before the dream grows too strange, and she wakes.' },
       { dur: 2.6, pos: [V(0, 14, -12), eye.clone().add(V(0, 2.2, -5))], look: [V(0, 1, -27), eye], fov: [50, 60] },
     ];
-    this.playCutscene(shots, { onEnd: () => { this.meta.data.seenPrologue = true; this.meta.save(); if (first) lvl.guide(p.pos.clone(), first.pos); } });
+    this.playCutscene(shots, { onEnd: () => { this.meta.data.seenPrologue = true; this.meta.save(); if (!this.beginTutorial(lvl) && first) lvl.guide(p.pos.clone(), first.pos); } });
   }
 
   // the first time the Figment meets one of the new anxieties, the dream stops to introduce it
@@ -477,6 +488,7 @@ class Game {
     }
     this.playCutscene(shots, {
       onEnd: () => {
+        this.saveProgress();
         lvl.relight(); lvl.startPatrols();
         lvl.guide(knot.pos, next && !optional ? next.pos : doorNow ? lvl.door.pos : null);
         if (doorNow) lvl.surge(3 + this.depth, 'The dream notices what you took back. It sends them after you.');
@@ -714,7 +726,8 @@ class Game {
     } else if (lvl.knotSpots?.length) lvl.startKnots();
     else lvl.startWaves();
     if (key === 'boss' && !this.sandbox) setTimeout(() => { if (this.state === 'playing' && this.level === lvl) this.playBossIntro(); }, 900);
-    if (lvl.knots && !this.sandbox) setTimeout(() => {
+    const skipArrival = this.skipArrival; this.skipArrival = false;
+    if (lvl.knots && !this.sandbox && !skipArrival) setTimeout(() => {
       if (this.state !== 'playing' || this.level !== lvl) return;
       if (index === 0 && (this.forcePrologue || !this.meta.data.seenPrologue)) { this.forcePrologue = false; this.playPrologue(); } else this.playIntro();
     }, 700);
@@ -738,6 +751,49 @@ class Game {
     this.meta.save();
     this.ui.refreshContinue?.();
   }
+  // Within a layer, the night also remembers what you've done: memories taken back,
+  // puzzles solved, the tutorial behind you, and what you carry now. Saved at each
+  // of those moments; Continue rebuilds the layer and puts it all back.
+  saveProgress() {
+    const cp = this.meta.data.checkpoint, L = this.level, p = this.player;
+    if (this.sandbox || !cp || !L?.knots || !p || p.dead || cp.depth !== this.depth) return;
+    cp.progress = {
+      taken: L.knots.map((k, i) => (k.state === 'taken' ? i : -1)).filter((i) => i >= 0),
+      solved: (L.locks || []).map((l, i) => (l.solved ? i : -1)).filter((i) => i >= 0),
+      pos: p.pos.toArray().map((v) => Math.round(v * 10) / 10), yaw: p.camYaw,
+    };
+    cp.carry = { charges: [...p.charges], roundProps: [...p.roundProps], hp: Math.round(p.hp), selected: p.selected, reverie: p.reverie || 0, armor: p.armor || 0 };
+    cp.whims = [...this.run.whims]; cp.lucid = Math.round(this.lucidity.value);
+    cp.stats = { ...this.stats, propUse: { ...this.stats.propUse } };
+    this.meta.save();
+  }
+  restoreProgress(pr) {
+    const L = this.level;
+    if (!pr || !L?.knots) return;
+    const quiet = this.noCutscenes; this.noCutscenes = true;
+    for (const i of pr.solved || []) {
+      const l = L.locks?.[i];
+      if (!l) continue;
+      l.solved = true; l.told = true;
+      try { l.restore?.(); } catch (e) { console.warn('restore', e); }
+      if (l.hides) l.knot.hide(false);
+    }
+    for (const i of pr.taken || []) {
+      const k = L.knots[i];
+      if (!k) continue;
+      k.state = 'taken'; k.group.visible = false;
+      for (const e of k.guards) if (!e.dead) e.die({ type: 'void' });
+    }
+    const stage = L.stage;
+    for (const v of L.veils || []) if (v.after !== 99 && v.after <= stage) { v.open(); v.gone = 1; v.mesh.material.uniforms.uGone.value = 1; v.mesh.visible = false; }
+    L.relight(); L.startPatrols();
+    if (L.chain && stage >= L.knotsNeeded) L.openDoor();
+    if (pr.pos && this.player) this.player.teleport(new THREE.Vector3(...pr.pos).setY(pr.pos[1] + 0.5), pr.yaw ?? 0);
+    const cur = L.current;
+    if (cur && this.player) L.guide(this.player.pos.clone(), cur.pos);
+    this.noCutscenes = quiet;
+  }
+
   continueRun() {
     const cp = this.meta.data.checkpoint;
     if (!cp) { this.startRun(); return; }
@@ -752,7 +808,10 @@ class Game {
     this.depth = cp.depth;
     this.narrator.reset();
     const c = cp.carry;
+    const pr = cp.progress;
+    this.skipArrival = !!(pr && (pr.taken?.length || pr.solved?.length));
     this.loadLayer(cp.depth, { charges: new Map(c.charges), roundProps: new Map(c.roundProps), hp: c.hp, selected: c.selected, reverie: c.reverie, armor: c.armor });
+    if (pr) { this.meta.data.checkpoint.progress = pr; this.restoreProgress(pr); this.stats = { ...this.freshStats(), ...(cp.stats || {}) }; }
     this.lucidity.value = Math.min(70, cp.lucid || 0);
     this.ui.toast('The dream picks up where it left you.', 'good');
   }
@@ -1111,6 +1170,10 @@ class Game {
       let near = 0;
       for (const e of this.entities) if ((e.kind === 'enemy' || e.kind === 'boss') && pl && e.obj.position.distanceTo(pl.pos) < 35) near++;
       this.audio.setIntensity(Math.min(1, near * 0.18 + (this.boss && !this.boss.dead ? 0.6 : 0)));
+      // a Hush close by muffles the score
+      let hush = 99;
+      if (pl) for (const e of this.entities) if (e.variant === 'hush' && !e.dead && !e.dormant) hush = Math.min(hush, e.obj.position.distanceTo(pl.pos));
+      this.audio.setMuffle(Math.max(0, Math.min(1, 1 - (hush - 3) / 9)));
       this.audio.setLucidity(this.lucidity.display / 100);
       const cam = this.render.camera;
       const raw = pl && pl.camRaw;

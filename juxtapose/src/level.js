@@ -11,6 +11,7 @@ import { Town } from './town.js';
 import { Sea } from './sea.js';
 import { Knot, Veil, KNOTS } from './knots.js';
 import * as PZ from './puzzles.js';
+import { Tutorial } from './tutorial.js';
 
 // ---------------------------------------------------------------- noise
 function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
@@ -715,6 +716,8 @@ export class Level {
     }
     this.waves = [];
     this.objectiveName = 'Free the memories the anxieties are guarding';
+    // a first night starts with a lesson in the Dunes, behind a walled-up gate
+    if (!game.meta.data.tutorialDone && !game.sandbox) { this.tutorial = new Tutorial(this); this.tutorial.build(); }
   }
 
   // a headland from the kit; until it exists, a rough stack of stone
@@ -1094,10 +1097,12 @@ export class Level {
     if (r === this.region) return;
     const first = !this.region;
     this.region = r;
+    if (r) this.game.audio.setRegion(Math.max(0, r.tier));
     this.seenRegions = this.seenRegions || new Set();
     if (!r || this.seenRegions.has(r.name)) return;
     this.seenRegions.add(r.name);
-    if (!first && this.game.state === 'playing') this.game.ui.regionCard(r.name, r.sub);
+    this.game.audio.setRegion(Math.max(0, r.tier));
+    if (!first && this.game.state === 'playing') { this.game.ui.regionCard(r.name, r.sub); this.game.audio.sfx('region'); }
   }
 
   enemiesAlive() { let n = 0; for (const e of this.game.entities) if (e.kind === 'enemy' && !e.dead) n++; return n; }
@@ -1243,6 +1248,7 @@ export class Level {
     if (this.key === 'boss') this.objective = game.boss && !game.boss.dead ? 'Hurt it only while it is unwatched' : '';
     else if (this.key === 'sandbox') this.objective = 'Lucid sandbox · infinite charges · B for the spawn menu';
     else if (this.knots) {
+      this.tutorial?.update(dt);
       for (const k of this.knots) k.update(dt);
       for (const l of this.locks || []) { l.update(); l.tick?.(dt, this.time); }
       for (const v of this.veils || []) v.update(dt, this.time);
@@ -1268,7 +1274,8 @@ export class Level {
       const f = this.knotsFreed, cur = this.current;
       if (!this.doorOpen && f >= this.knotsNeeded && game.state === 'playing') this.openDoor();
       const held = cur && cur.lock && !cur.lock.solved ? cur.lock.hint : 'is caught';
-      this.objective = !this.doorOpen ? `${cur ? cur.def.name[0].toUpperCase() + cur.def.name.slice(1) + (held === 'is caught' ? ' is caught' : ': ' + held) : this.objectiveName} · ${f}/${this.knotsNeeded} memories`
+      this.objective = this.tutorial && !this.tutorial.done && this.tutorial.objective ? this.tutorial.objective
+        : !this.doorOpen ? `${cur ? cur.def.name[0].toUpperCase() + cur.def.name.slice(1) + (held === 'is caught' ? ' is caught' : ': ' + held) : this.objectiveName} · ${f}/${this.knotsNeeded} memories`
         : f < this.knots.length ? `The door in the ${this.key === 'desert' ? 'shallows' : 'square'} is open · ${this.knots.length - f} ${this.knots.length - f === 1 ? 'memory' : 'memories'} still caught`
           : this.key === 'piazza' ? 'Every memory is free · the 6:40 is waiting on the hill' : 'Every memory is free · step through the door';
     } else if (!this.doorOpen) this.objective = `${this.objectiveName} · wave ${Math.max(1, Math.min(total, this.waveIdx + 1))}/${total} · ${this.enemiesAlive()} remain`;
