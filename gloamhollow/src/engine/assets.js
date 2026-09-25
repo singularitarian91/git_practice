@@ -6,6 +6,17 @@ import { applyGameMaterials, getSharedMaterials } from './materials.js';
 
 export const MODEL_FILES = ['characters', 'enemies', 'nature', 'crops', 'items', 'buildings', 'props'];
 
+// Hosts that can't serve .glb (the published artifact) ship each model as
+// base64 text instead; the page sets this flag (see tools/build-artifact.mjs).
+async function loadBase64Glb(loader, url, path) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${url}`);
+  const bin = atob((await res.text()).trim());
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return loader.parseAsync(bytes.buffer, path);
+}
+
 export class ModelLibrary {
   constructor() {
     this.templates = new Map();
@@ -19,7 +30,9 @@ export class ModelLibrary {
     let done = 0;
     const results = await Promise.all(MODEL_FILES.map(async (f) => {
       try {
-        const gltf = await loader.loadAsync(`${baseUrl}${f}.glb`);
+        const gltf = globalThis.__GH_MODELS_B64
+          ? await loadBase64Glb(loader, `${baseUrl}${f}.glb.b64.txt`, baseUrl)
+          : await loader.loadAsync(`${baseUrl}${f}.glb`);
         return { f, gltf };
       } catch (e) {
         console.warn(`[assets] could not load ${f}.glb`, e && e.message);

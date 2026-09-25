@@ -1,6 +1,6 @@
 // Scripted playtest in headless Chromium: drives the real game with
 // keyboard/mouse, checks state, and saves screenshots along the way.
-//   node tools/playtest.mjs <outdir> [scenario]      scenarios: farm (default), night, tour
+//   node tools/playtest.mjs <outdir> [scenario]      scenarios: farm (default), night, tour, systems
 import fs from 'node:fs';
 import path from 'node:path';
 import { startServer } from './serve.mjs';
@@ -20,6 +20,8 @@ page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}\n${(e.stack || '
 const Q = ({ farm: 'play&skipintro&hour=9', night: 'play&skipintro&hour=21.5', tour: 'play&skipintro&hour=17.5', systems: 'play&skipintro&hour=9&weather=clear' }[scenario] || 'play&skipintro') + (process.env.QUALITY ? `&quality=${process.env.QUALITY}` : '');
 await page.goto(`http://127.0.0.1:${port}/index.html?${Q}`);
 await page.waitForFunction(() => window.__gh && window.__gh.ready, null, { timeout: 240000 });
+// CSS animations run on real time, which headless rendering can't keep up with
+await page.addStyleTag({ content: '*, *::before, *::after { animation-duration: 0s !important; animation-delay: 0s !important; transition-duration: 0s !important; }' });
 let n = 0;
 const shot = async (name) => { const f = path.join(outDir, `${String(++n).padStart(2, '0')}_${name}.png`); try { await page.screenshot({ path: f, timeout: 90000 }); console.log('  shot', f); } catch (e) { console.log('  shot failed', name, e.message.split('\n')[0]); } };
 const ev = (fn, arg) => page.evaluate(fn, arg);
@@ -150,7 +152,7 @@ try {
     const rodSlot = await ev(() => window.__gh.game.inventory.slots.findIndex((s) => s && s.id === 'tool_rod'));
     if (rodSlot >= 0 && rodSlot < 10) {
       await ev((i) => { window.__gh.game.inventory.selectedIndex = i; }, rodSlot);
-      await page.mouse.move(700, 300);
+      await aim(47, 0, 5); // open water east of the jetty
       await click(1.5);
       console.log('fishing phase:', await ev(() => window.__gh.game.fishing.phase), 'where:', await ev(() => window.__gh.game.fishing.where));
       await ev(() => { const f = window.__gh.game.fishing; if (f.active) f.waitFor = 0.1; });
@@ -161,7 +163,7 @@ try {
       await shot('minigame');
       // hold the mouse to keep the zone up for a while, then force the result
       await page.mouse.down(); await sim(1); await page.mouse.up(); await sim(0.5);
-      await ev(() => { const u = window.__gh.game.ui.fishingUI; if (u.active) u.p = 1; });
+      await ev(() => { const u = window.__gh.game.ui.fishingUI; if (u.active) u.stop(true); });
       await sim(0.3);
       console.log('fish caught:', await ev(() => window.__gh.game.state.stats.fish));
     } else console.log('no rod in hotbar', rodSlot);
@@ -173,10 +175,14 @@ try {
     if (bug && netSlot >= 0 && netSlot < 10) {
       await teleport(bug[0] - 1, bug[1], Math.PI / 2);
       await ev((i) => { window.__gh.game.inventory.selectedIndex = i; }, netSlot);
-      await ev(() => { const g = window.__gh.game; const b = g.bugs.list[0]; if (b) { b.anchor.set(g.player.pos.x + 1, g.player.pos.y + 1, g.player.pos.z); b.r = 0.1; } });
-      await aim(bug[0], 6, bug[1]);
-      await click(0.8);
+      // a net swing can miss by design ("slipped through the net"), so allow a few tries
+      for (let k = 0; k < 4 && !(await ev(() => window.__gh.game.state.stats.bugs)); k++) {
+        await ev(() => { const g = window.__gh.game; const b = g.bugs.list.find((x) => !x.fleeing) || g.bugs.list[0]; if (b) { b.fleeing = false; b.anchor.set(g.player.pos.x + 1, g.player.pos.y + 1, g.player.pos.z); b.pos.copy(b.anchor); b.r = 0.1; } });
+        await aim(bug[0], 6, bug[1]);
+        await click(0.8);
+      }
       console.log('bugs caught:', await ev(() => window.__gh.game.state.stats.bugs));
+      if (!(await ev(() => window.__gh.game.state.stats.bugs))) console.log('  net debug:', JSON.stringify(await ev(() => { const g = window.__gh.game; return { action: g.player.action && g.player.action.kind, sel: g.inventory.selected && g.inventory.selected.id, blocking: g.ui.blocking, p: g.player.pos.toArray().map((v) => +v.toFixed(1)), facing: +g.player.facing.toFixed(2), bugs: g.bugs.list.map((b) => [b.id, b.fleeing, ...b.pos.toArray().map((v) => +v.toFixed(1))]) }; })));
     }
     // offerings: give kindling
     await ev(() => { const g = window.__gh.game; g.inventory.add('wood', 30); g.inventory.add('stone', 20); g.inventory.add('resin', 5); g.state.flags.offerings_known = true; });
@@ -218,7 +224,7 @@ try {
     if (hasFish) {
       const m = await ev(() => { const n = window.__gh.game.npcs.byId.morrow; return [n.pos.x, n.pos.z]; });
       await teleport(m[0], m[1] + 1.4, Math.PI);
-      await ev(() => window.__gh.game.npcs.donate(window.__gh.game.npcs.byId.morrow));
+      await ev(() => { window.__gh.game.npcs.donate(window.__gh.game.npcs.byId.morrow); }); // don't await the conversation
       await sim(0.3);
       const fs = await ev(() => window.__gh.game.inventory.slots.findIndex((s) => s && s.id.startsWith('fish_')));
       await ev((i) => { const p = window.__gh.game.ui.stack[window.__gh.game.ui.stack.length - 1]; if (p) p.el.querySelectorAll('.islot')[i].click(); }, fs);
@@ -238,7 +244,7 @@ try {
     await ev(() => { const g = window.__gh.game; g.player.pos.copy(g.drops.list.find((d) => d.id === 'trophy_stag')?.pos || g.player.pos); });
     await sim(2);
     console.log('has antler:', await ev(() => window.__gh.game.inventory.has('trophy_stag')), 'boss defeated:', await ev(() => window.__gh.game.state.bossDefeated));
-    await ev(() => window.__gh.game.finalRite());
+    await ev(() => { window.__gh.game.finalRite(); });
     await wait(4000); await sim(0.5);
     await shot('ending');
     for (let i = 0; i < 12; i++) { await page.mouse.click(500, 300); await wait(200); }

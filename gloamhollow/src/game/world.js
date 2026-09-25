@@ -54,6 +54,14 @@ export class World {
       let { x, z } = b;
       if (b.coast === true) z = this.dockOrigin.z;
       if (b.coast === 'ship') z = this.dockOrigin.z + 7;
+      if (b.shore) {
+        // walk along the given direction until the ground drops to the waterline
+        for (let k = 0; k < 120; k++) {
+          if (t.heightAt(x + b.shore[0] * 0.5, z + b.shore[1] * 0.5) < 0.45) break;
+          x += b.shore[0] * 0.5; z += b.shore[1] * 0.5;
+        }
+        x -= b.shore[0] * 1.0; z -= b.shore[1] * 1.0;
+      }
       const obj = this.placeModel(b.model, x, z, b.rot, { id: b.id, ship: b.coast === 'ship' });
       this.buildings.set(b.id, { def: b, obj, x, z, rot: b.rot });
     }

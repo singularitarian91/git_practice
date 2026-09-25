@@ -14,12 +14,18 @@ each night. Farm, fish, befriend the villagers, pay back the Raven, and
 bring the island six offerings to rekindle the Hearth. Then face what
 waits at the altar in the Mistwood.
 
-![The village green at dusk](docs/village.png)
+![The village green at dusk](docs/village.jpg)
+
+| | |
+|---|---|
+| ![Talking with Grenna, the herbalist goat](docs/dialogue.jpg) | ![The croft by lantern light](docs/croft-night.jpg) |
+| ![Fishing off the lake jetty at dawn](docs/lake.jpg) | ![The Barrow museum and graveyard](docs/barrow.jpg) |
 
 ## Play
 
 It's a static site with no build step. The browser needs WebGL 2 (any
-modern desktop browser has it), and you need a keyboard and mouse.
+modern browser has it). It plays best with a keyboard and mouse; on a
+phone or tablet you get an on-screen joystick and buttons instead.
 
 ```bash
 cd gloamhollow
@@ -56,6 +62,12 @@ module and model loading over `file://`. You have to serve the folder.
 | **M** | map |
 | **T** | help |
 | **Esc** | pause / settings |
+
+On a touchscreen, drag anywhere on the left half to move (drag past the
+ring to run), drag on the right half to turn the camera, and pinch to zoom.
+The buttons on the right use your tool (hold to keep swinging), interact,
+and dodge; the row along the top opens the pack, crafting, journal, map
+and menu. The hotbar slots are tappable.
 
 ## What's in it
 
@@ -101,11 +113,11 @@ gloamhollow/
 │  ├─ game/                gameplay
 │  │                         world, player, farm, resources, NPCs, enemies,
 │  │                         fishing, bugs, critters, clock, save state
-│  ├─ ui/                  HUD, dialogue, panels, fishing minigame, title
+│  ├─ ui/                  HUD, dialogue, panels, fishing minigame, title, touch controls
 │  └─ data/                items, recipes, shop, offerings, dialogue, lore
 ├─ assets/models/*.glb     exported by the Blender scripts
 ├─ blender/                procedural modelling scripts (+ ASSETS.md spec)
-├─ tools/                  static server, model previewer, screenshot & playtest scripts
+├─ tools/                  static server, model previewer, screenshot, playtest & publish scripts
 └─ vendor/three/           three.js r180 (MIT)
 ```
 
@@ -139,6 +151,17 @@ crafting, building, the museum, the boss and the ending.
 
 ```bash
 node tools/playtest.mjs /tmp/pt systems
+```
+
+## Publishing as a single page
+
+`tools/build-artifact.mjs` builds a body-only page with `styles.css`
+inlined, plus a map of every runtime file to publish next to it. Hosts that
+don't serve `.glb` get the models as base64 text, which the model loader
+decodes itself.
+
+```bash
+node tools/build-artifact.mjs /tmp/out/gloamhollow.html --files /tmp/out/files.json
 ```
 
 ## Credits

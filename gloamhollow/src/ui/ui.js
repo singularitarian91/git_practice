@@ -36,7 +36,7 @@ export class UI {
     this.build();
     window.addEventListener('keydown', (e) => this.onKey(e));
     // clicking anywhere advances dialogue (choices handle their own clicks)
-    window.addEventListener('mousedown', (e) => {
+    window.addEventListener('pointerdown', (e) => {
       if (this.dialogueOpen && !this.dlgChoices.contains(e.target) && !this.dlg.contains(e.target)) this.advance();
     });
   }
@@ -81,7 +81,7 @@ export class UI {
     this.slots = [];
     for (let i = 0; i < 10; i++) {
       const s = h('div', 'slot interactive', `<img alt=""><span class="n"></span><span class="k">${(i + 1) % 10}</span><span class="lvl"></span>`);
-      s.addEventListener('mousedown', (e) => { e.stopPropagation(); if (this.game) { this.game.inventory.selectedIndex = i; this.audio.sfx('ui_click', { volume: 0.4 }); } });
+      s.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (this.game) { this.game.inventory.selectedIndex = i; this.audio.sfx('ui_click', { volume: 0.4 }); } });
       this.hotbarEl.appendChild(s);
       this.slots.push(s);
     }
@@ -91,7 +91,7 @@ export class UI {
     this.dlgChoices = h('div', 'dlg-choices');
     r.appendChild(this.dlg);
     r.appendChild(this.dlgChoices);
-    this.dlg.addEventListener('mousedown', (e) => { e.stopPropagation(); this.advance(); });
+    this.dlg.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.advance(); });
     // modal layer
     this.modal = h('div', 'modal-layer');
     r.appendChild(this.modal);
@@ -296,16 +296,25 @@ export class UI {
     const el = this.dlg.querySelector('.dlg-text');
     this.dlg.querySelector('.dlg-next').style.visibility = 'hidden';
     this.dlgChoices.classList.remove('show');
-    this.typing = { full: txt, i: 0, el };
+    const chars = Array.from(txt);
+    this.typing = { full: txt, chars, i: 0, el };
     el.textContent = '';
     if (this.dlgVoice && this.audio.speak) this.speech = this.audio.speak(txt, this.dlgVoice);
+    // speakers reveal their words in step with their babble; narration types briskly
+    const tl = this.dlgVoice && this.audio.speechTimeline ? this.audio.speechTimeline(txt, this.dlgVoice) : null;
+    const at = tl && tl.at && tl.at.length === chars.length + 1 ? tl.at : null;
+    const t0 = performance.now();
     clearInterval(this.typeTimer);
     this.typeTimer = setInterval(() => {
-      if (!this.typing) return;
-      this.typing.i += 2;
-      el.textContent = this.typing.full.slice(0, this.typing.i);
-      if (this.typing.i >= this.typing.full.length) this.finishTyping();
-    }, 40);
+      const T = this.typing;
+      if (!T) return;
+      const s = (performance.now() - t0) / 1000;
+      let i = T.i;
+      if (at) while (i < chars.length && at[i] <= s) i++;
+      else i = Math.min(chars.length, Math.floor(s * 45));
+      if (i !== T.i) { T.i = i; el.textContent = chars.slice(0, i).join(''); }
+      if (i >= chars.length) this.finishTyping();
+    }, 25);
   }
 
   finishTyping() {
@@ -322,15 +331,17 @@ export class UI {
     this.dlgChoices.innerHTML = '';
     c.options.forEach((o, i) => {
       const b = h('button', 'choice interactive' + (i === c.sel ? ' sel' : ''), o);
-      b.addEventListener('mouseenter', () => { c.sel = i; this.markChoice(); this.audio.sfx('ui_hover', { volume: 0.3 }); });
-      b.addEventListener('mousedown', (e) => { e.stopPropagation(); this.pickChoice(i); });
+      b.addEventListener('mouseenter', () => { if (this.dlgChoicesActive !== c) return; c.sel = i; this.markChoice(); this.audio.sfx('ui_hover', { volume: 0.3 }); });
+      b.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.pickChoice(i); });
       this.dlgChoices.appendChild(b);
     });
     this.dlgChoices.classList.add('show');
   }
 
   markChoice() {
-    [...this.dlgChoices.children].forEach((b, i) => b.classList.toggle('sel', i === this.dlgChoicesActive.sel));
+    const c = this.dlgChoicesActive;
+    if (!c) return;
+    [...this.dlgChoices.children].forEach((b, i) => b.classList.toggle('sel', i === c.sel));
   }
 
   pickChoice(i) {
@@ -355,6 +366,8 @@ export class UI {
   }
 
   closeDialogue() {
+    this.lastClose = performance.now();
+    this.mouseLatch = true;
     clearInterval(this.typeTimer);
     this.typing = null;
     if (this.audio.stopSpeak) this.audio.stopSpeak();
@@ -380,6 +393,8 @@ export class UI {
   close() {
     const p = this.stack.pop();
     if (!p) return;
+    this.lastClose = performance.now();
+    this.mouseLatch = true;
     p.el.remove();
     if (p.onClose) p.onClose();
     if (!this.stack.length) this.modal.classList.remove('show');
@@ -428,6 +443,8 @@ export class UI {
   // ------------------------------------------------------------------
   onKey(e) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    // keys handled by an open dialogue or panel must not leak into the game next frame
+    if ((this.dialogueOpen || this.stack.length) && this.input) this.input.consumeKey(e.code);
     if (this.dialogueOpen) {
       const c = this.dlgChoicesActive;
       if (c && this.dlgPages.length === 0 && !this.typing) {

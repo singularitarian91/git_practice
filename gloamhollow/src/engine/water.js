@@ -108,10 +108,10 @@ const FRAG = /* glsl */`
 
     // shoreline foam
     float foamN = vnoise(vWorld.xz * 1.6 + vec2(uTime * 0.25, -uTime * 0.18));
-    float shore = smoothstep(0.45, 0.0, depth + (foamN - 0.5) * 0.3);
-    float band = smoothstep(0.35, 0.9, sin(depth * 18.0 - uTime * 2.2 + foamN * 4.0) * 0.5 + 0.5) * smoothstep(0.9, 0.2, depth);
-    float foam = clamp(shore * 0.7 + band * 0.25 * (1.0 - lakeW * 0.7), 0.0, 1.0);
-    col = mix(col, (uAmbient + uLightColor * 0.4) * 0.75, foam * 0.55);
+    float shore = smoothstep(0.16, 0.0, depth + (foamN - 0.5) * 0.12);
+    float band = smoothstep(0.75, 0.95, sin(depth * 22.0 - uTime * 2.2 + foamN * 5.0) * 0.5 + 0.5) * smoothstep(0.55, 0.12, depth) * smoothstep(0.3, 0.6, foamN);
+    float foam = clamp(shore * 0.6 + band * 0.35 * (1.0 - lakeW * 0.8), 0.0, 1.0);
+    col = mix(col, (uAmbient + uLightColor * 0.4) * 0.7, foam * 0.45);
 
     float alpha = clamp(0.55 + dk * 0.6 + fres * 0.3, 0.0, 1.0);
     gl_FragColor = vec4(col, alpha);

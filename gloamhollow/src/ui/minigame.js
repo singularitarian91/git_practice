@@ -21,8 +21,9 @@ export class FishingGame {
     this.fishEl = this.el.querySelector('.fg-fish');
     this.fillEl = this.el.querySelector('.fg-fill');
     this.hold = false;
-    window.addEventListener('mousedown', (e) => { if (this.active && e.button === 0) this.hold = true; });
-    window.addEventListener('mouseup', (e) => { if (e.button === 0) this.hold = false; });
+    window.addEventListener('pointerdown', (e) => { if (this.active && e.button === 0) this.hold = true; });
+    window.addEventListener('pointerup', (e) => { if (e.button === 0) this.hold = false; });
+    window.addEventListener('pointercancel', () => { this.hold = false; });
     window.addEventListener('keydown', (e) => { if (this.active && e.code === 'Space') { this.hold = true; e.preventDefault(); } });
     window.addEventListener('keyup', (e) => { if (e.code === 'Space') this.hold = false; });
   }
@@ -46,6 +47,8 @@ export class FishingGame {
       this.ui.overlayBusy = true;
       this.ui.timeRuns = true;
       this.fishEl.src = this.ui.icons.get(this.ui.game.fishing.fishId) || '';
+      this.el.querySelector('.fg-hint').innerHTML = document.body.classList.contains('is-touch')
+        ? 'Hold a finger <b>anywhere</b>' : 'Hold <b>mouse</b> or <kbd>Space</kbd>';
       this.el.classList.add('show');
     });
   }

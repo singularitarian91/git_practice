@@ -106,7 +106,7 @@ export class Game {
       this.clock.running = !blocking || this.ui.timeRuns;
       if (!this.ui.blocking || this.ui.timeRuns) this.clock.update(dt);
       const move = blocking ? { x: 0, z: 0 } : this.moveVector();
-      this.player.update(dt, move, !blocking && this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight'));
+      this.player.update(dt, move, !blocking && (this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight') || !!this.input.touchSprint));
       this.npcs.update(dt);
       this.enemies.update(dt);
       this.fishing.update(dt);
@@ -156,6 +156,10 @@ export class Game {
     if (I.isDown('KeyS')) { x -= f.x; z -= f.z; }
     if (I.isDown('KeyD')) { x += r.x; z += r.z; }
     if (I.isDown('KeyA')) { x -= r.x; z -= r.z; }
+    if (I.touchMove && I.enabled) {
+      x += r.x * I.touchMove.x - f.x * I.touchMove.y;
+      z += r.z * I.touchMove.x - f.z * I.touchMove.y;
+    }
     return { x, z };
   }
 
@@ -168,19 +172,25 @@ export class Game {
     }
     if (I.pressed('KeyQ')) { this.inventory.selectedIndex = this.inventory.selectedIndex - 1; this.audio.sfx('ui_click', { volume: 0.3 }); }
     if (I.pressed('KeyR')) { this.inventory.selectedIndex = this.inventory.selectedIndex + 1; this.audio.sfx('ui_click', { volume: 0.3 }); }
+    // a click that just closed a dialogue/panel shouldn't also act in the world:
+    // mouse input stays latched until that button is released (keys are
+    // already consumed by the UI while it is open)
+    if (this.ui.mouseLatch && !I.mouseDown(0)) this.ui.mouseLatch = false;
+    const fresh = this.ui.mouseLatch;
+    const aim = I.touchMode ? null : (this.cursorValid ? this.cursor : null);
     if (I.pressed('Space')) {
       const m = this.moveVector();
       this.player.startDodge(m.x, m.z);
     }
     if (I.pressed('KeyE') || I.pressed('KeyF')) this.tryInteract(false);
-    if (I.mousePressed(0)) {
+    if (I.mousePressed(0) && !fresh) {
       if (this.fishing.active) this.fishing.reelClick();
-      else this.player.useSelected(this.cursorValid ? this.cursor : null);
+      else this.player.useSelected(aim);
     }
     // hold to keep swinging tools (not for single-use items)
-    else if (I.mouseDown(0) && !this.player.action && !this.fishing.active) {
+    else if (I.mouseDown(0) && !fresh && !this.player.action && !this.fishing.active) {
       const sel = this.inventory.selected;
-      if (sel && ['tool_axe', 'tool_pickaxe', 'tool_hoe', 'tool_sword', 'tool_can'].includes(sel.id)) this.player.useSelected(this.cursorValid ? this.cursor : null);
+      if (sel && ['tool_axe', 'tool_pickaxe', 'tool_hoe', 'tool_sword', 'tool_can'].includes(sel.id)) this.player.useSelected(aim);
     }
     if (I.pressed('Tab') || I.pressed('KeyI')) this.ui.open('inventory');
     if (I.pressed('KeyC')) this.ui.open('crafting', { station: this.nearStation('workbench') ? 'workbench' : null });

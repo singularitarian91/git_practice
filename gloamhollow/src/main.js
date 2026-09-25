@@ -5,6 +5,7 @@ import { ModelLibrary } from './engine/assets.js';
 import { Input } from './engine/input.js';
 import { IconFactory } from './ui/icons.js';
 import { UI } from './ui/ui.js';
+import { TouchControls, isTouchDevice } from './ui/touch.js';
 import { Game } from './game/game.js';
 import { newGameState, loadGame, saveGame, hasSave, deleteSave, loadSettings, seasonOf } from './game/state.js';
 import { LOC } from './game/worldmap.js';
@@ -29,6 +30,9 @@ async function loadOptional(path) {
 async function boot() {
   if (!window.WebGL2RenderingContext) throw new Error('This game needs a browser with WebGL 2.');
   const settings = loadSettings();
+  const touch = isTouchDevice();
+  // phones and tablets start on the light preset unless the player chose otherwise
+  if (touch && !settings.qualityChosen) settings.quality = 'low';
   if (params.get('quality')) settings.quality = params.get('quality');
   setLoading(0.03, 'Raising the isle from the sea…');
   await nextFrame();
@@ -55,11 +59,15 @@ async function boot() {
 
   const input = new Input(engine.renderer.domElement);
   const ui = new UI(document.getElementById('ui'), { audio, icons, content });
+  ui.input = input;
+  if (touch || params.has('touch')) { new TouchControls(document.getElementById('ui'), input, engine.renderer.domElement); document.body.classList.add('is-touch'); }
 
-  // pick the state: a pending "new game" from the title, a save, or fresh
-  const pendingNew = sessionStorage.getItem('gh_new');
-  sessionStorage.removeItem('gh_new');
-  const saved = pendingNew ? null : loadGame();
+  // pick the state: a live-reload snapshot, a pending "new game" from the
+  // title, a save, or fresh
+  let pendingNew = null;
+  try { pendingNew = sessionStorage.getItem('gh_new'); sessionStorage.removeItem('gh_new'); } catch { /* storage blocked */ }
+  const hot = window.claude && window.claude.hot && window.claude.hot.data && window.claude.hot.data.state;
+  const saved = hot || (pendingNew ? null : loadGame());
   const state = saved || newGameState(pendingNew || 'Wanderer');
 
   setLoading(0.82, 'Planting the forests…');
@@ -67,6 +75,12 @@ async function boot() {
   const game = new Game({ engine, lib, audio, ui, input, settings, state, content });
   ui.attach(game);
   window.__gh = { engine, game, THREE, ready: false };
+  // keep the session across a republish of this page (Claude artifact hot reload)
+  try {
+    if (window.claude && window.claude.hot && window.claude.hot.snapshot) {
+      window.claude.hot.snapshot(() => { game.player.save(); return { state: game.state }; });
+    }
+  } catch { /* not in an artifact */ }
   // test hook: advance the simulation without rendering (headless playtests)
   window.__gh.sim = (seconds, step = 1 / 30) => {
     for (let t = 0; t < seconds; t += step) { game.update(step); input.endFrame(); }
@@ -117,6 +131,8 @@ async function boot() {
 
   if (pendingNew) {
     start(true);
+  } else if (hot) {
+    start(false);
   } else if (params.has('play')) {
     // debug / screenshot mode: jump straight in
     if (params.has('hour')) game.state.time = Number(params.get('hour')) * 60;
@@ -132,7 +148,10 @@ async function boot() {
       saveInfo: info,
       onContinue: () => start(false),
       onNew: (name) => {
-        if (saved || hasSave()) { deleteSave(); sessionStorage.setItem('gh_new', name); location.reload(); return; }
+        if (saved || hasSave()) {
+          deleteSave();
+          try { sessionStorage.setItem('gh_new', name); location.reload(); return; } catch { /* fall through */ }
+        }
         game.state.name = name;
         start(true);
       },

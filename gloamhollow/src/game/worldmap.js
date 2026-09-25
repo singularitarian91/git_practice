@@ -60,7 +60,7 @@ export const BUILDINGS = [
   { id: 'barrow', model: 'museum_barrow', x: 0, z: -66, rot: 0 },
   { id: 'altar', model: 'altar_offering', x: 70, z: -80, rot: face(70, -80, 50, -50) },
   { id: 'stones', model: 'standing_stones', x: -64, z: -58, rot: 0.3 },
-  { id: 'lake_jetty', model: 'dock', x: 31, z: 5, rot: Math.PI / 2 },            // extends east into the lake
+  { id: 'lake_jetty', model: 'dock', x: 22, z: 5, rot: Math.PI / 2, shore: [1, 0] }, // extends east into the lake
   { id: 'sea_dock', model: 'dock', x: 22, z: null, rot: 0, coast: true },       // extends south into the sea
   { id: 'longship', model: 'longship', x: 29, z: null, rot: 0.06, coast: 'ship' },
   { id: 'bridge', model: 'bridge', x: 55, z: 56, rot: Math.PI / 2 },

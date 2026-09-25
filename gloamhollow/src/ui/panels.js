@@ -49,7 +49,7 @@ function frame(ui, title, cls = '') {
   const el = h('div', `panel ${cls}`);
   el.innerHTML = `<div class="panel-head"><h2>${title}</h2><button class="x interactive" title="Close (Esc)">✕</button></div><div class="panel-body"></div>`;
   el.querySelector('.x').addEventListener('click', () => ui.close());
-  el.addEventListener('mousedown', (e) => e.stopPropagation());
+  el.addEventListener('pointerdown', (e) => e.stopPropagation());
   return { el, body: el.querySelector('.panel-body'), head: el.querySelector('.panel-head') };
 }
 
@@ -310,7 +310,7 @@ function cratePanel(ui, g) {
           ui.audio.sfx('pickup');
           render();
         },
-        extra: () => '<div class="tt-hint">Click to take back</div>',
+        extra: () => `<div class="tt-hint">${document.body.classList.contains('is-touch') ? 'Tap' : 'Click'} to take back</div>`,
       }));
     });
     box.appendChild(h('div', 'crate-title', `In the crate — worth <b>◉ ${total.toLocaleString()}</b>`));
@@ -635,8 +635,18 @@ function mapPanel(ui, g) {
 // ---------------------------------------------------------------------
 function helpPanel(ui) {
   const f = frame(ui, 'How to Play', 'help-panel');
-  f.body.innerHTML = `
-  <div class="help-cols">
+  const touch = document.body.classList.contains('is-touch');
+  const controls = touch ? `
+    <div><h3>Moving</h3>
+      <p>Drag on the left of the screen to walk; drag past the ring to run · <b>⤳</b> dodge-roll</p>
+      <p>Drag on the right to turn the camera · pinch to zoom</p>
+      <h3>Doing</h3>
+      <p><b>⚒</b> use the held tool/item (hold to keep swinging)</p>
+      <p><b>E</b> talk · pick · harvest · open · sleep at your door</p>
+      <p>Tap a hotbar slot to hold that item</p>
+      <h3>Menus</h3>
+      <p>The buttons along the top open your pack, crafting, journal, map and the pause menu.</p>
+    </div>` : `
     <div><h3>Moving</h3>
       <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> dodge-roll</p>
       <p><b>Right-drag</b> or <kbd>←</kbd><kbd>→</kbd> turn the camera · <b>Wheel</b> zoom</p>
@@ -646,11 +656,16 @@ function helpPanel(ui) {
       <p><kbd>1</kbd>–<kbd>0</kbd> or <kbd>Q</kbd>/<kbd>R</kbd> choose hotbar slot</p>
       <h3>Menus</h3>
       <p><kbd>Tab</kbd> pack · <kbd>C</kbd> crafting · <kbd>J</kbd> journal · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</p>
-    </div>
+    </div>`;
+  const fishHow = touch
+    ? 'use the rod to cast, tap again when it bites, then hold a finger down to keep the fish in the green bar'
+    : 'click to cast, click again when it bites, then hold the mouse to keep the fish in the green bar';
+  f.body.innerHTML = `
+  <div class="help-cols">${controls}
     <div><h3>Living here</h3>
       <p>Till your field with the hoe, plant seeds, water them each day (or let the rain). Crops only grow in their season.</p>
       <p>Drop goods in the <b>tithe crate</b> by your hut; they're sold overnight. Pay Corvin back at his stall.</p>
-      <p>Chop trees, break rocks, forage, fish (click to cast, click again when it bites, then hold the mouse to keep the fish in the green bar), and catch bugs with the net.</p>
+      <p>Chop trees, break rocks, forage, fish (${fishHow}), and catch bugs with the net.</p>
       <p>After dark the <b>Gloam</b> hunts. Stay near fire — torches, braziers and the Great Hearth keep them away. Standing by a fire makes you <b>Rested</b>.</p>
       <p>Sleep at your hut door before 2 am. Your game saves each morning.</p>
     </div>
@@ -688,7 +703,7 @@ function pausePanel(ui, g) {
   }));
   f.body.querySelectorAll('select').forEach((el) => el.addEventListener('change', () => {
     s[el.dataset.k] = el.value;
-    if (el.dataset.k === 'quality') g.engine.setQuality(el.value);
+    if (el.dataset.k === 'quality') { g.engine.setQuality(el.value); s.qualityChosen = true; }
     saveSettings(s);
   }));
   f.body.querySelector('[data-a=resume]').onclick = () => ui.close();

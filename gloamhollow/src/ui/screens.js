@@ -36,7 +36,7 @@ export function showTitle(ui, { hasSave, saveInfo, onNew, onContinue }) {
   const helpBox = el.querySelector('.title-help');
   const input = ng.querySelector('input');
   const done = () => { el.classList.add('out'); setTimeout(() => el.remove(), 1200); ui.overlayBusy = false; };
-  el.addEventListener('mousedown', (e) => e.stopPropagation());
+  el.addEventListener('pointerdown', (e) => e.stopPropagation());
   el.querySelectorAll('button').forEach((b) => b.addEventListener('mouseenter', () => ui.audio.sfx('ui_hover', { volume: 0.25 })));
   el.querySelector('[data-a=new]').onclick = () => { ui.audio.init(); ui.audio.sfx('ui_click'); menu.style.display = 'none'; ng.classList.add('show'); input.focus(); };
   el.querySelector('[data-a=back]').onclick = () => { ui.audio.sfx('ui_click'); ng.classList.remove('show'); menu.style.display = ''; };
@@ -64,7 +64,7 @@ export function showTitle(ui, { hasSave, saveInfo, onNew, onContinue }) {
 export function narrate(ui, pages, title) {
   return new Promise((resolve) => {
     const el = h('div', 'narration');
-    el.innerHTML = `${title ? `<div class="nar-title">${title}</div>` : ''}<div class="nar-text"></div><div class="nar-hint">click to continue</div><button class="nar-skip interactive">Skip ›</button>`;
+    el.innerHTML = `${title ? `<div class="nar-title">${title}</div>` : ''}<div class="nar-text"></div><div class="nar-hint">${document.body.classList.contains('is-touch') ? 'tap' : 'click'} to continue</div><button class="nar-skip interactive">Skip ›</button>`;
     ui.root.appendChild(el);
     ui.overlayBusy = true;
     const txt = el.querySelector('.nar-text');
@@ -88,7 +88,7 @@ export function narrate(ui, pages, title) {
       if (i >= pages.length) end(); else show();
     };
     const onKey = (e) => { if (['Space', 'Enter', 'KeyE'].includes(e.code)) { e.preventDefault(); next(); } if (e.code === 'Escape') end(); };
-    el.addEventListener('mousedown', (e) => { e.stopPropagation(); if (!e.target.classList.contains('nar-skip')) next(); });
+    el.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (!e.target.classList.contains('nar-skip')) next(); });
     el.querySelector('.nar-skip').onclick = (e) => { e.stopPropagation(); end(); };
     window.addEventListener('keydown', onKey);
     requestAnimationFrame(() => { el.classList.add('show'); show(); });

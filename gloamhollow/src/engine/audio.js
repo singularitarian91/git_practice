@@ -30,6 +30,18 @@
 //   World units are metres, +Z is south.  setListener(x, z, yaw) uses the
 //   three.js Object3D.rotation.y convention: yaw 0 faces -Z (north), and a
 //   positive yaw turns left (counter-clockwise seen from above).
+//   Volume sliders map 0..1 to gain as v*v (perceptual).
+//   Every public method is a silent no-op until init() succeeds and never
+//   throws.  Volumes, the music mood, ambience levels and the listener set
+//   before init are remembered and applied once audio starts; one-shots
+//   (sfx, speak, thunder) are dropped while the context is not running.
+//
+// Extras beyond the core API
+//   init({ context })  use an existing (Offline)AudioContext (tests)
+//   sfx() returns true if the sound played, false if dropped
+//   thunder() plays on the ambience bus (weather); sfx('thunder') on sfx
+//   SFX_NAMES, MUSIC_MOODS, AMBIENCE_LAYERS  lists for tools and tests
+//   _debugLevel() / _debugPeak() / _debugStats()  master output meter
 
 // ---------------------------------------------------------------------------
 // 1. Helpers & DSP tables
@@ -44,6 +56,7 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const noop = () => {};
+const own = (obj, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(obj, key);
 
 // Pick an element with the given relative weights.
 function weighted(items, weights) {
@@ -810,7 +823,8 @@ def('tree_fall', 1, 0.15, 0.25, (k) => {
   k.noise({ at: hit + 0.05, color: 'pink', type: 'highpass', f: 1500, a: 0.02, dur: 1.1, gain: 0.4 });
 });
 def('pick_stone', 1, 0.1, 0, (k) => {
-  k.bell({ f: k.r(1700, 2300), dur: 0.3, gain: 0.16, partials: [[1, 1, 1], [1.47, 0.6, 0.8], [2.09, 0.45, 0.6], [2.74, 0.3, 0.45], [3.6, 0.15, 0.3]] });
+  // FM clink: non-integer ratio = inharmonic metal, index decays as it rings
+  k.fm({ f: k.r(1700, 2200), ratio: 1.41, index: 3, index2: 0.2, dur: 0.28, a: 0.001, gain: 0.16 });
   k.noise({ color: 'white', type: 'highpass', f: 2800, a: 0.0008, dur: 0.035, gain: 0.8 });
   thud(k, 0, 0.5, 130, 0.08);
   k.noise({ at: 0.015, color: 'white', type: 'bandpass', f: 3000, Q: 1.4, grains: k.grains(5, 0.18, [0.004, 0.012], [0.3, 0.8], [2000, 5000], 0.7), gain: 0.6 });
@@ -1007,7 +1021,9 @@ def('player_die', 2, 0.1, 0.45, (k) => {
   k.noise({ at: 0.1, color: 'pink', type: 'lowpass', f: 600, f2: 150, a: 0.6, dur: 1.6, gain: 0.5 });
 });
 def('block', 2, 0.1, 0.05, (k) => {
-  k.bell({ f: k.r(520, 610), dur: 0.55, gain: 0.13, partials: [[1, 1, 1], [2.32, 0.7, 0.7], [3.1, 0.5, 0.5], [4.53, 0.35, 0.35], [6.1, 0.2, 0.25]] });
+  const f = k.r(520, 610);
+  k.bell({ f, dur: 0.55, gain: 0.13, partials: [[1, 1, 1], [2.32, 0.7, 0.7], [3.1, 0.5, 0.5], [4.53, 0.35, 0.35], [6.1, 0.2, 0.25]] });
+  k.fm({ f: f * 2.01, ratio: 2.32, index: 4, index2: 0.3, dur: 0.45, a: 0.001, gain: 0.06 }); // bright "shing"
   k.noise({ color: 'white', type: 'bandpass', f: 2600, Q: 0.9, a: 0.0008, dur: 0.05, gain: 1.1 });
   k.tone({ f: 190, f2: 90, dur: 0.1, a: 0.001, gain: 0.3 });
 });
@@ -1034,9 +1050,9 @@ def('bite', 2, 0.08, 0, (k) => {
 });
 def('reel', 1, 0.03, 0, (k) => {
   const list = [], rate = k.r(22, 28);
-  for (let t = 0; t < 0.42; t += 1 / rate) list.push([t, 0.005, k.r(0.7, 1)]);
-  k.noise({ color: 'white', type: 'bandpass', f: 3400, Q: 2.5, grains: list, gain: 1.2 });
-  k.tone({ type: 'triangle', grains: list.map((g) => [g[0], 0.008, g[2] * 0.6, 1800]), gain: 0.05 });
+  for (let t = 0; t < 0.42; t += 1 / rate) list.push([t, 0.009, k.r(0.6, 1)]);
+  k.noise({ color: 'pink', type: 'bandpass', f: 2600, Q: 1.6, grains: list, gain: 1.2 });
+  k.tone({ type: 'triangle', grains: list.map((g) => [g[0], 0.012, g[2] * 0.6, 1400]), gain: 0.08 });
 });
 def('fish_catch', 2, 0.08, 0.1, (k) => {
   splash(k, 0, 0.9);
@@ -1137,24 +1153,44 @@ def('gloam_spawn', 1, 0.05, 0.5, (k) => {
   k.tone({ at: 0.3, type: 'sawtooth', f: 900, f2: 1350, dur: 0.4, a: 0.5, gain: 0.02, filter: { type: 'bandpass', f: 1200, Q: 6 } });
 });
 def('wraith_scream', 1, 0.08, 0.5, (k) => {
-  vocal(k, { f: k.r(760, 960), voices: 3, spread: 18, path: [[0, 0.9], [0.12, 1.15], [0.5, 0.95], [1, 0.55]], a: 0.05, hold: 0.3, dur: 0.9, gain: 0.5, vib: { rate: 7, depth: 0.03 }, formants: [[900, 4, 1], [2400, 6, 0.5], [3200, 8, 0.25]], breath: 0.6, lp: 4500 });
+  vocal(k, {
+    f: k.r(760, 960), voices: 3, spread: 18, path: [[0, 0.9], [0.12, 1.15], [0.5, 0.95], [1, 0.55]],
+    a: 0.05, hold: 0.3, dur: 0.9, gain: 0.5, vib: { rate: 7, depth: 0.03 },
+    formants: [[900, 4, 1], [2400, 6, 0.5], [3200, 8, 0.25]], breath: 0.6, lp: 4500,
+  });
 });
 def('gloamling_growl', 1, 0.08, 0.1, (k) => {
-  vocal(k, { f: k.r(85, 110), voices: 2, spread: 25, path: [[0, 0.9], [0.3, 1.1], [1, 0.8]], a: 0.06, hold: 0.25, dur: 0.3, gain: 0.8, rough: { rate: 32, depth: 0.7 }, formants: [[450, 2.5, 1], [900, 4, 0.5]], breath: 0.3, lp: 1500 });
+  vocal(k, {
+    f: k.r(85, 110), voices: 2, spread: 25, path: [[0, 0.9], [0.3, 1.1], [1, 0.8]],
+    a: 0.06, hold: 0.25, dur: 0.3, gain: 0.8, rough: { rate: 32, depth: 0.7 },
+    formants: [[450, 2.5, 1], [900, 4, 0.5]], breath: 0.3, lp: 1500,
+  });
   k.noise({ color: 'white', type: 'bandpass', f: 2500, Q: 2, grains: shift(k.grains(5, 0.5, [0.004, 0.01], [0.3, 0.9], [1800, 3800]), 0.05), gain: 0.6 });
 });
 def('draugr_groan', 1, 0.1, 0.3, (k) => {
-  vocal(k, { f: k.r(56, 66), voices: 2, spread: 20, path: [[0, 1], [0.4, 1.08], [1, 0.82]], a: 0.25, hold: 0.6, dur: 0.7, gain: 1.1, rough: { rate: 18, depth: 0.45 }, formants: [[380, 3, 1], [760, 4, 0.6], [2400, 8, 0.1]], breath: 0.4, lp: 1400 });
+  vocal(k, {
+    f: k.r(56, 66), voices: 2, spread: 20, path: [[0, 1], [0.4, 1.08], [1, 0.82]],
+    a: 0.25, hold: 0.6, dur: 0.7, gain: 1.1, rough: { rate: 18, depth: 0.45 },
+    formants: [[380, 3, 1], [760, 4, 0.6], [2400, 8, 0.1]], breath: 0.4, lp: 1400,
+  });
 });
 def('stag_roar', 2, 0.1, 0.5, (k) => {
   const f = k.r(72, 82);
-  vocal(k, { f, voices: 2, spread: 15, path: [[0, 0.9], [0.22, 1.45], [0.6, 1.25], [1, 0.75]], a: 0.15, hold: 1.2, dur: 0.9, gain: 1.2, rough: { rate: 24, depth: 0.5 }, formants: [[320, 3, 1], [750, 4, 0.8], [2300, 6, 0.3]], breath: 0.5, lp: 3200 });
+  vocal(k, {
+    f, voices: 2, spread: 15, path: [[0, 0.9], [0.22, 1.45], [0.6, 1.25], [1, 0.75]],
+    a: 0.15, hold: 1.2, dur: 0.9, gain: 1.2, rough: { rate: 24, depth: 0.5 },
+    formants: [[320, 3, 1], [750, 4, 0.8], [2300, 6, 0.3]], breath: 0.5, lp: 3200,
+  });
   k.tone({ f: f / 2, dur: 0.9, hold: 1.1, a: 0.2, gain: 0.25 });
 });
 def('crow_caw', 1, 0.08, 0.2, (k) => {
   const n = chance(0.6) ? 2 : 1;
   for (let i = 0; i < n; i++) {
-    vocal(k, { at: i * 0.3, f: k.r(520, 640), path: [[0, 1], [0.3, 1.1], [1, 0.78]], a: 0.012, hold: 0.07, dur: 0.12, gain: 0.7, rough: { rate: 70, depth: 0.5 }, formants: [[1300, 3, 1], [2600, 4, 0.5]], breath: 0.3, lp: 5000 });
+    vocal(k, {
+      at: i * 0.3, f: k.r(520, 640), path: [[0, 1], [0.3, 1.1], [1, 0.78]],
+      a: 0.012, hold: 0.07, dur: 0.12, gain: 0.7, rough: { rate: 70, depth: 0.5 },
+      formants: [[1300, 3, 1], [2600, 4, 0.5]], breath: 0.3, lp: 5000,
+    });
   }
 });
 def('owl_hoot', 1, 0.05, 0.5, (k) => owl(k, 0, 1));
@@ -1199,13 +1235,13 @@ function choir(k, at, midis, dur, gain) {
 // suits its role: soft steps and UI, clear tools and rewards, big events.
 const SFX_TRIM = {
   step_grass: -1.4, step_wood: -3.7, step_stone: -1.3, step_snow: +1.3, step_water: -2.0,
-  swing: -4.4, chop: +1.4, tree_fall: -4.4, pick_stone: -0.4, rock_break: -5.4, hoe: -5.7,
+  swing: -4.4, chop: +1.4, tree_fall: -4.4, pick_stone: +1.7, rock_break: -5.4, hoe: -5.7,
   water_pour: -6.9, plant: -4.3, harvest: +2.9, dig: -2.1, pickup: +2.2, drop: +2.1, coin: +2.5,
   buy: +6.5, sell: +5.6, ui_click: +6.8, ui_hover: +8.6, ui_open: +2.0, ui_close: +3.4,
   ui_error: +1.8, eat: +3.4, drink: -1.2, place: -4.1, remove: +0.3, craft: +3.2, cook: +4.1,
   door: -3.8, chest_open: +3.8, chest_close: -3.2, gift: +7.6, hit_enemy: +0.2, hit_wood: +3.3,
-  enemy_die: -3.6, player_hurt: -4.0, player_die: -5.0, block: +2.4, dodge: -3.2, cast: -3.1,
-  bite: +3.8, reel: +11.6, fish_catch: -1.0, fish_escape: +2.0, splash: -2.5, net_swing: -3.3,
+  enemy_die: -3.6, player_hurt: -4.0, player_die: -5.0, block: +2.2, dodge: -3.2, cast: -3.1,
+  bite: +3.8, reel: +8.0, fish_catch: -1.0, fish_escape: +2.0, splash: -2.5, net_swing: -3.3,
   bug_catch: +3.1, relic_found: +4.1, sleep: +6.3, day_start: +1.9, friendship: +7.6,
   quest_complete: +2.1, offering: -3.2, hearth_roar: -10.2, fire_ignite: -9.8, levelup: +8.2,
   notify: +4.7, gloam_spawn: +1.4, wraith_scream: -5.8, gloamling_growl: -0.4, draugr_groan: -1.0,
@@ -1236,14 +1272,19 @@ class Layer {
     this.st = {};
   }
 
+  // Safe to call every frame: automation is only scheduled when the level
+  // really moves, and the teardown timer only starts on the way down to 0.
   set(level, now) {
     this.level = level;
     if (level > 0.001 && !this.on) this.start(now);
     if (!this.on) return;
+    const silent = level <= 0.001;
+    if (Math.abs(level - this.sent) < 0.005 && silent === this.sent <= 0.001) return;
+    this.sent = level;
     const v = level * this.spec.vol;
     this.dry.gain.setTargetAtTime(v, now, 0.6);
     this.wet.gain.setTargetAtTime(v, now, 0.6);
-    this.offAt = level > 0.001 ? 0 : now + 4;
+    this.offAt = silent ? now + 4 : 0;
   }
 
   start(now) {
@@ -1256,6 +1297,7 @@ class Layer {
     this.wet.connect(bus.hall);
     this.on = true;
     this.st = {};
+    this.sent = -1;
     this.now = now;
     this.spec.build(this);
   }
@@ -1644,7 +1686,7 @@ const MOODS = {
     drone: { gain: 0.05, notes: [-24, -17], type: 'sine', cutoff: 500 },
     pad: { gain: 0.032, center: 55, attack: 4, release: 4, cutoff: 900, wave: 'warm', choir: 0.35 },
     lyre: { gain: 0.84, oct: 12, lo: -3, hi: 8, cells: 'slow', bright: 0.3, hall: 0.8, echo: 0.45 },
-    bells: { gain: 0.18, every: [6, 14], degs: [0, 2, 4, 7, 9, 11], oct: 24 },
+    bells: { gain: 0.18, every: [6, 14], degs: [0, 2, 4, 7], oct: 24 },
     bow: { gain: 0.08, every: [4, 8], len: [4, 8], lo: -7, hi: 2 },
   },
   day: {
@@ -1661,7 +1703,7 @@ const MOODS = {
     arp: { gain: 0.34, oct: -12, prob: 0.55, bright: 0.45, patterns: [[0, 1, 2, 1, 3, 1, 2, 1], [0, 2, 1, 2, 3, 2, 1, 2], [0, -1, 1, 2, 3, -1, 2, 1]] },
     bass: { type: 'pluck', gain: 0.4, oct: -24, steps: 8, pattern: [0, null, null, null, null, 7, null, null] },
     drums: { gain: 0.5, every: 2, boom: [0.6, 0, 0, 0.35, 0, 0, 0, 0, 0.4, 0, 0, 0, 0, 0, 0, 0] },
-    bells: { gain: 0.15, every: [10, 20], degs: [0, 2, 4, 7, 9], oct: 24 },
+    bells: { gain: 0.15, every: [10, 20], degs: [0, 2, 4, 7, 9], oct: 12 },
     bow: { gain: 0.066, every: [8, 16], len: [3, 6], lo: -5, hi: 2 },
   },
   dusk: {
@@ -1683,7 +1725,7 @@ const MOODS = {
     drone: { gain: 0.042, notes: [-24, -17, -12], type: 'sine', cutoff: 380 },
     pad: { gain: 0.017, center: 57, attack: 5, release: 5, cutoff: 600, wave: 'warm' },
     lyre: { gain: 0.55, oct: 12, lo: 0, hi: 9, cells: 'sparse', bright: 0.3 },
-    bells: { gain: 0.14, every: [3, 9], degs: [0, 2, 3, 4, 6, 7, 9], oct: 24 },
+    bells: { gain: 0.14, every: [3, 9], degs: [0, 2, 3, 4, 6, 7], oct: 24 },
     bow: { gain: 0.065, every: [4, 10], len: [5, 10], lo: -7, hi: 0 },
     drums: { gain: 0.3, every: 8, prob: 0.4, boom: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
   },
@@ -1735,7 +1777,7 @@ const MOODS = {
     drone: { gain: 0.048, notes: [-24, -17], type: 'triangle', cutoff: 450 },
     pad: { gain: 0.034, center: 57, attack: 2, release: 3, cutoff: 1200, wave: 'warm', choir: 0.25 },
     lyre: { gain: 0.72, oct: 0, lo: -2, hi: 9, cells: 'slow', bright: 0.55 },
-    bells: { gain: 0.14, every: [8, 16], degs: [0, 2, 4, 7, 9], oct: 24 },
+    bells: { gain: 0.14, every: [8, 16], degs: [0, 2, 4, 7, 9], oct: 12 },
     // fanfare: bVI - bVII - I (Bb - C - D) before the generative part settles in
     script(P, t) {
       const B = P.beat, bar = P.barDur;
@@ -1876,6 +1918,17 @@ class Performer {
     this.killAt = now + dur + 0.3;
   }
 
+  // undo a fade-out still in progress (e.g. combat <-> night flapping)
+  revive(now, dur) {
+    this.dead = false;
+    this.killAt = Infinity;
+    for (const f of this.fades) {
+      f.gain.cancelScheduledValues(now);
+      f.gain.setValueAtTime(f.gain.value, now);
+      f.gain.linearRampToValueAtTime(1, now + dur);
+    }
+  }
+
   dispose() {
     for (const s of this.srcs) { try { s.stop(); } catch { /* not started */ } }
     for (const n of [...this.persist, ...this.fades]) { try { n.disconnect(); } catch { /* gone */ } }
@@ -1902,7 +1955,7 @@ class Performer {
 
   planBar(bar, t) {
     const m = this.m, B = this.beat;
-    if (m.bells) {
+    if (m.bells && bar >= this.scriptBars) { // free-running bells (not over a scripted fanfare)
       if (this.nextBell < t - 1) this.nextBell = t + rand(0, m.bells.every[0]);
       while (this.nextBell < t + this.barDur) {
         const bt = Math.max(this.nextBell, t);
@@ -2302,12 +2355,15 @@ function parseSpeech(text, P) {
   }
   const sp = clamp(num(P.speed, 0.055), 0.02, 0.3);
   const ev = [];
+  // at[i]: when character i is reached, so text can be revealed in step
+  const at = new Float32Array(n + 1);
   let t = 0, inWord = false, lastChime = -1;
   for (let i = 0; i < n; i++) {
     const raw = chars[i], c = raw.toLowerCase();
+    at[i] = t;
     if (PAUSE[c] != null) { // collapse runs like "?!" or "..."
       let p = PAUSE[c], j = i;
-      while (j + 1 < n && PAUSE[chars[j + 1]] != null) { j++; p = Math.max(p, PAUSE[chars[j]]); }
+      while (j + 1 < n && PAUSE[chars[j + 1]] != null) { j++; at[j] = t; p = Math.max(p, PAUSE[chars[j]]); }
       if (j > i && c === '.') p = Math.max(p, 7);
       t += p * sp;
       i = j;
@@ -2344,7 +2400,8 @@ function parseSpeech(text, P) {
     ev.push({ t, v: !!vowelShape, cls, f, fm: vowelShape ? vowelShape[1] : cls === 'nas' ? 0.55 : 0.85, g: (k === 'x' ? 1.15 : 1) * (upper ? 1.15 : 1) });
     t += sp * (vowelShape ? 1 : 0.9) * rand(0.94, 1.06);
   }
-  return { ev, dur: t };
+  at[n] = t;
+  return { ev, dur: t, at };
 }
 
 class Utterance {
@@ -2505,7 +2562,7 @@ class Utterance {
 const MAX_VOICES = 24;           // simultaneous sfx (important ones get +8)
 const BUS_NAMES = ['music', 'sfx', 'ambience', 'voice'];
 const BUS_TRIM = { music: 1, sfx: 1, ambience: 1, voice: 1 }; // internal mix calibration
-const THUNDER_VOL = 1;
+const THUNDER_VOL = 1.6;         // weather thunder vs sfx('thunder'): ambience bus is quieter by default
 const volCurve = (v) => v * v;   // slider 0..1 -> gain (perceptual)
 
 export const MUSIC_MOODS = ['title', 'day', 'dusk', 'night', 'combat', 'boss', 'victory', 'none'];
@@ -2558,13 +2615,17 @@ export class AudioEngine {
       const given = opts && opts.context;
       const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
       if (!given && !AC) return false;
-      this.ctx = given || new AC({ latencyHint: 'interactive' });
+      if (given) this.ctx = given;
+      else {
+        try { this.ctx = new AC({ latencyHint: 'interactive' }); } catch { this.ctx = new AC(); } // old Safari: no options
+      }
       this._offline = typeof OfflineAudioContext !== 'undefined' && this.ctx instanceof OfflineAudioContext;
       try {
         this._build();
       } catch (e) {
         this._warn(e);
         this._failed = true;
+        if (!given) this.ctx.close?.().catch(noop);
         return false;
       }
       if (!this._offline) {
@@ -2642,11 +2703,12 @@ export class AudioEngine {
           tail.connect(lp);
           tail = lp;
         }
-        if (Math.abs(pan) > 0.01) {
-          const p = v.add(this._panner(pan));
-          tail.connect(p);
-          tail = p;
-        }
+        // equal-power panner always (no level jump near centre); +3 dB so a
+        // centred positional sound matches the calibrated non-positional level
+        const p = v.add(this._panner(pan));
+        tail.connect(p);
+        tail = p;
+        out.gain.value = vol * Math.SQRT2;
       }
       tail.connect(bus.in);
       const wetBoost = spatial ? Math.min(3, 1 / Math.sqrt(att)) : 1; // distant = wetter
@@ -2687,7 +2749,7 @@ export class AudioEngine {
 
   setMusic(mood) {
     try {
-      if (typeof mood !== 'string' || !(mood === 'none' || MOODS[mood])) return; // unknown: ignore
+      if (mood !== 'none' && !own(MOODS, mood)) return; // unknown: ignore
       if (!this._live()) { this._mood = mood; return; }
       if (mood === this._mood && (mood === 'none' || (this._perf && this._perf.name === mood))) return;
       this._mood = mood;
@@ -2699,7 +2761,11 @@ export class AudioEngine {
         this._perf = null;
       }
       if (next) {
-        this._perf = new Performer(this, mood, now);
+        const back = this._dying.findIndex((p) => p.name === mood);
+        if (back >= 0) { // still fading out: bring it back rather than restarting
+          this._perf = this._dying.splice(back, 1)[0];
+          this._perf.revive(now, Math.min(1.5, next.fade));
+        } else this._perf = new Performer(this, mood, now);
         this._perf.tick(now, 0.35);
       }
     } catch (e) { this._warn(e); }
@@ -2712,7 +2778,7 @@ export class AudioEngine {
       if (!this._canPlay()) return silent;
       const str = text == null ? '' : String(text);
       if (!str.trim()) return silent;
-      const preset = typeof voice === 'string' ? VOICES[voice] || VOICES.player
+      const preset = typeof voice === 'string' ? (own(VOICES, voice) ? VOICES[voice] : VOICES.player)
         : voice && typeof voice === 'object' ? voice : VOICES.player;
       const u = new Utterance(this, str.slice(0, 4000), preset);
       this._utt = u;
@@ -2721,6 +2787,21 @@ export class AudioEngine {
     } catch (e) {
       this._warn(e);
       return silent;
+    }
+  }
+
+  // How a line would be paced when spoken: { at, dur } where at[i] is the
+  // time (s) character i is reached.  Pure; works before init() and muted.
+  speechTimeline(text, voice) {
+    try {
+      const str = (text == null ? '' : String(text)).slice(0, 4000);
+      const preset = typeof voice === 'string' ? (own(VOICES, voice) ? VOICES[voice] : VOICES.player)
+        : voice && typeof voice === 'object' ? voice : VOICES.player;
+      const { at, dur } = parseSpeech(str, voicePreset(preset));
+      return { at, dur };
+    } catch (e) {
+      this._warn(e);
+      return null;
     }
   }
 
@@ -2739,7 +2820,7 @@ export class AudioEngine {
       if (I <= 0.01) return;
       const ctx = this.ctx, v = new Voice(), bus = this.bus.ambience;
       const out = v.add(ctx.createGain()), p = v.add(this._panner(rand(-0.5, 0.5))), s = v.add(ctx.createGain());
-      out.gain.value = THUNDER_VOL;
+      out.gain.value = THUNDER_VOL * SFX.thunder.vol * Math.SQRT2; // panned: compensate pan law
       s.gain.value = 0.7;
       out.connect(p);
       p.connect(bus.in);

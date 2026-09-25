@@ -86,7 +86,8 @@ const GRAIN_FRAG_MAIN = /* glsl */`
 const FADE_FRAG = /* glsl */`
   if (uFade.w > 0.0) {
     float fd = distance(gl_FragCoord.xy, uFade.xy);
-    if (fd < uFade.w && -vViewPosition.z < uFade.z - 1.2 && vGhWorldPos.y > uFadeY) {
+    // vViewPosition.z is the fragment's positive distance along the view axis
+    if (fd < uFade.w && vViewPosition.z < uFade.z - 1.2 && vGhWorldPos.y > uFadeY) {
       float k = 1.0 - smoothstep(uFade.w * 0.5, uFade.w, fd);
       if (ghBayer(gl_FragCoord.xy) < k * 0.8) discard;
     }
