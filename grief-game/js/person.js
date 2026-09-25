@@ -27,8 +27,8 @@
 
   // A sleeve or trouser leg. `dark` lays a shadow over it (for the far side of the body).
   // `ink` (paper mode) outlines it in charcoal first; only that first stroke casts a shadow.
-  function limb(x, pts, w, col, dark, ink) {
-    x.lineCap = 'round';
+  function limb(x, pts, w, col, dark, ink, cap) {
+    x.lineCap = cap || 'round';
     x.lineJoin = 'round';
     x.beginPath();
     x.moveTo(pts[0], pts[1]);
@@ -192,10 +192,17 @@
       return { kx, ky, ax, ay, th, kb };
     });
     const drawLeg = (lp, far) => {
-      if (trouF !== trou) limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, trouF, far ? 0.3 : 0, ink);
-      else limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, far ? trouD : trou, 0, ink);
-      // boot
+      // points up the shin from the ankle (the trouser stops inside the boot, so nothing
+      // of the leg can show below the sole)
+      const sl = Math.hypot(lp.ax - lp.kx, lp.ay - lp.ky) || 1;
+      const up = d => [lp.ax - (lp.ax - lp.kx) / sl * d, lp.ay - (lp.ay - lp.ky) / sl * d];
+      const [tx, ty] = up(0.05);
+      if (trouF !== trou) limb(x, [hipX, hipY, lp.kx, lp.ky, tx, ty], 0.056, trouF, far ? 0.3 : 0, ink);
+      else limb(x, [hipX, hipY, lp.kx, lp.ky, tx, ty], 0.056, far ? trouD : trou, 0, ink);
+      // boot: a short shaft that follows the shin, then the foot over the ankle
       const bootCol = far ? shade(look.boots, -0.3) : look.boots;
+      const [b0x, b0y] = up(0.078), [b1x, b1y] = up(0.012);
+      limb(x, [b0x, b0y, b1x, b1y], 0.06, bootCol, 0, ink, 'butt');
       x.save();
       x.translate(lp.ax, lp.ay);
       // walking: toe follows the shin; kneeling: foot turned back, sole up
