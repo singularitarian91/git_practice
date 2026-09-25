@@ -49,15 +49,23 @@
     ]);
   }
 
+  // Straight into a chapter (a #ch link, or the page reloading mid-chapter) once its
+  // painted scenery has arrived.
+  function begin(i, o) {
+    G.art.loadAll(G.art.shared.concat(G.flow.artFor(i, o))).then(() => G.flow.start(i, o));
+  }
+
   function start(data) {
     data = data || {};
     const m = (location.hash || '').match(/^#ch([1-5])(r?)$/);
-    if (m) { G.flow.start(+m[1] - 1, { revisit: m[2] === 'r' }); return; }
+    if (m) { begin(+m[1] - 1, { revisit: m[2] === 'r' }); return; }
     if (data.ch != null && data.ch >= 0 && G.chapters[G.flow.CH[data.ch].ctor]) {
-      G.flow.start(data.ch, { revisit: !!data.revisit });
+      begin(data.ch, { revisit: !!data.revisit });
       return;
     }
-    G.setScene(new G.TitleScene());
+    // the title waits a little for its painting, then shows the drawn room if it's slow
+    Promise.race([G.art.loadAll(G.art.shared.concat(G.TitleScene.art)), wait(6000)])
+      .then(() => G.setScene(new G.TitleScene()));
   }
 
   fonts.then(() => {

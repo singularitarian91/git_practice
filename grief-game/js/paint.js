@@ -497,7 +497,7 @@
     x.lineTo(e[0] + Math.sin((o.seed || 0) * 3) * 4, e[1] + 3);
     for (let i = n - 1; i >= 0; i--) x.lineTo(right[i][0], right[i][1]);
     x.closePath();
-    x.fillStyle = o.color || C.oxblood;
+    x.fillStyle = (o.fabric && P.fabric(x, o.fabric, o.texel || 0.35)) || o.color || C.oxblood;
     x.fill();
     x.strokeStyle = M.rgba(o.edge || C.oxbloodDark, 0.8);
     x.lineWidth = 1;
@@ -560,12 +560,65 @@
     x.restore();
   };
 
+  // ------------------------------------------------------------ painted cloth and the chair
+  const FABRICS = ['ochre', 'rust', 'mustard', 'tweed', 'linen', 'plum', 'sage', 'rose', 'oxblood'];
+  const THROWS = { grey: ['#8e8a84'], plum: ['#6b3f52'] };
+  G.art.shared = ['shared/chair-ochre.webp', 'shared/chair-grey.webp', 'shared/chair-plum.webp']
+    .concat(FABRICS.map(n => 'shared/fabric-' + n + '.webp'));
+
+  // A repeating painted-fabric fill. texel: size of one texture pixel in current drawing units.
+  const patterns = new WeakMap();
+  P.fabric = function (x, name, texel) {
+    const im = G.art.get('shared/fabric-' + name + '.webp');
+    if (!im) return null;
+    let m = patterns.get(x);
+    if (!m) patterns.set(x, (m = {}));
+    const p = m[name] || (m[name] = x.createPattern(im, 'repeat'));
+    if (p.setTransform && window.DOMMatrix) p.setTransform(new DOMMatrix([texel, 0, 0, texel, 0, 0]));
+    return p;
+  };
+
+  // The painted chair: its floor point (between the feet) and floor-to-top height, in image px.
+  const CHAIR = { ax: 210, ay: 637, h: 634 };
+  function chairSprite(o) {
+    if (o.wood) return null; // ghost copies and the charcoal end card keep the drawn chair
+    let v = 'ochre';
+    for (const k in THROWS) if (THROWS[k].indexOf(o.throwColor) >= 0) v = k;
+    return G.art.get('shared/chair-' + v + '.webp');
+  }
+
   // ------------------------------------------------------------ the empty chair
   // Side view with a little 3/4 depth. (fx, fy) is the floor point under the seat.
-  // o: {s: height in px, facing: 1|-1, tip: radians, throwColor, throwPatch, alpha, wood}
+  // o: {s: height in px, facing: 1|-1, tip: radians, throwColor, throwPatch, alpha, wood, shadow}
   P.chair = function (x, fx, fy, o) {
     o = o || {};
     const s = o.s || 100;
+    const im = chairSprite(o);
+    if (im) {
+      const k = s * 1.03 / CHAIR.h;
+      x.save();
+      x.translate(fx, fy);
+      if (o.alpha != null) x.globalAlpha *= o.alpha;
+      // soft contact shadow, fading as the chair tips over
+      const sh = (o.shadow == null ? 0.3 : o.shadow) * (1 - Math.min(1, Math.abs(o.tip || 0) * 1.4));
+      if (sh > 0.01) {
+        const g = x.createRadialGradient(0, 0, 0, 0, 0, s * 0.34);
+        g.addColorStop(0, 'rgba(10,8,6,' + sh + ')');
+        g.addColorStop(1, 'rgba(10,8,6,0)');
+        x.fillStyle = g;
+        x.save();
+        x.scale(1, 0.12);
+        x.beginPath();
+        x.arc(0, 0, s * 0.34, 0, TAU);
+        x.fill();
+        x.restore();
+      }
+      if (o.tip) x.rotate(o.tip);
+      x.scale((o.facing || 1) * k, k);
+      x.drawImage(im, -CHAIR.ax, -CHAIR.ay);
+      x.restore();
+      return;
+    }
     const wood = o.wood || '#4a3628', dark = o.woodDark || '#2a1d15', lite = o.woodLight || '#7b5f47';
     x.save();
     x.translate(fx, fy);

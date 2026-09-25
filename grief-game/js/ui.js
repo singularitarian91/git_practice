@@ -71,7 +71,14 @@
     ui.queue.push(...items);
   };
   ui.busy = function () { return !!ui.line || ui.queue.length > 0; };
-  ui.clear = function () { ui.line = null; ui.queue = []; ui.bubbles = []; ui.hint(null); };
+  ui.clear = function () { ui.line = null; ui.queue = []; ui.bubbles = []; ui.action = null; ui.card = null; ui.hint(null); };
+
+  // A close look at something of theirs: a painted card in the middle of the screen, with its
+  // lines, until you tap or press a key.
+  ui.keepsake = function (img, lines) {
+    ui.card = { img, t: 0, a: 0, closing: false };
+    if (lines) ui.say(lines);
+  };
 
   ui.hint = function (text, dur) {
     if (text == null) { ui.hintT = 0; return; }
@@ -88,8 +95,13 @@
   // ------------------------------------------------------------ HUD + pause
   const HUD = {
     sound: { x: G.W - 64, y: 18, w: 36, h: 36 },
-    pause: { x: G.W - 108, y: 18, w: 36, h: 36 }
+    pause: { x: G.W - 108, y: 18, w: 36, h: 36 },
+    action: { x: G.W - 112, y: G.H - 150, w: 80, h: 80 }
   };
+  // A chapter can offer one hold-to-use action: a round button at the lower right, or a key.
+  // ui.action = { label, key } while it's offered; ui.action.held says whether it's held now.
+  ui.action = null;
+  ui.actionHeldBy = null;
   const inRect = (r, px, py) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
 
   ui.toggleSound = function () {
@@ -136,10 +148,25 @@
       return;
     }
     ui.hudHover = null;
+    if (ui.card) {
+      if (ui.card.t > 1.2 && (inp.pressed || inp.hit.act)) ui.card.closing = true;
+      inp.consume();
+      inp.hit = {};
+      return;
+    }
     if (!ui.hud) return;
-    if (inRect(HUD.sound, inp.x, inp.y)) ui.hudHover = 'sound';
+    // the hold-to-use action: pressing the button holds it until the press ends
+    const act = ui.action;
+    if (act) {
+      if (inp.pressed && inRect(HUD.action, inp.x, inp.y)) { ui.actionHeldBy = 'pointer'; inp.consume(); }
+      if (ui.actionHeldBy === 'pointer' && !inp.down) ui.actionHeldBy = null;
+      act.held = ui.actionHeldBy === 'pointer' || !!inp.keys[act.key];
+      if (inp.keys[act.key]) inp.lastDevice = 'keys';
+    } else ui.actionHeldBy = null;
+    if (act && inRect(HUD.action, inp.x, inp.y)) ui.hudHover = 'action';
+    else if (inRect(HUD.sound, inp.x, inp.y)) ui.hudHover = 'sound';
     else if (inRect(HUD.pause, inp.x, inp.y)) ui.hudHover = 'pause';
-    if (inp.pressed && ui.hudHover) {
+    if (inp.pressed && (ui.hudHover === 'sound' || ui.hudHover === 'pause')) {
       if (ui.hudHover === 'sound') ui.toggleSound(); else if (!G.fx.active) ui.openMenu();
       inp.consume();
     }
@@ -160,6 +187,18 @@
     ui.hintA = M.damp(ui.hintA, ui.hintT > 0 ? 1 : 0, 6, dt);
     for (const b of ui.bubbles) b.t += dt;
     ui.bubbles = ui.bubbles.filter(b => b.t < b.dur);
+    if (ui.card) {
+      const c = ui.card;
+      c.t += dt;
+      c.a = c.closing ? c.a - dt * 3 : Math.min(1, c.a + dt * 2.5);
+      if (c.closing && c.a <= 0) ui.card = null;
+    }
+    if (ui.action) {
+      const a = ui.action;
+      a.t = (a.t || 0) + dt;
+      a.fill = M.damp(a.fill || 0, a.held ? 1 : 0, 8, dt);
+      a.appear = Math.min(1, (a.appear || 0) + dt * 1.5);
+    }
     if (ui.hud && ui.hudHover && !ui.menu) G.setCursor('pointer');
   };
 
@@ -199,6 +238,78 @@
         x.stroke();
       }
     }
+    x.restore();
+  }
+
+  function drawCard(x, c) {
+    const a = M.easeInOut(M.clamp(c.a, 0, 1));
+    const im = typeof c.img === 'string' ? G.art.get(c.img) : c.img;
+    x.save();
+    x.fillStyle = 'rgba(10,12,11,' + (0.62 * a) + ')';
+    x.fillRect(0, 0, G.W, G.H);
+    if (im) {
+      const k = Math.min(520 / im.naturalWidth, 380 / im.naturalHeight);
+      const w = im.naturalWidth * k, h = im.naturalHeight * k;
+      x.globalAlpha = a;
+      x.translate(G.W / 2, G.H / 2 - 40 + (1 - a) * 16);
+      x.rotate(-0.02);
+      x.shadowColor = 'rgba(0,0,0,0.5)';
+      x.shadowBlur = 24;
+      x.drawImage(im, -w / 2, -h / 2, w, h);
+      x.shadowBlur = 0;
+    }
+    x.restore();
+    if (c.t > 1.2 && !c.closing) {
+      x.save();
+      x.globalAlpha = a * (0.5 + 0.3 * Math.sin(c.t * 2.5));
+      T.label(x, G.touch ? 'Tap to put it back' : 'Click or press E to put it back', G.W / 2, G.H - 118, { size: 11, align: 'center', color: C.bone });
+      x.restore();
+    }
+  }
+
+  // The hold-to-use action: a stitched ring that fills with warm light while held.
+  function drawAction(x, act, hover) {
+    const r = HUD.action, cx = r.x + r.w / 2, cy = r.y + r.h / 2 - 8, rad = 25;
+    const f = act.fill || 0;
+    x.save();
+    x.globalAlpha = (act.appear == null ? 1 : act.appear) * (hover || f > 0.05 ? 1 : 0.72);
+    x.fillStyle = 'rgba(14,16,15,0.45)';
+    x.beginPath();
+    x.arc(cx, cy, rad + 5, 0, M.TAU);
+    x.fill();
+    if (f > 0.01) {
+      const g = x.createRadialGradient(cx, cy, 2, cx, cy, rad);
+      g.addColorStop(0, M.rgba(C.warm, 0.85 * f));
+      g.addColorStop(1, M.rgba(C.ochre, 0.25 * f));
+      x.fillStyle = g;
+      x.beginPath();
+      x.arc(cx, cy, rad, 0, M.TAU);
+      x.fill();
+    }
+    // stitched ring
+    x.strokeStyle = C.bone;
+    x.lineWidth = 1.6;
+    x.lineCap = 'round';
+    const n = 18;
+    for (let i = 0; i < n; i++) {
+      const a0 = i / n * M.TAU + (act.t || 0) * 0.2, a1 = a0 + M.TAU / n * 0.55;
+      x.beginPath();
+      x.arc(cx, cy, rad, a0, a1);
+      x.stroke();
+    }
+    // a small spool of thread
+    x.fillStyle = C.bone;
+    x.fillRect(cx - 9, cy - 11, 18, 3);
+    x.fillRect(cx - 9, cy + 8, 18, 3);
+    x.strokeStyle = C.oxbloodLight;
+    x.lineWidth = 2;
+    x.beginPath();
+    for (let i = 0; i < 4; i++) { x.moveTo(cx - 6, cy - 6 + i * 4); x.lineTo(cx + 6, cy - 4 + i * 4); }
+    x.stroke();
+    x.shadowColor = 'rgba(0,0,0,0.7)';
+    x.shadowBlur = 6;
+    T.label(x, act.label, cx, cy + rad + 22, { size: 11, align: 'center', color: C.tan, track: 1.6 });
+    if (!G.touch) T.label(x, 'hold ' + (act.keyName || ''), cx, cy + rad + 38, { size: 10, align: 'center', color: 'rgba(237,233,226,0.6)', track: 1.4 });
     x.restore();
   }
 
@@ -295,7 +406,10 @@
       x.restore();
       drawIcon(x, 'sound', ui.hudHover === 'sound');
       drawIcon(x, 'pause', ui.hudHover === 'pause');
+      if (ui.action) drawAction(x, ui.action, ui.hudHover === 'action');
     }
+
+    if (ui.card) drawCard(x, ui.card);
 
     if (ui.menu) {
       x.save();

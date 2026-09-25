@@ -10,6 +10,11 @@
   const GAUZE = [0, 0.2, 0.42, 0.64, 0.86];
   const DOOR_L = { x: 70, y: 238, w: 145, h: 362 };
   const DOOR_R = { x: 1095, y: 238, w: 140, h: 362 };
+  // Painted scenery (assets/art/denial): the room with its walls turning to cloth, and small
+  // painted pieces laid over it for the things that change. [x, y, w, h] in stage units.
+  const PATCH = { cupB: [907, 414, 47, 43], coat: [997, 270, 109, 278] };
+  const ART = { room: 'denial/room.webp', gauze: 'denial/gauze.webp', warm: 'denial/warm.webp', open: 'denial/warm-open.webp' };
+  const LOOK_FIRST = 3; // things to look at in the first room before its door will open
 
   const LINES = {
     bed: { 0: 'The bed, half made. Their side is still creased.', n: 'The bed, half made. The same.', rv: 'The bed is made now.' },
@@ -606,6 +611,30 @@
     x.fill();
   }
 
+  // The painted door leaf, cut from the room painting and swung toward the viewer in strips.
+  function paintedLeaf(x, img, d, open, hingeLeft, alpha) {
+    if (open >= 0.995 || !img) return;
+    const th = open * 1.35, ww = d.w * Math.cos(th), bulge = d.h * 0.07 * Math.sin(th);
+    const k = img.naturalWidth / G.W, N = 12;
+    x.save();
+    x.globalAlpha *= alpha == null ? 1 : alpha;
+    for (let i = 0; i < N; i++) {
+      const u0 = i / N, u1 = (i + 1) / N, um = (u0 + u1) / 2;
+      const sx = hingeLeft ? d.x + d.w * u0 : d.x + d.w * (1 - u1);
+      const dx0 = hingeLeft ? d.x + ww * u0 : d.x + d.w - ww * u1;
+      const top = d.y - bulge * um, h = d.h + 2 * bulge * um;
+      x.drawImage(img, sx * k, d.y * k, (d.w / N) * k, d.h * k, dx0, top, ww / N + 0.6, h);
+    }
+    // the leaf darkens as it turns away from the window light
+    x.fillStyle = 'rgba(10,8,6,' + (0.45 * open) + ')';
+    x.beginPath();
+    const x0 = hingeLeft ? d.x : d.x + d.w, x1 = hingeLeft ? d.x + ww : d.x + d.w - ww;
+    x.moveTo(x0, d.y); x.lineTo(x1, d.y - bulge); x.lineTo(x1, d.y + d.h + bulge); x.lineTo(x0, d.y + d.h);
+    x.closePath();
+    x.fill();
+    x.restore();
+  }
+
   // ------------------------------------------------------------ scene
   function Denial(o) {
     o = o || {};
@@ -633,9 +662,14 @@
     this.ribbons = [];
     this.pushT = 0;
     this.player.alpha = 1;
+    this.looked = new Set();
+    this.nudged = 0;
+    this.remember = 0;
+    this.windowOpen = 0;
   }
   Denial.prototype = Object.create(G.SideScene.prototype);
   G.chapters.Denial = Denial;
+  Denial.art = o => (o.revisit ? [ART.warm, ART.open] : [ART.room, ART.gauze, 'denial/cupB.webp', 'denial/coat.webp']);
 
   Denial.prototype.state = function () {
     const c = this.copy, rv = this.revisit;
@@ -655,7 +689,8 @@
   // Scenery, painted ahead of time (during the chapter plate) when possible.
   Denial.prototype.prepareSteps = function () {
     return [() => {
-      this.layer = paintRoom(this.state());
+      this.painted = !!G.art.get(this.revisit ? ART.warm : ART.room);
+      if (!this.painted) this.layer = paintRoom(this.state());
       this.motes = new P.Motes(40, { x: 430, y: 230, w: 470, h: 420 }, 9);
     }];
   };
@@ -676,6 +711,8 @@
   };
 
   Denial.prototype.look = function (id) {
+    if (this.copy === 0) this.looked.add(id);
+    if (this.revisit && id === 'window') { this.openWindow(); return; }
     const ch = CHANGES[this.copy];
     if (!this.revisit && ch && ch.id === id && this.noticed < this.copy) {
       this.noticed = this.copy;
@@ -713,7 +750,7 @@
         when: () => !this.ending
       });
     } else {
-      this.item({ id: 'door', x: DOOR_R.x, y: DOOR_R.y, w: DOOR_R.w, h: DOOR_R.h, gy: 430, at: 1160, face: 1, reach: false, use: () => this.startExit() });
+      this.item({ id: 'door', x: DOOR_R.x, y: DOOR_R.y, w: DOOR_R.w, h: DOOR_R.h, gy: 430, at: 1160, face: 1, reach: false, use: () => this.tryDoor() });
     }
     // after a loop without noticing, the changed thing shimmers a little
     const ch = CHANGES[this.copy];
@@ -721,6 +758,30 @@
       const it = this.items.find(i => i.id === ch.id);
       if (it) it.glintBoost = this.loops >= 2 ? 1 : 0.7;
     }
+  };
+
+  // The first room's door won't open until you've really looked at the room.
+  Denial.prototype.tryDoor = function () {
+    if (!this.revisit && this.copy === 0 && this.looked.size < LOOK_FIRST) {
+      this.nudged++;
+      this.pushT = -1.2;
+      this.rattle = 1;
+      G.audio.thud(0.12);
+      G.ui.say(this.nudged === 1 ? 'Not yet.' : ['Not yet.', 'I haven’t really looked.']);
+      if (this.nudged >= 2) G.ui.hint(G.touch ? 'Tap a few things in the room first' : 'Look at a few things in the room first', 6);
+      return;
+    }
+    this.startExit();
+  };
+
+  // Return: the window can be opened now.
+  Denial.prototype.openWindow = function () {
+    if (this.windowOpened) { G.ui.say('The window stays open.'); return; }
+    this.windowOpened = true;
+    G.audio.creak();
+    G.ui.say(['I open the window.', 'Air. It smells of rain.']);
+    G.audio.scene({ room: 0.7, wind: 0.35, drone: [50, 57, 64], droneLevel: 0.3 });
+    G.after(1.4, () => G.audio.bird());
   };
 
   Denial.prototype.startExit = function () {
@@ -740,13 +801,18 @@
     else if (this.noticed >= c) n = Math.min(4, c + 1);
     this.loops = n === c ? this.loops + 1 : 0;
     this.copy = n;
-    if (this.layer) { this.layer.c.width = 0; this.layer.c.height = 0; }
-    this.layer = paintRoom(this.state());
+    if (!this.painted) {
+      if (this.layer) { this.layer.c.width = 0; this.layer.c.height = 0; }
+      this.layer = paintRoom(this.state());
+    }
     this.buildItems();
     if (n === 4) G.audio.scene({ room: 0.8, wind: 0.3, drone: [50, 56, 62], droneLevel: 0.3 });
   };
 
   Denial.prototype.onEnterCopy = function () {
+    if (this.copy === 1 && this.loops === 0) {
+      G.ui.hint(G.touch ? 'Hold the round button to remember how the room was' : 'Hold R, or the round button, to remember how the room was', 9);
+    }
     if (this.loops === 0) G.ui.say(ENTER[this.copy]);
     else if (this.loops === 1) G.ui.say('The same room. Again.');
     else G.ui.say(['Something here is different.', 'Look again.']);
@@ -851,10 +917,20 @@
       const st = this.state();
       if (!this.locked && !st.sewn && G.input.axis() > 0 && pl.x >= this.maxX - 2) {
         this.pushT += dt;
-        if (this.pushT > 0.35) this.startExit();
-      } else this.pushT = 0;
+        if (this.pushT > 0.35) this.tryDoor();
+      } else if (this.pushT > 0) this.pushT = 0;
+      else this.pushT = Math.min(0, this.pushT + dt);
     }
     if (this.markFlash) this.markFlash = Math.max(0, this.markFlash - dt * 0.6);
+    if (this.rattle) this.rattle = Math.max(0, this.rattle - dt * 2.5);
+    if (this.windowOpened) this.windowOpen = Math.min(1, this.windowOpen + dt / 1.8);
+    // hold to remember the room as it was (from the second copy on)
+    const canRemember = !this.revisit && this.copy >= 1 && !this.anim && !this.ending;
+    if (canRemember && !G.ui.action) G.ui.action = { label: 'Remember', key: 'remember', keyName: 'R', owner: this };
+    else if (!canRemember && G.ui.action && G.ui.action.owner === this) G.ui.action = null;
+    const held = !!(G.ui.action && G.ui.action.owner === this && G.ui.action.held);
+    if (held && this.remember < 0.05) G.audio.chime(62, 0.05);
+    this.remember = M.damp(this.remember, held ? 1 : 0, held ? 4 : 6, dt);
     for (const b of this.bits) {
       b.life -= dt;
       b.vy += 260 * dt;
@@ -885,8 +961,83 @@
     }
   };
 
+  // The painted room as it stands now: the solid room, the cloth version fading in copy by
+  // copy, then the things that change.
+  Denial.prototype.drawRoom = function (x, st) {
+    if (!this.painted) { x.drawImage(this.layer.c, 0, 0, G.W, G.H); return; }
+    const A = G.art.get;
+    if (this.revisit) {
+      x.drawImage(A(ART.warm), 0, 0, G.W, G.H);
+      const w = M.easeInOut(this.windowOpen);
+      if (w > 0 && A(ART.open)) { x.globalAlpha = w; x.drawImage(A(ART.open), 0, 0, G.W, G.H); x.globalAlpha = 1; }
+      return;
+    }
+    x.drawImage(A(ART.room), 0, 0, G.W, G.H);
+    if (st.g > 0 && A(ART.gauze)) { x.globalAlpha = st.g; x.drawImage(A(ART.gauze), 0, 0, G.W, G.H); x.globalAlpha = 1; }
+    this.drawPatches(x, st, 1);
+  };
+  Denial.prototype.drawPatches = function (x, st, alpha) {
+    x.save();
+    x.globalAlpha *= alpha;
+    for (const key of ['cupB', 'coat']) {
+      if ((key === 'cupB' && st.cups < 2) || (key === 'coat' && !st.coat)) continue;
+      const im = G.art.get('denial/' + key + '.webp'), r = PATCH[key];
+      if (im) x.drawImage(im, r[0], r[1], r[2], r[3]);
+    }
+    x.restore();
+  };
+  Denial.prototype.roomImage = function () {
+    return this.painted ? G.art.get(this.revisit ? ART.warm : ART.room) : null;
+  };
+
+  // Holding Remember: the first room, as it was, laid over this one like an old photograph.
+  Denial.prototype.drawRemembered = function (x) {
+    const a = this.remember;
+    if (a < 0.01) return;
+    const first = { cups: 2, coat: true, g: 0 };
+    x.save();
+    x.globalAlpha = a * 0.82;
+    if (this.painted) {
+      x.drawImage(G.art.get(ART.room), 0, 0, G.W, G.H);
+      this.drawPatches(x, first, 1);
+    } else x.drawImage(this.layer.c, 0, 0, G.W, G.H);
+    P.chair(x, 640, 612, { s: 165, facing: 1, throwColor: C.ochre });
+    x.globalAlpha = a;
+    x.globalCompositeOperation = 'soft-light';
+    x.fillStyle = 'rgba(214,170,110,0.55)';
+    x.fillRect(0, 0, G.W, G.H);
+    x.globalCompositeOperation = 'source-over';
+    // a pale, uneven edge, like a photograph handled often
+    const g = x.createRadialGradient(G.W / 2, G.H / 2, G.H * 0.45, G.W / 2, G.H / 2, G.W * 0.62);
+    g.addColorStop(0, 'rgba(240,232,214,0)');
+    g.addColorStop(1, 'rgba(240,232,214,0.35)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, G.W, G.H);
+    x.restore();
+    x.save();
+    x.globalAlpha = a * 0.85;
+    G.text.label(x, 'As it was', G.W / 2, 104, { size: 13, align: 'center', color: C.bone });
+    x.restore();
+  };
+
   // Things in the doorways: a smaller copy of this room, or the grove behind the seam.
   Denial.prototype.drawBeyond = function (x, d, st) {
+    const im = this.roomImage();
+    if (im) {
+      // the next copy of the room waits behind every door
+      x.save();
+      x.beginPath();
+      x.rect(d.x, d.y, d.w, d.h);
+      x.clip();
+      x.fillStyle = '#2b2622';
+      x.fillRect(d.x, d.y, d.w, d.h);
+      const k = 0.34, w = G.W * k, h = G.H * k;
+      x.drawImage(im, d.x + d.w / 2 - w / 2, d.y + d.h - h * 0.93, w, h);
+      x.fillStyle = 'rgba(30,26,22,0.3)';
+      x.fillRect(d.x, d.y, d.w, d.h);
+      x.restore();
+      return;
+    }
     x.save();
     x.beginPath();
     x.rect(d.x, d.y, d.w, d.h);
@@ -964,15 +1115,28 @@
     const st = this.state(), t = this.t, pl = this.player;
     x.save();
     this.cam.apply(x);
-    x.drawImage(this.layer.c, 0, 0, G.W, G.H);
+    this.drawRoom(x, st);
 
-    // what's beyond the two doors, then the leaves
-    this.drawBeyond(x, DOOR_L, st);
-    doorLeaf(x, DOOR_L, this.leftDoor, true);
-    if (st.sewn) this.drawSeam(x, st);
-    else {
-      this.drawBeyond(x, DOOR_R, st);
-      doorLeaf(x, DOOR_R, this.rightDoor, false);
+    // what's beyond the two doors, then the leaves (painted doors only need drawing while they move)
+    const im = this.roomImage();
+    if (im) {
+      const leaf = (d, open, hingeLeft) => {
+        if (open < 0.005) return;
+        this.drawBeyond(x, d, st);
+        paintedLeaf(x, im, d, open, hingeLeft);
+        if (!this.revisit && st.g > 0) paintedLeaf(x, G.art.get(ART.gauze), d, open, hingeLeft, st.g);
+      };
+      leaf(DOOR_L, this.leftDoor, true);
+      if (st.sewn) this.drawSeam(x, st);
+      else leaf(DOOR_R, Math.max(this.rightDoor, (this.rattle || 0) * 0.04 * Math.abs(Math.sin(this.t * 40))), false);
+    } else {
+      this.drawBeyond(x, DOOR_L, st);
+      doorLeaf(x, DOOR_L, this.leftDoor, true);
+      if (st.sewn) this.drawSeam(x, st);
+      else {
+        this.drawBeyond(x, DOOR_R, st);
+        doorLeaf(x, DOOR_R, Math.max(this.rightDoor, (this.rattle || 0) * 0.04 * Math.abs(Math.sin(this.t * 40))), false);
+      }
     }
 
     // marks left by each noticing: a few red cross-stitches
@@ -997,7 +1161,7 @@
     // window light and dust
     x.save();
     x.globalCompositeOperation = 'lighter';
-    const breathe = 0.85 + 0.15 * Math.sin(t * 0.4);
+    const breathe = (0.85 + 0.15 * Math.sin(t * 0.4)) * (this.painted ? 0.4 : 1);
     const lg = x.createLinearGradient(760, 220, 560, 700);
     lg.addColorStop(0, M.rgba(st.warm ? '#ffe7c4' : '#dfe6ee', 0.13 * breathe));
     lg.addColorStop(1, M.rgba(st.warm ? '#ffe7c4' : '#dfe6ee', 0.03));
@@ -1018,6 +1182,7 @@
     panels.forEach((p, i) => P.gauze(x, p[0], p[1], p[2], p[3], { t: t + i, alpha: p[4], seed: i + 1, wind, midSeam: i % 2 === 0 }));
 
     P.chair(x, st.chairX, 612, { s: 165, facing: st.chairFacing, throwColor: C.ochre });
+    this.drawRemembered(x);
 
     this.drawPlayer(x, { alpha: pl.alpha, s: pl.s });
 
@@ -1035,7 +1200,7 @@
     x.restore();
 
     // red cloth blowing in
-    for (const r of this.ribbons) if (r.trail.length > 2) P.ribbon(x, r.trail, { width: r.w, seed: r.seed });
+    for (const r of this.ribbons) if (r.trail.length > 2) P.ribbon(x, r.trail, { width: r.w, seed: r.seed, fabric: 'oxblood' });
 
     if (!this.locked) this.drawGlints(x);
     x.restore();

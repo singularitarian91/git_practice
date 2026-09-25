@@ -277,6 +277,33 @@
     x.closePath();
     x.fill();
 
+    // their scarf, once it's been freed from the thorns: wound at the neck, one end loose
+    if (p.scarf) {
+      const fl = wind * 0.09 + walk * 0.025;
+      const knit = G.paint.fabric && G.paint.fabric(x, 'rust', 0.0011);
+      x.fillStyle = knit || '#8e4a2a';
+      x.beginPath();
+      x.moveTo(-0.07, -0.345);
+      x.quadraticCurveTo(0.0, -0.385, 0.068, -0.35);
+      x.lineTo(0.06, -0.305);
+      x.quadraticCurveTo(0.0, -0.335, -0.062, -0.3);
+      x.closePath();
+      x.fill();
+      x.beginPath();
+      x.moveTo(-0.04, -0.33);
+      x.quadraticCurveTo(-0.09 - fl, -0.3 + Math.sin(t * 5) * 0.01, -0.12 - fl * 1.6, -0.2 + Math.sin(t * 7 + 1) * 0.015 * (0.3 + wind));
+      x.lineTo(-0.085 - fl * 1.3, -0.19);
+      x.quadraticCurveTo(-0.06, -0.27, -0.01, -0.31);
+      x.closePath();
+      x.fill();
+      x.strokeStyle = 'rgba(214,170,70,0.8)';
+      x.lineWidth = 0.006;
+      x.beginPath();
+      x.moveTo(-0.112 - fl * 1.5, -0.218);
+      x.lineTo(-0.08 - fl * 1.2, -0.21);
+      x.stroke();
+    }
+
     // ----- near arm
     let nearHand;
     if (p.carry) {

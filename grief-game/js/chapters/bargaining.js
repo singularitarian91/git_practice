@@ -13,18 +13,18 @@
   const ENTRY = { c: 0, r: 1 }, EXIT = { c: 4, r: 0 };
   const FABRICS = ['#9d8aa6', '#8aa39c', '#d9c7a4', '#b8918a', '#a8a7c4'];
   const VERSIONS = ['table', 'bed', 'chair', 'stairs', 'plant', 'empty'];
-  const IFS = [
-    'If I had called that morning.',
-    'If we had left an hour earlier.',
-    'If I had noticed sooner.',
-    'If I keep everything exactly as it was.',
-    'If I promise to be better.',
-    'If I had said it out loud.',
-    'If I go back and take the other door.',
-    'If this is the room where it didn’t happen.',
-    'If I try just one more.',
-    'If I give something up in return.'
-  ];
+  // "If only", matched to the version of the room that has just turned into view.
+  const IFS = {
+    table: ['If we had stayed for another cup.', 'If I had called that morning.'],
+    bed: ['If I had sat up with them that night.', 'If I had checked on them once more.'],
+    chair: ['If I had stayed a little longer.', 'If I promise to keep their place.'],
+    stairs: ['If I had gone down to see.', 'If we had left an hour earlier.'],
+    plant: ['If I had noticed sooner.', 'If I give something up in return.'],
+    empty: ['If this is the room where it didn’t happen.', 'If I try just one more door.']
+  };
+  // Their letter, on the landing where you arrive.
+  const LETTER = { x: GX - 62, y: GY + TS * 1.5 + 38, r: 34 };
+  const ART = ['bargaining/backdrop.webp', 'bargaining/rooms.webp', 'bargaining/letter.webp'];
   // Initial openings: the entrance feeds a closed loop through lamp-lit rooms.
   const START = [
     [S, E | S, Wd | S, Wd | N, N | S],
@@ -59,9 +59,16 @@
         });
       }
     }
-    // the lamp-lit rooms sit on the loop
-    for (const [c, row] of [[1, 0], [2, 0], [2, 1], [1, 1]]) this.tile(c, row).v = [0, 1, 0, 1][(c + row) % 4];
-    this.ifIndex = 0;
+    // the lamp-lit rooms sit on the loop; turning one away puts its lamp out
+    for (const t of this.tiles) { t.lamp = 0; t.lampTo = 0; }
+    for (const [c, row] of [[1, 0], [2, 0], [2, 1], [1, 1]]) {
+      const t = this.tile(c, row);
+      t.v = [0, 1, 0, 1][(c + row) % 4];
+      if (!this.revisit) { t.lamp = 1; t.lampTo = 1; }
+    }
+    this.said = {};
+    this.lampsOut = 0;
+    this.letterRead = false;
     this.turns = 0;
     this.sel = { c: 2, r: 1 };
     this.keySel = false;
@@ -69,8 +76,11 @@
     this.walk = null;
     this.hero = { x: GX - 58, y: GY + TS * 1.5, ang: 0, phase: 0, walk: 0 };
     this.connect();
+    // Return: someone has lit the lamps along the way through
+    if (this.revisit) for (const t of this.reached.keys()) { t.lamp = 1; t.lampTo = 1; }
   }
   G.chapters.Bargaining = Bargaining;
+  Bargaining.art = () => ART;
 
   Bargaining.prototype.tile = function (c, r) {
     if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return null;
@@ -119,14 +129,15 @@
 
   // Scenery, painted ahead of time (during the chapter plate) when possible.
   Bargaining.prototype.prepareSteps = function () {
-    return [() => { this.backdrop = this.paintBackdrop(); }];
+    this.painted = !!G.art.get('bargaining/backdrop.webp');
+    return [() => { if (!this.painted) this.backdrop = this.paintBackdrop(); }];
   };
 
   Bargaining.prototype.enter = function () {
     G.prepareScene(this);
     G.audio.scene({ room: 0.7, drone: [49, 56, 61], droneLevel: 0.3 });
     if (this.revisit) {
-      G.ui.say('The rooms are still here. The way through stays open.', { delay: 0.8 });
+      G.ui.say(['The rooms are still here.', 'Someone has lit the lamps along the way through.'], { delay: 0.8 });
       this.solveAt = 2.5;
     } else {
       G.ui.say('The rooms fold into one another.', { delay: 0.8 });
@@ -227,17 +238,27 @@
     const inp = G.input;
     if (!this.solved && !this.walk) {
       const hover = inp.lastDevice === 'pointer' ? this.tileAt(inp.x, inp.y) : null;
+      const onLetter = !this.revisit && M.dist(inp.x, inp.y, LETTER.x, LETTER.y) < LETTER.r + 8;
       this.hover = hover;
-      G.setCursor(hover ? 'pointer' : 'default');
-      if (inp.pressed && !inp.consumed && hover) { this.keySel = false; this.turn(hover); }
+      this.hoverLetter = inp.lastDevice === 'pointer' && onLetter;
+      G.setCursor(hover || this.hoverLetter ? 'pointer' : 'default');
+      if (inp.pressed && !inp.consumed && onLetter) { this.keySel = false; this.readLetter(); }
+      else if (inp.pressed && !inp.consumed && hover) { this.keySel = false; this.turn(hover); }
       if (inp.hit.left || inp.hit.right || inp.hit.up || inp.hit.down) {
         if (this.keySel) {
-          this.sel.c = M.clamp(this.sel.c + (inp.hit.right ? 1 : 0) - (inp.hit.left ? 1 : 0), 0, COLS - 1);
-          this.sel.r = M.clamp(this.sel.r + (inp.hit.down ? 1 : 0) - (inp.hit.up ? 1 : 0), 0, ROWS - 1);
+          // one step left of the first column is the landing, with the letter
+          const minC = this.revisit ? 0 : -1;
+          this.sel.c = M.clamp(this.sel.c + (inp.hit.right ? 1 : 0) - (inp.hit.left ? 1 : 0), minC, COLS - 1);
+          if (this.sel.c < 0) this.sel.r = ENTRY.r;
+          else this.sel.r = M.clamp(this.sel.r + (inp.hit.down ? 1 : 0) - (inp.hit.up ? 1 : 0), 0, ROWS - 1);
         }
         this.keySel = true;
       }
-      if (inp.hit.act) { this.keySel = true; this.turn(this.tile(this.sel.c, this.sel.r)); }
+      if (inp.hit.act) {
+        this.keySel = true;
+        if (this.sel.c < 0) this.readLetter();
+        else this.turn(this.tile(this.sel.c, this.sel.r));
+      }
     } else {
       this.hover = null;
       G.setCursor('default');
@@ -263,13 +284,30 @@
         G.audio.chime([61, 63, 66, 68, 70, 73][(t.c + t.r * 2 + this.turns) % 6], 0.06);
       }
       for (let i = 0; i < 4; i++) t.doors[i] = M.damp(t.doors[i], t.turning > 0 ? 0 : (t.doorsTarget ? t.doorsTarget[i] : 0), 7, dt);
+      // a lamp going out gutters first
+      if (t.lamp > t.lampTo) t.lamp = Math.max(t.lampTo, t.lamp - dt * (0.5 + 0.8 * Math.random()));
     }
 
     if (this.solveAt != null && this.t >= this.solveAt && !this.walk) this.startWalk();
     if (this.walk) this.updateWalk(dt);
   };
 
+  Bargaining.prototype.readLetter = function () {
+    G.audio.chime(66, 0.08);
+    if (!this.letterRead) {
+      this.letterRead = true;
+      G.ui.keepsake('bargaining/letter.webp', ['A letter, in their handwriting.', 'I know what it says.']);
+    } else G.ui.keepsake('bargaining/letter.webp', 'I don’t need to open it again.');
+  };
+
   Bargaining.prototype.afterTurn = function (t) {
+    // turning a lit room away puts its lamp out, for good
+    if (t.lampTo > 0) {
+      t.lampTo = 0;
+      this.lampsOut++;
+      G.audio.chime(49, 0.05);
+      if (this.lampsOut === 1 && !this.solved && !this.reachExit) { G.ui.say('The lamp goes out.'); return; }
+    }
     if (this.reachExit && !this.solved) {
       this.solved = true;
       G.ui.hint(null);
@@ -280,8 +318,9 @@
       return;
     }
     if (!G.ui.busy()) {
-      G.ui.say(IFS[this.ifIndex % IFS.length]);
-      this.ifIndex++;
+      const kind = VERSIONS[t.v], n = this.said[kind] || 0;
+      G.ui.say(IFS[kind][n % IFS[kind].length]);
+      this.said[kind] = n + 1;
     }
     if (this.turns === 16) G.ui.hint('The thread starts at the left. Turn rooms until it reaches the open door on the right', 8);
   };
@@ -410,7 +449,8 @@
     const lifted = t.turning > 0 ? Math.sin(t.turning * Math.PI) : 0;
     const reached = this.reached.has(t);
     const kind = VERSIONS[t.v];
-    const lit = kind === 'table' || kind === 'bed';
+    const lit = t.lamp > 0.01;
+    const rooms = this.painted && G.art.get('bargaining/rooms.webp');
     x.save();
     x.translate(cx, cy);
     if (lifted > 0) {
@@ -420,12 +460,20 @@
     }
     x.rotate(t.ang);
     const r = M.rng(Math.floor(t.seed * 1000));
-    drawFloor(x, t, r);
-    drawContents(x, kind, t, this.t);
+    if (rooms) {
+      // painted floor and furniture: one cell of the 3 x 2 sheet per version of the room
+      const cw = rooms.naturalWidth / 3, chh = rooms.naturalHeight / 2;
+      x.drawImage(rooms, (t.v % 3) * cw, Math.floor(t.v / 3) * chh, cw, chh, -TS / 2, -TS / 2, TS, TS);
+      if (!lit) { x.fillStyle = 'rgba(14,12,18,0.28)'; x.fillRect(-TS / 2, -TS / 2, TS, TS); }
+    } else {
+      drawFloor(x, t, r);
+      drawContents(x, kind, t, this.t);
+    }
     if (lit) {
       x.save();
       x.globalCompositeOperation = 'lighter';
-      P.glow(x, 0, 0, 90, '#e8b77a', 0.2 + 0.03 * Math.sin(this.t * 2 + t.seed));
+      const flick = t.lampTo < t.lamp ? Math.random() * 0.5 + 0.5 : 1;
+      P.glow(x, 0, 0, 96, '#e8b77a', (0.22 + 0.03 * Math.sin(this.t * 2 + t.seed)) * t.lamp * flick);
       x.restore();
     }
     if (!reached && !this.solved) {
@@ -497,7 +545,20 @@
   };
 
   Bargaining.prototype.draw = function (x) {
-    x.drawImage(this.backdrop.c, 0, 0, G.W, G.H);
+    if (this.painted) x.drawImage(G.art.get('bargaining/backdrop.webp'), 0, 0, G.W, G.H);
+    else x.drawImage(this.backdrop.c, 0, 0, G.W, G.H);
+    // their letter on the landing
+    if (!this.revisit) {
+      const im = G.art.get('bargaining/letter.webp');
+      x.save();
+      x.translate(LETTER.x, LETTER.y);
+      x.rotate(-0.25);
+      if (im) { const w = 46, h = w * im.naturalHeight / im.naturalWidth; x.drawImage(im, -w / 2, -h / 2, w, h); }
+      else { x.fillStyle = '#e8e0cc'; x.fillRect(-18, -12, 36, 24); }
+      x.restore();
+      const near = this.hoverLetter || (this.keySel && this.sel.c < 0);
+      P.glint(x, LETTER.x, LETTER.y, this.t, near ? 1 : (this.letterRead ? 0 : 0.5), false);
+    }
     // grid shadow and base
     x.fillStyle = 'rgba(0,0,0,0.45)';
     x.fillRect(GX + 10, GY + 14, COLS * TS, ROWS * TS);
@@ -510,7 +571,7 @@
       P.runningStitch(x, pts, { color: C.oxbloodLight, width: 2.4, dash: [8, 6], offset: off });
     }
     // hover / key selection
-    const sel = this.keySel ? this.tile(this.sel.c, this.sel.r) : this.hover;
+    const sel = this.keySel && this.sel.c >= 0 ? this.tile(this.sel.c, this.sel.r) : (this.keySel ? null : this.hover);
     if (sel && !this.solved) {
       const sx = GX + sel.c * TS, sy = GY + sel.r * TS;
       x.save();

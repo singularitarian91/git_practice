@@ -10,6 +10,12 @@
   const GATE = { x: 3790, w: 210, top: 560 };
   const PILLARS = [3740, 4000];
   const KNOT_Y = [860, 760, 660];
+  // The chair: tipped in the torn bedroom, then taken by the wind to the fragment of wall.
+  const CHAIR_HOME = 445, CHAIR_WALL = 1745;
+  // A bramble thicket across the path, with their scarf caught in it.
+  const BRAMBLE = { x0: 2462, x1: 2648 };
+  const SCARF = { x: 2556, y: BASE - 92 };
+  const ART = ['anger/far.webp', 'anger/mid.webp', 'anger/main-0.webp', 'anger/main-1.webp', 'anger/bramble.webp', 'anger/scarf.webp'];
 
   const ground = x => BASE + 12 * Math.sin(x / 340) + 7 * Math.sin(x / 130 + 1) * M.smoothstep(560, 900, x);
 
@@ -422,14 +428,33 @@
     const x = L.x;
     const r = M.rng(77);
     for (const tx of [from + (to - from) * 0.2, from + (to - from) * 0.78]) {
-      const tw = r.range(110, 160);
-      x.fillStyle = '#0d0e0e';
+      const tw = r.range(110, 160), lean = r.range(-20, 20);
+      // near trunks, out of focus: dark bark with a little grey light down one edge
       x.beginPath();
       x.moveTo(tx - tw / 2, G.H + 10);
-      x.lineTo(tx - tw / 2 + r.range(-20, 20), -10);
-      x.lineTo(tx + tw / 2 + r.range(-20, 20), -10);
+      x.lineTo(tx - tw / 2 + lean, -10);
+      x.lineTo(tx + tw / 2 + lean, -10);
       x.lineTo(tx + tw / 2, G.H + 10);
+      x.closePath();
+      const bark = x.createLinearGradient(tx - tw / 2, 0, tx + tw / 2, 0);
+      bark.addColorStop(0, '#1c1a17');
+      bark.addColorStop(0.3, '#0f0e0d');
+      bark.addColorStop(0.82, '#0c0b0a');
+      bark.addColorStop(1, '#34302b');
+      x.fillStyle = bark;
       x.fill();
+      x.save();
+      x.clip();
+      x.lineCap = 'round';
+      for (let i = 0; i < 46; i++) {
+        const bx = tx + r.range(-tw / 2, tw / 2) + lean * 0.5;
+        x.strokeStyle = 'rgba(78,70,60,' + r.range(0.12, 0.32).toFixed(2) + ')';
+        x.lineWidth = r.range(1, 3.5);
+        x.beginPath();
+        P.wobbleLine(x, bx, r.range(-10, G.H * 0.5), bx + r.range(-6, 6), r.range(G.H * 0.4, G.H + 10), 4, r() * 50);
+        x.stroke();
+      }
+      x.restore();
       canopy(x, tx, r.range(0, 30), 200, 60, r, ['#0b0c0c', '#121414', '#191c1d'], 50, 42);
     }
     // undergrowth along the bottom edge
@@ -461,6 +486,11 @@
     this.gateOpen = this.revisit;
     this.chairUp = this.revisit;
     this.chairTip = this.revisit ? 0 : -1.35;
+    this.chair = { x: this.revisit ? CHAIR_WALL : CHAIR_HOME, state: this.revisit ? 'placed' : 'home', lift: 0 };
+    this.scarfTaken = false;
+    this.scarfPull = 0;
+    this.inBramble = false;
+    this.flinch = 0;
     this.shoves = 0;
     this.freed = [];
     this.saidGust = false;
@@ -471,13 +501,16 @@
   }
   Anger.prototype = Object.create(G.SideScene.prototype);
   G.chapters.Anger = Anger;
+  Anger.art = () => ART;
 
   Anger.prototype.ground = function (x) { return x < 560 ? BASE - 3 : ground(x); };
   Anger.prototype.surface = function (x) { return x < 560 ? 'wood' : 'stone'; };
   Anger.prototype.speedMul = function (want) {
     const W = this.gust;
-    if (want > 0) return Math.max(-0.05, 1 - 1.08 * W);
-    if (want < 0) return 1 + 0.35 * W;
+    // the thicket drags at every step
+    const thorns = this.inBramble ? (this.revisit ? 0.8 : 0.42) : 1;
+    if (want > 0) return Math.max(-0.05, 1 - 1.08 * W) * thorns;
+    if (want < 0) return (1 + 0.35 * W) * thorns;
     return 1;
   };
 
@@ -486,6 +519,13 @@
     this.camMinX = G.W / 2 / ZOOM;
     this.camMaxX = WORLD_W - G.W / 2 / ZOOM;
     const span = (this.camMaxX - this.camMinX) * ZOOM;
+    this.painted = !!G.art.get('anger/main-0.webp');
+    if (this.painted) {
+      return [() => {
+        const fgW = G.W + span * 1.35 + 340;
+        this.fg = paintForeground(fgW, 300 + G.W + 200, fgW - G.W - 200);
+      }];
+    }
     return [
       () => {
         this.sky = paintSkyScreen();
@@ -550,12 +590,22 @@
   Anger.prototype.buildItems = function () {
     this.items = [];
     this.item({
-      id: 'chair', x: 380, y: 800, w: 130, h: 100, gx: 440, gy: 860, at: 360,
-      use: () => {
-        if (!this.chairUp) { this.chairUp = true; G.audio.thud(0.3); G.ui.say('I set it upright.'); this.player.reach = { x: 440, y: 860 }; this.player.reachT = 0.8; }
-        else G.ui.say('Upright. For now.');
-      }
+      id: 'chair', x: () => this.chair.x - 65, y: BASE - 110, w: 130, h: 110, gy: BASE - 50,
+      at: () => this.chair.x - (this.chair.state === 'home' ? 85 : 105),
+      when: () => this.chair.state !== 'fly',
+      use: () => this.touchChair()
     });
+    if (!this.revisit) {
+      this.item({
+        id: 'scarf', x: SCARF.x - 62, y: SCARF.y - 44, w: 124, h: 96, gx: SCARF.x, gy: SCARF.y, at: SCARF.x - 64, face: 1, hold: true,
+        when: () => !this.scarfTaken,
+        tap: () => {
+          if (!this.saidScarf) { this.saidScarf = true; G.ui.say(['Their scarf.', 'Caught on the thorns.']); }
+          G.ui.hint('Hold to free it', 4);
+        },
+        holdTick: (s, dt) => this.freeScarf(dt)
+      });
+    }
     this.item({ id: 'mirror', x: 60, y: 360, w: 110, h: 150, at: 160, say: 'The mirror is full of trees.' });
     this.item({ id: 'fragment', x: 1810, y: 480, w: 190, h: 420, gy: 650, at: 1900, say: ['A piece of the bedroom wall.', 'The ferns. The glass is cracked.'] });
     this.item({ id: 'cloth', x: 1180, y: 380, w: 110, h: 220, gx: 1235, gy: 520, at: 1230, say: 'Torn. Everything out here is torn.' });
@@ -580,6 +630,67 @@
       when: () => this.gateOpen && this.gateAngle > 0.6 && !this.exitAnim,
       use: () => this.walkThrough()
     });
+  };
+
+  Anger.prototype.touchChair = function () {
+    const c = this.chair;
+    this.player.reach = { x: c.x, y: BASE - 60 };
+    this.player.reachT = 0.8;
+    if (c.state === 'home') {
+      if (!this.chairUp) { this.chairUp = true; G.audio.thud(0.3); G.ui.say('I set it upright.'); }
+      else G.ui.say('Upright. For now.');
+    } else if (c.state === 'rest') {
+      c.state = 'placed';
+      this.chairUp = true;
+      G.audio.thud(0.3);
+      G.ui.say(['It came this far.', 'I stand it by the wall. What’s left of the wall.']);
+    } else G.ui.say(this.revisit ? 'Still standing by the wall.' : 'By the wall. Out of the wind, a little.');
+  };
+
+  // A swirl of wind takes the chair out of the bedroom and tumbles it past you.
+  Anger.prototype.startTumble = function () {
+    const c = this.chair;
+    c.state = 'fly';
+    c.fly = { t: 0, a0: this.chairUp ? 0 : -1.35, hops: 0 };
+    this.swirl = 1;
+    G.audio.rustle(0.14);
+    G.audio.thud(0.4);
+    G.ui.say('The wind takes the chair.');
+  };
+  Anger.prototype.updateChair = function (dt) {
+    const c = this.chair;
+    if (c.state === 'home' && !this.revisit && this.player.x > 1080 && !this.locked) this.startTumble();
+    if (c.state !== 'fly') {
+      if (!this.chairUp) this.chairTip = -1.35 + Math.sin(this.t * 8) * 0.03 * this.gust;
+      else this.chairTip = M.damp(this.chairTip, 0, 8, dt);
+      return;
+    }
+    const f = c.fly;
+    f.t += dt;
+    const u = Math.min(1, f.t / 2.7), e = 1 - Math.pow(1 - u, 1.8);
+    c.x = M.lerp(CHAIR_HOME, CHAIR_WALL, e);
+    const hop = Math.abs(Math.sin(u * Math.PI * 3.5)) * 170 * Math.pow(1 - u, 1.2);
+    const hops = Math.floor(u * 3.5);
+    if (hops > f.hops) { f.hops = hops; G.audio.thud(0.35 * (1 - u) + 0.08); }
+    this.chairTip = M.lerp(f.a0, -1.35 + Math.PI * 4, M.easeOut(u));
+    // never through the ground: lift it by however far it has turned over
+    c.lift = hop + Math.max(0, -Math.cos(this.chairTip)) * 150;
+    if (u >= 1) { c.state = 'rest'; c.lift = 0; this.chairUp = false; this.chairTip = -1.35; G.audio.thud(0.2); }
+  };
+
+  Anger.prototype.freeScarf = function (dt) {
+    const before = this.scarfPull;
+    this.scarfPull = Math.min(1, this.scarfPull + dt / 1.6);
+    if (Math.floor(before * 6) !== Math.floor(this.scarfPull * 6)) G.audio.stitch();
+    if (this.scarfPull >= 1) {
+      this.scarfTaken = true;
+      this.player.scarf = true;
+      G.audio.chime(64, 0.12);
+      G.ui.hint(null);
+      G.ui.say(['I free it, thread by thread.', 'I wear it.']);
+      return true;
+    }
+    return false;
   };
 
   Anger.prototype.shove = function () {
@@ -644,7 +755,7 @@
     if (this.revisit) target = 0;
     else if (this.gustPhase === 'calm') {
       target = 0;
-      this.telegraph = M.smoothstep(this.gustNext - 1.0, this.gustNext, this.gustT);
+      this.telegraph = M.smoothstep(this.gustNext - 1.6, this.gustNext, this.gustT);
       if (this.gustT >= this.gustNext) {
         this.gustPhase = 'gust';
         this.gustT = 0;
@@ -677,8 +788,15 @@
     this.gust = M.damp(this.gust, target, rate, dt);
     const W = this.gust;
     const base = this.revisit || this.gustPhase === 'still' ? 0.08 : 0.2;
-    this.windNow = base + W;
-    G.audio.gust = this.gateOpen && this.gustPhase === 'still' ? 0.05 : W;
+    const warn = this.telegraph * 0.32 + (this.swirl || 0);
+    this.windNow = base + W + warn;
+    G.audio.gust = this.gateOpen && this.gustPhase === 'still' ? 0.05 : Math.min(1, Math.max(W, warn));
+    if (this.swirl) this.swirl = Math.max(0, this.swirl - dt * 0.6);
+    // holding a knot as the wind gathers: say so once
+    if (this.telegraph > 0.35 && this.holding && /^knot/.test(this.holding.id) && !this.warnedGust) {
+      this.warnedGust = true;
+      G.ui.hint('Wind coming · let go', 3);
+    }
     if (this.gustPhase === 'still' || this.revisit) G.audio.targets.wind = 0.35;
     // walking into a strong gust: legs keep working, progress stalls, a little is lost
     const pl = this.player;
@@ -728,8 +846,24 @@
       this.gateVel += (targetA - this.gateAngle) * 14 * dt - this.gateVel * 2.2 * dt;
       this.gateAngle = Math.min(1.25, this.gateAngle + this.gateVel * dt);
     }
-    if (!this.chairUp) this.chairTip = -1.35 + Math.sin(this.t * 8) * 0.03 * this.gust;
-    else this.chairTip = M.damp(this.chairTip, 0, 8, dt);
+    this.updateChair(dt);
+    // the thicket: slow, and it stings
+    const pl = this.player;
+    const inB = pl.x > BRAMBLE.x0 + 16 && pl.x < BRAMBLE.x1 - 16;
+    if (inB && !this.inBramble) {
+      if (this.revisit) { if (!this.saidBloom) { this.saidBloom = true; G.ui.say('The brambles are flowering.'); } }
+      else {
+        this.flinch = 1;
+        G.audio.rustle(0.05);
+        if (!this.saidThorns) { this.saidThorns = true; G.ui.say(['It catches at my coat.', 'I push through anyway.']); }
+      }
+    }
+    this.inBramble = inB;
+    if (inB && !this.revisit && Math.abs(pl.vel) > 20) {
+      this.thornT = (this.thornT || 0) + dt;
+      if (this.thornT > 0.55) { this.thornT = 0; this.flinch = Math.max(this.flinch, 0.6); G.audio.stitch(); }
+    }
+    this.flinch = Math.max(0, this.flinch - dt * 2.2);
     // cloth
     const W = this.windNow || 0.2;
     for (const rb of this.ribbons) this.stepRibbon(rb, dt, W);
@@ -786,6 +920,8 @@
 
   Anger.prototype.drawGate = function (x) {
     const th = Math.max(0, this.gateAngle);
+    // shut: the painted gate is already part of the main painting
+    if (this.painted && th < 0.02) return;
     const w = GATE.w, h = BASE + 10 - GATE.top;
     const x0 = GATE.x, y0 = GATE.top;
     // light beyond the gate
@@ -793,13 +929,25 @@
     x.beginPath();
     x.rect(x0, y0 - 40, w, h + 40);
     x.clip();
-    const g = x.createLinearGradient(0, y0, 0, BASE);
-    g.addColorStop(0, '#e9e5dc');
-    g.addColorStop(1, '#b9b7ad');
-    x.fillStyle = g;
-    x.fillRect(x0, y0 - 40, w, h + 40);
-    x.fillStyle = 'rgba(120,128,126,0.55)';
-    for (let i = 0; i < 7; i++) x.fillRect(x0 + 10 + i * 30, y0 + 30 + (i % 3) * 20, 10, h);
+    const far = this.painted && G.art.get('anger/far.webp');
+    if (far) {
+      // through the gate: the grove thinning into grey light
+      const fw = far.naturalWidth, fh = far.naturalHeight;
+      x.drawImage(far, fw * 0.6, fh * 0.2, fw * 0.13, fh * 0.62, x0, y0 - 40, w, h + 40);
+      const g = x.createLinearGradient(0, y0, 0, BASE);
+      g.addColorStop(0, 'rgba(238,234,224,0.5)');
+      g.addColorStop(1, 'rgba(238,234,224,0.12)');
+      x.fillStyle = g;
+      x.fillRect(x0, y0 - 40, w, h + 40);
+    } else {
+      const g = x.createLinearGradient(0, y0, 0, BASE);
+      g.addColorStop(0, '#e9e5dc');
+      g.addColorStop(1, '#b9b7ad');
+      x.fillStyle = g;
+      x.fillRect(x0, y0 - 40, w, h + 40);
+      x.fillStyle = 'rgba(120,128,126,0.55)';
+      for (let i = 0; i < 7; i++) x.fillRect(x0 + 10 + i * 30, y0 + 30 + (i % 3) * 20, 10, h);
+    }
     x.fillStyle = '#9d988d';
     x.beginPath();
     x.moveTo(x0 + w * 0.3, BASE + 10);
@@ -811,6 +959,20 @@
     // the leaf, swinging away from us
     const ww = w * Math.cos(Math.min(th, 1.45));
     const recede = h * 0.06 * Math.sin(th);
+    const im = this.painted && G.art.get('anger/main-1.webp');
+    if (im) {
+      // the painted gate, cut from the main painting in strips
+      const k = im.naturalWidth / 2150, N = 10;
+      for (let i = 0; i < N; i++) {
+        const u0 = i / N, um = (i + 0.5) / N;
+        x.drawImage(im, (x0 - 2150 + w * u0) * k, y0 * k, (w / N) * k, h * k, x0 + ww * u0, y0 + recede * um, ww / N + 0.6, h - 2 * recede * um);
+      }
+      x.fillStyle = 'rgba(12,10,8,' + (0.4 * Math.min(1, th)) + ')';
+      x.beginPath();
+      x.moveTo(x0, y0); x.lineTo(x0 + ww, y0 + recede); x.lineTo(x0 + ww, y0 + h - recede); x.lineTo(x0, y0 + h);
+      x.fill();
+      return;
+    }
     const q = (u, v) => [x0 + ww * u, M.lerp(y0 + recede * u, y0 + h - recede * u, v)];
     const poly = pts => { x.beginPath(); pts.forEach((p, i) => (i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1]))); x.closePath(); };
     poly([q(0, 0), q(1, 0), q(1, 1), q(0, 1)]);
@@ -867,7 +1029,8 @@
     x.save();
     x.translate(kx, ky);
     // binding wrapped around gate edge and pillar
-    x.fillStyle = C.oxblood;
+    const cloth = P.fabric(x, 'oxblood', 0.3);
+    x.fillStyle = cloth || C.oxblood;
     x.fillRect(-14, -9, 34, 18);
     x.strokeStyle = 'rgba(236,226,208,0.6)';
     x.lineWidth = 1;
@@ -911,26 +1074,40 @@
   };
 
   Anger.prototype.draw = function (x) {
-    const cam = this.cam;
-    x.drawImage(this.sky.c, 0, 0, G.W, G.H);
+    const cam = this.cam, A = G.art.get;
     const off = cam.x - this.camMinX;
-    x.drawImage(this.far.c, -off * ZOOM * 0.25, 0, this.far.w, G.H);
-    x.drawImage(this.mid.c, -off * ZOOM * 0.55, 0, this.mid.w, G.H);
+    if (this.painted) {
+      x.drawImage(A('anger/far.webp'), -off * ZOOM * 0.25, 0, 1774, G.H);
+      const mid = A('anger/mid.webp');
+      if (mid) {
+        const mw = mid.naturalWidth / mid.naturalHeight * G.H;
+        for (let mx = -((off * ZOOM * 0.55) % mw); mx < G.W; mx += mw) x.drawImage(mid, mx, 0, mw + 0.5, G.H);
+      }
+    } else {
+      x.drawImage(this.sky.c, 0, 0, G.W, G.H);
+      x.drawImage(this.far.c, -off * ZOOM * 0.25, 0, this.far.w, G.H);
+      x.drawImage(this.mid.c, -off * ZOOM * 0.55, 0, this.mid.w, G.H);
+    }
 
     x.save();
     cam.apply(x);
-    x.drawImage(this.main.c, 0, 0, WORLD_W, 1000);
+    if (this.painted) {
+      x.drawImage(A('anger/main-0.webp'), 0, 0, 2150, 1000);
+      x.drawImage(A('anger/main-1.webp'), 2150, 0, 2150, 1000);
+    } else x.drawImage(this.main.c, 0, 0, WORLD_W, 1000);
     this.drawGate(x);
     for (const k of this.knots) this.drawKnot(x, k);
-    P.chair(x, 445, BASE - 2, { s: 165, facing: -1, tip: this.chairTip, throwColor: C.ochre });
-    for (const rb of this.ribbons) P.ribbon(x, rb.pts.map(p => [p.x, p.y]), { width: rb.w, seed: rb.seed, taper: rb.garland ? false : undefined });
+    this.drawChair(x);
+    for (const rb of this.ribbons) P.ribbon(x, rb.pts.map(p => [p.x, p.y]), { width: rb.w, seed: rb.seed, taper: rb.garland ? false : undefined, fabric: 'oxblood' });
     for (const fr of this.freed) {
       x.save();
       x.globalAlpha = Math.min(1, fr.life);
-      P.ribbon(x, fr.pts.map(p => [p.x, p.y]), { width: 14, seed: fr.seed });
+      P.ribbon(x, fr.pts.map(p => [p.x, p.y]), { width: 14, seed: fr.seed, fabric: 'oxblood' });
       x.restore();
     }
-    this.drawPlayer(x, { alpha: this.player.alpha, s: this.player.s });
+    this.drawScarf(x);
+    this.drawPlayer(x, { alpha: this.player.alpha, s: this.player.s, bow: this.flinch * 0.22, scarf: this.player.scarf });
+    this.drawBramble(x);
     if (!this.locked) this.drawGlints(x);
     x.restore();
 
@@ -954,5 +1131,77 @@
     x.restore();
 
     x.drawImage(this.fg.c, -off * ZOOM * 1.35 - 300, 0, this.fg.w, G.H);
+
+    // the wind gathering at the right edge before a gust, and holding while it blows
+    const dark = Math.max(this.telegraph, this.gust * 0.6);
+    if (dark > 0.01 && !this.revisit) {
+      const g = x.createLinearGradient(G.W * 0.5, 0, G.W, 0);
+      g.addColorStop(0, 'rgba(14,17,19,0)');
+      g.addColorStop(1, 'rgba(14,17,19,' + (0.3 * dark) + ')');
+      x.fillStyle = g;
+      x.fillRect(G.W * 0.5, 0, G.W * 0.5, G.H);
+    }
+  };
+
+  Anger.prototype.drawChair = function (x) {
+    const c = this.chair;
+    const gy = this.ground(c.x) - 2 - (c.lift || 0);
+    P.chair(x, c.x, gy, { s: 165, facing: -1, tip: this.chairTip, throwColor: C.ochre, shadow: c.state === 'fly' ? 0 : 0.3 });
+  };
+
+  // The thicket across the path (drawn in front of you, so you push through it).
+  Anger.prototype.drawBramble = function (x) {
+    const im = G.art.get('anger/bramble.webp');
+    const w = BRAMBLE.x1 - BRAMBLE.x0 + 60, h = im ? w * im.naturalHeight / im.naturalWidth : 150;
+    const shake = this.inBramble && Math.abs(this.player.vel) > 10 ? Math.sin(this.t * 30) * 1.5 : 0;
+    x.save();
+    x.translate(BRAMBLE.x0 - 30 + shake, this.ground(BRAMBLE.x0) + 18 - h);
+    if (im) x.drawImage(im, 0, 0, w, h);
+    else {
+      x.strokeStyle = '#1b1a18';
+      x.lineWidth = 3;
+      const r = M.rng(515);
+      for (let i = 0; i < 16; i++) {
+        x.beginPath();
+        x.moveTo(r() * w, h);
+        x.quadraticCurveTo(r() * w, r() * h * 0.2, r() * w, h * (0.5 + r() * 0.5));
+        x.stroke();
+      }
+    }
+    if (this.revisit) {
+      // Return: white bramble flowers among the thorns
+      const r = M.rng(77);
+      x.fillStyle = '#f2eee4';
+      for (let i = 0; i < 26; i++) {
+        const fx = r.range(0.08, 0.92) * w, fy = r.range(0.15, 0.7) * h, s = r.range(3.5, 6);
+        for (let k = 0; k < 5; k++) {
+          const a = k / 5 * M.TAU + i;
+          x.beginPath();
+          x.ellipse(fx + Math.cos(a) * s * 0.9, fy + Math.sin(a) * s * 0.9, s * 0.75, s * 0.5, a, 0, M.TAU);
+          x.fill();
+        }
+        x.fillStyle = '#d7b24a';
+        x.beginPath();
+        x.arc(fx, fy, s * 0.35, 0, M.TAU);
+        x.fill();
+        x.fillStyle = '#f2eee4';
+      }
+    }
+    x.restore();
+  };
+
+  // Their scarf, snagged in the thicket, stirring in the wind until it's freed.
+  Anger.prototype.drawScarf = function (x) {
+    if (this.scarfTaken || this.revisit) return;
+    const im = G.art.get('anger/scarf.webp');
+    const W = this.windNow || 0.2;
+    x.save();
+    x.translate(SCARF.x, SCARF.y);
+    x.rotate(Math.sin(this.t * (2 + W * 6)) * 0.04 * (0.3 + W) - this.scarfPull * 0.25);
+    if (im) {
+      const w = 150, h = w * im.naturalHeight / im.naturalWidth;
+      x.drawImage(im, -w / 2, -h * 0.35, w, h);
+    } else P.ribbon(x, [[-60, -10], [-20, 18], [20, 22], [60, 0]], { width: 14, color: '#8e4a2a', seed: 3 });
+    x.restore();
   };
 })();

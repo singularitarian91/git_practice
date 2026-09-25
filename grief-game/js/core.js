@@ -205,6 +205,37 @@
     return { c, x, w, h, k };
   };
 
+  // ------------------------------------------------------------------ painted art
+  // Painted backgrounds and sprites live in assets/art/. Each chapter lists the images it
+  // needs (Chapter.art(options)); its title plate loads them, and the next chapter's are
+  // fetched in the background while you play. Anything that fails to load falls back to
+  // the drawn version, so the game still runs from a bare folder.
+  const art = (G.art = { base: 'assets/art/', cache: {}, shared: [] });
+  art.load = function (path) {
+    let e = art.cache[path];
+    if (e) return e;
+    const img = new Image();
+    e = art.cache[path] = { img, ready: false, failed: false };
+    e.promise = new Promise(resolve => {
+      img.onload = () => {
+        const done = () => { e.ready = true; resolve(e); };
+        // decode off the main thread where possible, so the first draw doesn't stall
+        if (img.decode) img.decode().then(done, done); else done();
+      };
+      img.onerror = () => { e.failed = true; e.ready = true; resolve(e); };
+    });
+    img.src = art.base + path;
+    return e;
+  };
+  art.loadAll = paths => Promise.all((paths || []).map(p => art.load(p).promise));
+  art.ready = paths => (paths || []).every(p => { const e = art.cache[p]; return !!(e && e.ready); });
+  art.get = path => { const e = art.cache[path]; return e && e.ready && !e.failed ? e.img : null; };
+  // Let go of images nothing needs any more (phones have little memory to spare).
+  art.keepOnly = function (paths) {
+    const keep = new Set(paths);
+    for (const p of Object.keys(art.cache)) if (!keep.has(p) && art.cache[p].ready) delete art.cache[p];
+  };
+
   // ------------------------------------------------------------------ input
   const input = (G.input = {
     x: G.W / 2, y: G.H / 2,
@@ -260,7 +291,8 @@
     ArrowDown: 'down', KeyS: 'down',
     KeyE: 'act', Space: 'act', Enter: 'act',
     Escape: 'pause', KeyP: 'pause',
-    KeyM: 'mute'
+    KeyM: 'mute',
+    KeyR: 'remember'
   };
   window.addEventListener('keydown', e => {
     if (e.code === 'Tab') document.body.classList.add('keys');

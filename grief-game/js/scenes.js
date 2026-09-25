@@ -18,6 +18,17 @@
   // ------------------------------------------------------------ flow
   const flow = (G.flow = { CH, current: -1, revisit: false });
 
+  // Painted images a chapter needs (see G.art). Shared ones (the chair, cloth) stay loaded.
+  flow.artFor = function (i, o) {
+    const Ctor = i >= 0 && i < CH.length && G.chapters[CH[i].ctor];
+    return Ctor && Ctor.art ? Ctor.art(o || {}) : [];
+  };
+  // Keep only what's needed now and next, and fetch the next chapter quietly.
+  flow.settleArt = function (now, next) {
+    G.art.keepOnly(G.art.shared.concat(now, next || []));
+    if (next && next.length) setTimeout(() => G.art.loadAll(next), 2500);
+  };
+
   flow.title = function (sub) {
     G.fx.fade(() => { G.ui.clear(); G.setScene(new TitleScene(sub)); }, { dur: 1.4 });
   };
@@ -36,6 +47,7 @@
     const scene = pre || new G.chapters[CH[i].ctor](o);
     scene.restart = () => G.fx.fade(() => flow.start(i, o), { dur: 1.2 });
     G.setScene(scene);
+    flow.settleArt(flow.artFor(i, o), o.revisit ? [] : flow.artFor(i + 1));
     if (!o.revisit) {
       G.save.data.reached = Math.max(G.save.data.reached || 0, i);
       G.save.write();
@@ -163,7 +175,11 @@
   }
   TitleScene.prototype.enter = function () {
     G.ui.hud = false;
-    this.room = paintTitleRoom();
+    this.painted = G.art.get('title/room.webp');
+    if (!this.painted) this.room = paintTitleRoom();
+    // keep the title's painting and fetch the chapter Begin/Continue leads to
+    const d = G.save.data;
+    flow.settleArt(TitleScene.art, d.done ? [] : flow.artFor(d.reached || 0));
     this.motes = new P.Motes(46, { x: 520, y: 120, w: 520, h: 560 }, 3);
     this.sel = 0;
     this.buildMenu();
@@ -218,10 +234,11 @@
   };
   TitleScene.prototype.draw = function (x) {
     const t = this.t;
-    x.drawImage(this.room.c, 0, 0, G.W, G.H);
+    if (this.painted) x.drawImage(this.painted, 0, 0, G.W, G.H);
+    else x.drawImage(this.room.c, 0, 0, G.W, G.H);
     // gauze at the window
-    P.gauze(x, 752, 86, 120, 470, { t, alpha: 0.22, seed: 2, wind: 0.08 });
-    P.gauze(x, 930, 86, 110, 440, { t: t + 3, alpha: 0.16, seed: 5, wind: 0.05 });
+    P.gauze(x, 752, 86, 120, 470, { t, alpha: this.painted ? 0.12 : 0.22, seed: 2, wind: 0.08 });
+    P.gauze(x, 930, 86, 110, 440, { t: t + 3, alpha: this.painted ? 0.09 : 0.16, seed: 5, wind: 0.05 });
     this.motes.draw(x, t, 0.5);
     // the empty chair in the light
     P.chair(x, 690, 628, { s: 190, facing: 1, throwColor: C.ochre });
@@ -322,18 +339,21 @@
     const r = M.rng(this.i * 97 + 5);
     for (let xx = 0; xx <= G.W; xx += 14) this.edge.push([xx, 488 + r.range(-6, 6)]);
     G.audio.scene({ room: 0.5, drone: [[50, 57, 64], [48, 55, 63], [49, 56, 61], [45, 52, 60], [48, 55, 64]][this.i], droneLevel: 0.32 });
+    this.art = flow.artFor(this.i, this.o);
+    G.art.loadAll(this.art);
   };
   PlateScene.prototype.update = function (dt) {
     this.t += dt;
     const inp = G.input;
+    this.ready = G.art.ready(this.art);
     // build the chapter while the plate is up, one piece of scenery per frame
     const Ctor = G.chapters[CH[this.i].ctor];
-    if (Ctor && this.t > 0.3 && !this.done) {
+    if (Ctor && this.t > 0.3 && !this.done && this.ready) {
       if (!this.next) this.next = new Ctor(this.o);
       else G.prepareStep(this.next);
     }
-    G.setCursor(this.t > 1 ? 'pointer' : 'default');
-    if (!this.done && this.t > 1.0 && (inp.pressed || inp.hit.act)) {
+    G.setCursor(this.t > 1 && this.ready ? 'pointer' : 'default');
+    if (!this.done && this.t > 1.0 && this.ready && (inp.pressed || inp.hit.act)) {
       this.done = true;
       if (this.next) G.prepareScene(this.next);
       const next = this.next;
@@ -374,10 +394,25 @@
     x.fillStyle = 'rgba(214,186,147,0.9)';
     x.fillText(this.o.revisit ? 'The loss is still here. The light has changed.' : c.play, 70, 656);
     x.restore();
-    if (this.t > 1.2) {
+    if (this.t > 1.2 && this.ready) {
       x.save();
       x.globalAlpha = 0.55 + 0.35 * Math.sin(this.t * 2.5);
       T.label(x, 'Continue ›', G.W - 70, 656, { size: 13, align: 'right', color: C.bone });
+      x.restore();
+    } else if (this.t > 1.2) {
+      // still fetching the chapter's painted scenery: three stitches, one at a time
+      x.save();
+      x.strokeStyle = C.tan;
+      x.lineWidth = 2;
+      x.lineCap = 'round';
+      for (let i = 0; i < 3; i++) {
+        x.globalAlpha = 0.25 + 0.6 * Math.max(0, Math.sin(this.t * 3 - i * 0.9));
+        const sx = G.W - 110 + i * 16;
+        x.beginPath();
+        x.moveTo(sx - 4, 652);
+        x.lineTo(sx + 4, 660);
+        x.stroke();
+      }
       x.restore();
     }
   };
@@ -496,6 +531,7 @@
     x.restore();
   };
 
+  TitleScene.art = ['title/room.webp'];
   G.TitleScene = TitleScene;
   G.PlateScene = PlateScene;
   G.EndScene = EndScene;
