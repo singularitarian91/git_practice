@@ -552,6 +552,8 @@
 
   Anger.prototype.enter = function () {
     G.prepareScene(this);
+    // a fresh walk through the grove: the scarf is still in the thorns
+    if (!this.revisit) G.save.data.scarf = false;
     this.ribbons = [];
     const anchors = [[700, 330], [960, 250], [1230, 420], [1510, 300], [1720, 460], [2140, 280], [2400, 380], [2690, 250], [2950, 420], [3250, 300], [3520, 360]];
     anchors.forEach(([ax, ay], i) => this.ribbons.push(this.makeRibbon(ax, ay, 9 + (i % 3) * 2, 22, i)));
@@ -685,6 +687,8 @@
     if (this.scarfPull >= 1) {
       this.scarfTaken = true;
       this.player.scarf = true;
+      G.save.data.scarf = true;
+      G.save.write();
       G.audio.chime(64, 0.12);
       G.ui.hint(null);
       G.ui.say(['I free it, thread by thread.', 'I wear it.']);
@@ -1106,7 +1110,7 @@
       x.restore();
     }
     this.drawScarf(x);
-    this.drawPlayer(x, { alpha: this.player.alpha, s: this.player.s, bow: this.flinch * 0.22, scarf: this.player.scarf });
+    this.drawPlayer(x, { alpha: this.player.alpha, s: this.player.s, bow: this.flinch * 0.22 });
     this.drawBramble(x);
     if (!this.locked) this.drawGlints(x);
     x.restore();

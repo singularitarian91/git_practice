@@ -11,6 +11,16 @@
   const TEARS = [[470, 186, 58, 40], [650, 172, 64, 44], [820, 190, 54, 38]];
   const SEEDS = [1030, 1120, 1210];
   const CLOTH = ['#d9cdb4', '#9d8aa6', '#c7a25a', '#8a8680', '#b8918a', '#cbbfa6', '#a9b3a1'];
+  const CLOTH_FAB = ['linen', 'plum', 'mustard', 'tweed', 'rose', 'linen', 'sage'];
+  const ART = {
+    back: 'acceptance/backdrop.webp', shelter: 'acceptance/shelter.webp', packet: 'acceptance/packet.webp',
+    ground: 'acceptance/ground.webp', peas: 'acceptance/peas.webp'
+  };
+  // The shelter painting, placed so its three posts stand at world x 380, 620 and 860.
+  const SHELTER = { x: 355, y: 146, w: 532, h: 357 };
+  const POST_SRC = [505, 60, 36, 640]; // its middle post, reused for the fence
+  // Where the two gardeners stand once the chair is by the fence.
+  const BESIDE = [SPOT_X - 250, SPOT_X + 175];
 
   const ground = x => (x < ROUTE_X ? BASE : BASE + (x - ROUTE_X) * 0.07 + Math.sin((x - ROUTE_X) / 260) * 10);
 
@@ -132,23 +142,25 @@
     const x = L.x;
     const r = M.rng(88);
     const oy = 200; // local y of world 300
-    // hillside
-    x.fillStyle = '#5b5b41';
+    // hillside: the painting's own tussocks and puddles where there's a painting, flat colour where not
+    const turf = P.pattern(x, ART.ground, 3, 0, BASE - 300 + oy - 12);
+    const shelterIm = G.art.get(ART.shelter);
+    x.fillStyle = turf || '#5b5b41';
     x.beginPath();
     x.moveTo(0, 900);
     for (let px = 0; px <= W; px += 20) x.lineTo(px, ground(px) - 300 + oy + 4);
     x.lineTo(W, 900);
     x.fill();
     const gg = x.createLinearGradient(0, BASE - 300 + oy, 0, 900);
-    gg.addColorStop(0, 'rgba(120,120,86,0.6)');
-    gg.addColorStop(1, 'rgba(30,30,22,0.5)');
+    gg.addColorStop(0, turf ? 'rgba(160,150,110,0.12)' : 'rgba(120,120,86,0.6)');
+    gg.addColorStop(1, turf ? 'rgba(20,20,14,0.5)' : 'rgba(30,30,22,0.5)');
     x.fillStyle = gg;
     x.fill();
     // grass strokes
     x.lineCap = 'round';
-    for (let i = 0; i < W * 0.9; i++) {
+    for (let i = 0; i < W * (turf ? 0.5 : 0.9); i++) {
       const gx = r() * W, gy = ground(gx) - 300 + oy + r.range(0, 60);
-      x.strokeStyle = M.rgba(r.pick(['#7d7c55', '#6a6a46', '#8d8a60', '#4d4d36']), 0.7);
+      x.strokeStyle = M.rgba(r.pick(turf ? ['#8d8760', '#6f6c48', '#a39b72', '#4f4c33'] : ['#7d7c55', '#6a6a46', '#8d8a60', '#4d4d36']), 0.7);
       x.lineWidth = r.range(1, 2);
       x.beginPath();
       x.moveTo(gx, gy);
@@ -156,11 +168,17 @@
       x.stroke();
     }
     // the path: from the lake, past the garden, and on along the river
-    x.fillStyle = '#8a7e66';
+    x.fillStyle = turf || '#8a7e66';
     x.beginPath();
     for (let px = 0; px <= W; px += 20) x.lineTo(px, ground(px) - 300 + oy - 2);
     for (let px = W; px >= 0; px -= 20) x.lineTo(px, ground(px) - 300 + oy + 16);
     x.fill();
+    if (turf) {
+      x.fillStyle = 'rgba(126,104,74,0.62)';
+      x.fill();
+      x.fillStyle = 'rgba(214,200,170,0.12)';
+      for (let px = 0; px <= W; px += 20) x.fillRect(px, ground(px) - 300 + oy - 2, 20, 2);
+    }
     x.fillStyle = 'rgba(40,32,24,0.25)';
     for (let i = 0; i < 400; i++) { const px = r() * W; x.fillRect(px, ground(px) - 300 + oy + r.range(0, 14), r.range(2, 6), 2); }
     // a few old planks where the boardwalk ends
@@ -168,13 +186,24 @@
     for (let i = 0; i < 6; i++) x.fillRect(i * 32, BASE - 300 + oy - 4, 26, 10);
     // garden beds (worked soil)
     for (const [a, b] of [[960, 1270], [1310, 1610], [1650, 1910]]) {
-      x.fillStyle = '#3b3227';
+      x.fillStyle = turf || '#3b3227';
       x.beginPath();
       x.moveTo(a, BASE - 300 + oy + 2);
       x.quadraticCurveTo((a + b) / 2, BASE - 300 + oy - 22, b, BASE - 300 + oy + 2);
       x.lineTo(b, BASE - 300 + oy + 18);
       x.lineTo(a, BASE - 300 + oy + 18);
       x.fill();
+      if (turf) {
+        // turned earth: the painted ground, darkened, with light along the ridge
+        x.fillStyle = 'rgba(62,47,34,0.78)';
+        x.fill();
+        x.strokeStyle = 'rgba(176,146,106,0.3)';
+        x.lineWidth = 1.6;
+        x.beginPath();
+        x.moveTo(a + 12, BASE - 300 + oy - 1);
+        x.quadraticCurveTo((a + b) / 2, BASE - 300 + oy - 19, b - 12, BASE - 300 + oy - 1);
+        x.stroke();
+      }
       x.strokeStyle = 'rgba(20,16,12,0.4)';
       x.lineWidth = 1;
       for (let i = 0; i < 12; i++) {
@@ -217,10 +246,18 @@
     x.strokeStyle = '#4b3f33';
     x.lineWidth = 5;
     for (let px = 1960; px < W; px += 150) {
-      const gy = ground(px) - 300 + oy;
+      const gy = ground(px) - 300 + oy, lean = r.range(-3, 3);
+      if (shelterIm) {
+        x.save();
+        x.translate(px, gy + 6);
+        x.rotate(lean * 0.012);
+        x.drawImage(shelterIm, POST_SRC[0], POST_SRC[1], POST_SRC[2], POST_SRC[3], -6, -80, 12, 82);
+        x.restore();
+        continue;
+      }
       x.beginPath();
       x.moveTo(px, gy + 6);
-      x.lineTo(px + r.range(-3, 3), gy - 70);
+      x.lineTo(px + lean, gy - 70);
       x.stroke();
     }
     x.strokeStyle = 'rgba(60,60,60,0.5)';
@@ -301,15 +338,18 @@
     this.phase = this.revisit ? 'open' : 'work';
     this.light = this.revisit ? 1 : 0;
     this.kneelT = 0;
+    // The elder works the beds and brings the seedlings; the younger gardener starts under the shelter
+    // and holds the cloth while you sew. Both walk down to the fence with you and the chair.
     this.npcs = [
-      { look: G.person.ELDER, x: 1455, dir: -1, kneel: 1, t: 0, state: 'work', say: 0 },
-      { look: G.person.GARDENER, x: 1770, dir: -1, kneel: 1, t: 3, state: 'work', say: 0 }
-    ];
+      { look: G.person.ELDER, x: 1455, home: 1455, dir: -1, kneel: 1, t: 0, state: 'work' },
+      { look: G.person.GARDENER, x: this.revisit ? 1770 : 790, home: 1770, dir: -1, kneel: this.revisit ? 1 : 0.35, t: 3, state: this.revisit ? 'work' : 'tidy' }
+    ].map(n => Object.assign(n, { vel: 0, walk: 0, phase: 0, out: {}, reach: null, holding: false }));
     this.greeted = false;
     this.birdT = 3;
   }
   Acceptance.prototype = Object.create(G.SideScene.prototype);
   G.chapters.Acceptance = Acceptance;
+  Acceptance.art = () => [ART.back, ART.shelter, ART.packet, ART.ground, ART.peas];
 
   Acceptance.prototype.ground = function (x) { return ground(x); };
   Acceptance.prototype.surface = function (x) { return x < 200 ? 'wood' : 'grass'; };
@@ -317,6 +357,8 @@
 
   // Scenery, painted ahead of time (during the chapter plate) when possible.
   Acceptance.prototype.prepareSteps = function () {
+    this.painted = !!(G.art.get(ART.back) && G.art.get(ART.shelter));
+    if (this.painted) return [() => { this.groundL = paintGround(); }];
     return [
       () => {
         this.sky = P.paintSky(G.W + 200, 330, {
@@ -353,10 +395,26 @@
       return { x: p.x, y: p.y };
     };
   };
+  // One of them says something. They take turns: a line waits until the last one has been read.
   Acceptance.prototype.npcSay = function (i, text, delay) {
     const n = this.npcs[i];
-    const go = () => { if (G.scene !== this) return; G.ui.speak(this.npcAnchor(n), text); n.look2 = 2.5; };
+    const go = () => {
+      if (G.scene !== this) return;
+      if (this.t < (this.talkUntil || 0)) { G.after(this.talkUntil - this.t + 0.3, go); return; }
+      const dur = G.ui.lineDur(text) + 0.5;
+      this.talkUntil = this.t + dur;
+      G.ui.speak(n.anchor || (n.anchor = this.npcAnchor(n)), text, dur);
+      n.look2 = 2.5;
+    };
     if (delay) G.after(delay, go); else go();
+  };
+
+  // Send a gardener somewhere; `then` is what they do on arrival.
+  Acceptance.prototype.npcGo = function (n, tx, then) {
+    n.target = tx;
+    n.then = then || 'stand';
+    n.state = 'walk';
+    n.t = 0;
   };
 
   Acceptance.prototype.buildItems = function () {
@@ -391,16 +449,34 @@
       when: () => this.phase !== 'open', say: 'The river goes all the way to the edge of the sky.' });
   };
 
+  // The gardener comes over to hold the other end of the cloth.
+  Acceptance.prototype.callHelper = function (t) {
+    const g = this.npcs[1];
+    if (this.revisit || g.state === 'follow' || t.done) return;
+    if (g.tear !== t) {
+      g.tear = t;
+      this.npcGo(g, t.x + 78, 'hold');
+      if (!this.heldOnce) { this.heldOnce = true; this.npcSay(1, 'I’ll hold this end.', 0.3); }
+    } else if (g.state === 'stand') { g.state = 'hold'; g.t = 0; }
+  };
+
   Acceptance.prototype.sew = function (t, dt) {
+    const g = this.npcs[1];
+    this.callHelper(t);
+    // slow on your own; with someone holding the other end it goes quickly
+    const helped = g.state === 'hold' && g.tear === t && g.t > 0.3;
     const before = t.p;
-    t.p = Math.min(1, t.p + dt / 2.2);
+    t.p = Math.min(1, t.p + dt / (helped || this.revisit ? 1.6 : 4.5));
     if (Math.floor(before * 12) !== Math.floor(t.p * 12)) G.audio.stitch();
     if (t.p >= 1 && !t.done) {
       t.done = true;
       const n = this.tears.filter(q => q.done).length;
       G.audio.chime([67, 71, 74][n - 1], 0.14);
-      if (n === 1) { G.ui.say('Patched. The seam shows. That’s all right.'); this.npcSay(0, 'Small stitches hold better.', 1.6); }
-      if (n === 3) this.npcSay(1, 'That’ll keep the worst of it off.', 0.6);
+      if (n === 1) { G.ui.say('Patched. The seam shows. That’s all right.'); this.npcSay(1, 'Small stitches hold better.', 1.6); }
+      if (n === 3) {
+        this.npcSay(1, 'That’ll keep the worst of it off.', 0.6);
+        G.after(2.6, () => { const g = this.npcs[1]; if (g.state === 'hold' || g.state === 'stand') this.npcGo(g, g.home, 'work'); });
+      }
       this.checkWork();
       return true;
     }
@@ -408,9 +484,13 @@
   };
 
   Acceptance.prototype.plant = function (sd) {
-    this.kneeling = { t: 0, sd };
+    this.kneeling = { t: 0, sd, stage: 'wait', u: 0 };
     this.locked = true;
     this.player.dir = 1;
+    const el = this.npcs[0];
+    this.npcGo(el, sd.x + 88, 'offer');
+    el.holding = true;
+    if (!this.handedOnce) { this.handedOnce = true; this.npcSay(0, 'Here. I’ve brought the seedlings.', 0.3); }
   };
 
   Acceptance.prototype.checkWork = function () {
@@ -424,14 +504,27 @@
   };
 
   Acceptance.prototype.touchChair = function () {
-    if (this.phase === 'work') { G.ui.say(this.chair.placed ? 'It can see the river from here.' : 'Their chair. It came all this way.'); return; }
+    if (this.phase === 'work') {
+      if (!this.packetSeen) {
+        // tucked in the throw: where they meant the sweet peas to go
+        this.packetSeen = true;
+        G.audio.chime(67, 0.08);
+        const lines = ['In the throw, a seed packet.', 'Their handwriting: sweet peas, by the fence.'];
+        if (G.art.get(ART.packet)) G.ui.keepsake(ART.packet, lines); else G.ui.say(lines);
+      } else G.ui.say('Their chair. It came all this way.');
+      return;
+    }
     if (this.phase === 'chair' && !this.chair.placed) {
       this.chair.carried = true;
       this.player.carry = true;
       G.audio.thud(0.2);
       G.ui.say('It isn’t heavy.');
+      // the two of them come down to the fence with me
+      this.npcs.forEach((n, i) => { n.state = 'follow'; n.offset = i === 0 ? -170 : 175; n.t = 0; n.holding = false; n.reach = null; });
+      this.npcSay(1, 'We’ll come with you.', 1.4);
       return;
     }
+    if (this.revisit) { G.ui.say('Sweet peas along the fence, where they wanted them.'); return; }
     G.ui.say('Facing the river. Empty. It has its place.');
   };
 
@@ -445,27 +538,48 @@
     G.audio.thud(0.3);
     G.ui.hint(null);
     this.placedT = 0;
-    for (const n of this.npcs) { n.state = 'look'; n.t = 0; }
+    this.npcs.forEach((n, i) => this.npcGo(n, BESIDE[i], 'look'));
   };
 
   Acceptance.prototype.update = function (dt) {
     const pl = this.player;
     if (this.kneeling) {
-      const k = this.kneeling;
+      // kneel, take the seedling from the elder's hand, press it into the soil, stand again
+      const k = this.kneeling, el = this.npcs[0];
       k.t += dt;
       this.t += dt;
-      pl.kneel = M.smoothstep(0, 0.5, k.t) * (1 - M.smoothstep(1.7, 2.2, k.t));
       pl.walk = 0;
-      pl.work = 1;
-      if (k.t > 1.1 && !k.sd.planted) {
-        k.sd.planted = true;
-        G.audio.chime([72, 76, 79][this.seeds.filter(s => s.planted).length - 1], 0.12);
-        const n = this.seeds.filter(s => s.planted).length;
-        if (n === 1) { this.npcSay(1, 'Not too deep.', 0.2); }
-        if (n === 2) { this.npcSay(0, 'That’s it.', 0.3); }
-        if (n === 3) G.ui.say('Three rows of small green.');
+      if (k.stage === 'wait') {
+        pl.kneel = M.smoothstep(0, 0.5, k.t);
+        pl.work = 0;
+        const offering = el.state === 'offer';
+        if (offering && el.t > 0.45 && el.out.hand) { pl.reach = { x: el.out.hand.x, y: el.out.hand.y }; pl.reachT = 0.2; }
+        if ((offering && el.t > 0.95) || k.t > 9) { k.stage = 'plant'; k.u = 0; el.holding = false; k.inHand = true; }
+      } else if (k.stage === 'plant') {
+        k.u += dt;
+        pl.kneel = 1;
+        pl.work = k.u > 0.35 ? 1 : 0;
+        pl.reach = { x: k.sd.x, y: BASE - 8 };
+        pl.reachT = 0.2;
+        if (k.u > 0.7 && !k.sd.planted) {
+          k.sd.planted = true;
+          k.inHand = false;
+          const n = this.seeds.filter(s => s.planted).length;
+          G.audio.chime([72, 76, 79][n - 1], 0.12);
+          if (n === 1) this.npcSay(0, 'Not too deep.', 0.2);
+          if (n === 2) this.npcSay(0, 'That’s it.', 0.3);
+          if (n === 3) {
+            G.ui.say('Three rows of small green.');
+            G.after(2.6, () => { if (el.state === 'offer') this.npcGo(el, el.home, 'work'); });
+          }
+        }
+        if (k.u > 1.3) { k.stage = 'up'; k.u = 0; }
+      } else {
+        k.u += dt;
+        pl.kneel = 1 - M.smoothstep(0, 0.5, k.u);
+        pl.work = 0;
+        if (k.u > 0.55) { this.kneeling = null; this.locked = false; pl.kneel = 0; pl.work = 0; this.checkWork(); }
       }
-      if (k.t > 2.3) { this.kneeling = null; this.locked = false; pl.kneel = 0; pl.work = 0; this.checkWork(); }
       this.updateCamera(dt);
     } else if (this.phase === 'placed') {
       this.t += dt;
@@ -478,7 +592,8 @@
         this.phase = 'open';
         this.locked = false;
         this.maxX = END_X + 200;
-        for (const n of this.npcs) { n.state = 'work'; n.t = 0; }
+        // they stay by the chair, looking out at the river
+        for (const n of this.npcs) { n.state = 'stand'; n.t = 0; n.dir = 1; }
         G.ui.hint('The path along the river is open', 6);
         G.audio.chord([48, 55, 64], 4);
       }
@@ -488,26 +603,15 @@
     }
     for (const sd of this.seeds) if (sd.planted) sd.grow = Math.min(this.revisit ? 1.6 : 1, sd.grow + dt / 1.5);
 
-    // the two gardeners work, look up, now and then stand and stretch
-    for (const n of this.npcs) {
-      n.t += dt;
-      if (n.look2) n.look2 = Math.max(0, n.look2 - dt);
-      if (n.state === 'work') {
-        n.kneel = M.damp(n.kneel, 1, 3, dt);
-        if (n.t > 11 + n.x % 5) { n.state = 'stretch'; n.t = 0; }
-      } else if (n.state === 'stretch') {
-        n.kneel = M.damp(n.kneel, 0, 3, dt);
-        if (n.t > 3.2) { n.state = 'work'; n.t = 0; }
-      } else if (n.state === 'look') {
-        n.kneel = M.damp(n.kneel, 0.2, 2, dt);
-      }
-      n.dir = (n.look2 || n.state === 'look') ? (pl.x < n.x ? -1 : 1) : (n.x < 1600 ? -1 : 1);
-    }
-    if (!this.greeted && pl.x > 880 && this.phase === 'work' && !this.revisit) {
+    // heading for a tear: the gardener is already on the way over
+    const aim = this.pending && /^tear/.test(this.pending.id) ? this.tears[+this.pending.id.slice(4)] : null;
+    if (aim && this.phase === 'work') this.callHelper(aim);
+    for (const n of this.npcs) this.updateNPC(n, dt);
+    if (!this.greeted && pl.x > 330 && this.phase === 'work' && !this.revisit) {
       this.greeted = true;
-      this.npcSay(0, 'Morning.');
-      this.npcSay(1, 'Rain later, I think.', 2.2);
-      this.npcSay(0, 'Always is.', 4.4);
+      this.npcSay(1, 'Morning.');
+      this.npcSay(0, 'Rain later, I think.', 2.2);
+      this.npcSay(1, 'Always is.', 4.4);
     }
 
     // walking the route: the world widens around you
@@ -528,6 +632,76 @@
     if (this.birdT < 0) { this.birdT = 5 + Math.random() * 8; G.audio.bird(); }
   };
 
+  // The gardeners: working the beds, fetching and holding, walking down to the fence with you.
+  Acceptance.prototype.updateNPC = function (n, dt) {
+    const pl = this.player;
+    n.t += dt;
+    if (n.look2) n.look2 = Math.max(0, n.look2 - dt);
+    let tx = null;
+    if (n.state === 'walk') tx = n.target;
+    else if (n.state === 'follow') tx = M.clamp(pl.x + n.offset, this.minX, BESIDE[1]);
+    if (tx != null) {
+      const dx = tx - n.x;
+      const v = Math.abs(dx) > 3 ? Math.sign(dx) * Math.min(150, Math.abs(dx) * 4 + 20) : 0;
+      n.vel = M.damp(n.vel, v, 8, dt);
+      n.x += n.vel * dt;
+      n.kneel = M.damp(n.kneel, 0, 6, dt);
+      n.work = 0;
+      n.reach = null;
+      if (Math.abs(n.vel) > 8) n.dir = Math.sign(n.vel);
+      else if (n.state === 'follow') n.dir = pl.x < n.x ? -1 : 1;
+      if (n.state === 'walk' && Math.abs(dx) < 4 && Math.abs(n.vel) < 12) { n.state = n.then; n.t = 0; n.vel = 0; }
+    } else n.vel = 0;
+    n.walk = M.damp(n.walk, M.clamp(Math.abs(n.vel) / 110, 0, 1), 10, dt);
+    n.phase += dt * Math.abs(n.vel) / (HERO * 0.5) * Math.PI;
+    switch (n.state) {
+      case 'work':
+        n.kneel = M.damp(n.kneel, 1, 3, dt);
+        n.work = 1;
+        n.reach = null;
+        n.dir = n.x < 1600 ? -1 : 1;
+        if (n.t > 11 + n.x % 5) { n.state = 'stretch'; n.t = 0; }
+        break;
+      case 'stretch':
+        n.kneel = M.damp(n.kneel, 0, 3, dt);
+        n.work = 0;
+        if (n.t > 3.2) { n.state = 'work'; n.t = 0; }
+        break;
+      case 'tidy': // sorting the pots under the shelter
+        n.kneel = M.damp(n.kneel, 0.35, 3, dt);
+        n.work = 1;
+        break;
+      case 'hold': { // the other end of the cloth, while you sew
+        const t = n.tear;
+        n.kneel = M.damp(n.kneel, 0, 6, dt);
+        n.work = 0;
+        n.dir = -1;
+        n.reach = { x: t.x + t.w / 2 + 2, y: t.y - 2 };
+        const sewing = this.holding && this.holding.id === 'tear' + t.i;
+        if (!sewing && n.t > 0.4) { n.state = 'stand'; n.t = 0; n.reach = null; }
+        break;
+      }
+      case 'offer': // kneeling beside you, a seedling held out
+        n.kneel = M.damp(n.kneel, 0.85, 4, dt);
+        n.work = 0;
+        n.dir = -1;
+        n.reach = n.holding ? { x: n.x - 58, y: BASE - 70 } : null;
+        break;
+      case 'look':
+        n.kneel = M.damp(n.kneel, 0, 2, dt);
+        n.work = 0;
+        n.reach = null;
+        n.dir = this.chair.x < n.x ? -1 : 1;
+        break;
+      case 'stand':
+        n.kneel = M.damp(n.kneel, 0, 3, dt);
+        n.work = 0;
+        n.reach = null;
+        break;
+    }
+    if (n.look2 && n.state !== 'walk' && n.state !== 'follow' && n.state !== 'hold' && n.state !== 'offer') n.dir = pl.x < n.x ? -1 : 1;
+  };
+
   // ------------------------------------------------------------ drawing
   Acceptance.prototype.drawCanopy = function (x) {
     const t = this.t;
@@ -539,7 +713,7 @@
       const a = x0 + (x1 - x0) * i / cols, b = x0 + (x1 - x0) * (i + 1) / cols;
       const ya = y0 + Math.sin(i / cols * Math.PI) * sag + Math.sin(t * 1.2 + i) * 2;
       const yb = y0 + Math.sin((i + 1) / cols * Math.PI) * sag + Math.sin(t * 1.2 + i + 1) * 2;
-      x.fillStyle = CLOTH[(i * 3 + 1) % CLOTH.length];
+      x.fillStyle = P.fabric(x, CLOTH_FAB[(i * 3 + 1) % CLOTH.length], 0.2) || CLOTH[(i * 3 + 1) % CLOTH.length];
       x.beginPath();
       x.moveTo(a, ya - 40);
       x.lineTo(b, yb - 40);
@@ -552,8 +726,8 @@
       x.fillRect(a, ya + 10, b - a, 14);
       r();
     }
-    // hanging edge in the wind
-    P.gauze(x, 350, 168, 60, 170, { t, alpha: 0.5, seed: 4, wind: 0.2, color: '#cbbfa6' });
+    // hanging edge in the wind (the painted shelter has its own cloth on the left post)
+    if (!this.painted) P.gauze(x, 350, 168, 60, 170, { t, alpha: 0.5, seed: 4, wind: 0.2, color: '#cbbfa6' });
     P.gauze(x, 838, 172, 56, 140, { t: t + 2, alpha: 0.45, seed: 8, wind: 0.2, color: '#b8918a' });
     // tears and their patches
     for (const tr of this.tears) {
@@ -562,11 +736,24 @@
         x.beginPath();
         P.roughPolyPath(x, [[tr.x - tr.w / 2, tr.y - tr.h / 2], [tr.x + tr.w / 2, tr.y - tr.h / 2 + 4], [tr.x + tr.w / 2 - 6, tr.y + tr.h / 2], [tr.x - tr.w / 2 + 4, tr.y + tr.h / 2 - 3]], true, 6, M.rng(tr.i + 3), 7);
         x.fill();
-        x.strokeStyle = 'rgba(245,238,225,0.6)';
-        x.lineWidth = 1;
+        x.strokeStyle = 'rgba(58,46,40,0.55)';
+        x.lineWidth = 2.2;
         x.stroke();
+        x.strokeStyle = 'rgba(245,238,225,0.55)';
+        x.lineWidth = 0.9;
+        x.stroke();
+        // loose threads at the torn edge
+        x.strokeStyle = 'rgba(230,220,200,0.5)';
+        x.lineWidth = 0.8;
+        for (let k = 0; k < 4; k++) {
+          const fx = tr.x - tr.w / 2 + 8 + k * (tr.w - 16) / 3;
+          x.beginPath();
+          x.moveTo(fx, tr.y + tr.h / 2 - 2);
+          x.quadraticCurveTo(fx + 3, tr.y + tr.h / 2 + 6, fx + Math.sin(this.t * 2 + k) * 3, tr.y + tr.h / 2 + 12 + k % 2 * 4);
+          x.stroke();
+        }
       }
-      if (tr.p > 0) P.patch(x, tr.x, tr.y, tr.w + 12, tr.h + 10, { color: CLOTH[(tr.i + 2) % CLOTH.length], progress: tr.p, seed: tr.i + 30, alpha: M.clamp(tr.p * 3, 0, 1) });
+      if (tr.p > 0) P.patch(x, tr.x, tr.y, tr.w + 12, tr.h + 10, { color: CLOTH[(tr.i + 2) % CLOTH.length], fabric: CLOTH_FAB[(tr.i + 2) % CLOTH.length], progress: tr.p, seed: tr.i + 30, alpha: M.clamp(tr.p * 3, 0, 1) });
     }
   };
 
@@ -590,16 +777,93 @@
   Acceptance.prototype.drawNPC = function (x, n) {
     const sway = n.state === 'work' ? Math.sin(n.t * 2.2) * 0.02 : 0;
     G.person.draw(x, {
-      x: n.x, y: ground(n.x), s: HERO * 0.98, dir: n.dir, t: this.t + n.x,
-      look: n.look, kneel: n.kneel, work: n.state === 'work' ? 1 : 0, lean: sway, loose: 0.6, wind: 0.2,
-      bow: n.state === 'work' ? 0.1 : -0.05
+      x: n.x, y: ground(n.x), s: HERO * 0.98, dir: n.dir, t: this.t + n.home,
+      look: n.look, kneel: n.kneel, work: n.work || 0, lean: sway, loose: 0.6, wind: 0.2,
+      bow: n.state === 'work' ? 0.1 : -0.05, walk: n.walk, phase: n.phase, reach: n.reach, out: n.out
     });
+    if (n.holding && n.state === 'offer' && n.out.hand) this.drawSprout(x, n.out.hand.x, n.out.hand.y + 7, 1);
+  };
+
+  // A seedling with its ball of soil, passed from hand to hand.
+  Acceptance.prototype.drawSprout = function (x, hx, hy, k) {
+    x.fillStyle = '#4a3a2a';
+    x.beginPath();
+    x.ellipse(hx, hy, 9 * k, 7 * k, 0, 0, TAU);
+    x.fill();
+    x.fillStyle = '#6f7c48';
+    for (let i = 0; i < 4; i++) {
+      x.beginPath();
+      P.leafPath(x, hx, hy - 4 * k, 17 * k, 6.5 * k, -Math.PI / 2 + (i - 1.5) * 0.55);
+      x.fill();
+    }
+  };
+
+  // The painted plain: cloud shadows crossing it, now and then a line of birds.
+  Acceptance.prototype.drawBackdrop = function (x) {
+    const cam = this.cam, t = this.t;
+    const sx = M.clamp((cam.x - 1414) * 0.25, 0, 1780 - G.W);
+    x.drawImage(G.art.get(ART.back), -sx, 0, 1780, G.H);
+    x.save();
+    x.beginPath();
+    x.rect(0, 0, G.W, 430);
+    x.clip();
+    for (let i = 0; i < 3; i++) {
+      const span = G.W + 1000;
+      const cx = ((t * (7 + i * 3) + i * 610) % span) - 500, cy = 130 + i * 95;
+      const g = x.createRadialGradient(cx, cy, 0, cx, cy, 420);
+      g.addColorStop(0, 'rgba(30,30,38,0.13)');
+      g.addColorStop(1, 'rgba(30,30,38,0)');
+      x.fillStyle = g;
+      x.fillRect(cx - 420, cy - 420, 840, 840);
+    }
+    x.restore();
+    const per = 24, u = (t % per) / per;
+    if (u < 0.85) {
+      const bx = M.lerp(-120, G.W + 120, u / 0.85), by = 150 + Math.sin(t * 0.3) * 18;
+      x.strokeStyle = 'rgba(38,36,40,0.7)';
+      x.lineWidth = 1.4;
+      x.lineCap = 'round';
+      for (let i = 0; i < 6; i++) {
+        const fx = bx - i * 24 - (i % 2) * 9, fy = by + (i % 3) * 9 - i * 2;
+        const f = Math.sin(t * 9 + i * 1.7) * 3.2;
+        x.beginPath();
+        x.moveTo(fx - 6, fy - f);
+        x.quadraticCurveTo(fx - 2, fy - 1, fx, fy);
+        x.quadraticCurveTo(fx + 2, fy - 1, fx + 6, fy - f);
+        x.stroke();
+      }
+    }
+  };
+
+  // On a return visit: sweet peas all along the fence by the chair.
+  Acceptance.prototype.drawPeas = function (x) {
+    const im = G.art.get(ART.peas);
+    const t = this.t;
+    for (const [px, w, flip] of [[1950, 190, 1], [2105, 190, -1], [2262, 160, 1]]) {
+      const gy = ground(px + w / 2);
+      const h = im ? w * im.height / im.width : 0;
+      x.save();
+      x.translate(px + w / 2, gy - 44);
+      x.rotate(Math.sin(t * 0.9 + px) * 0.015);
+      x.scale(flip, 1);
+      if (im) x.drawImage(im, -w / 2, -h / 2, w, h);
+      else {
+        for (let i = 0; i < 9; i++) {
+          x.fillStyle = ['#d98fa6', '#8e6aa0', '#f1e6ea', '#b86a8c'][i % 4];
+          x.beginPath();
+          x.arc(-w / 2 + i * w / 8, Math.sin(i * 1.9) * 16, 5, 0, TAU);
+          x.fill();
+        }
+      }
+      x.restore();
+    }
   };
 
   Acceptance.prototype.draw = function (x) {
     const cam = this.cam, t = this.t;
     const off = cam.x;
-    x.drawImage(this.sky.c, -((t * 2) % 200), 0, this.sky.w, this.sky.h);
+    if (this.painted) this.drawBackdrop(x);
+    else x.drawImage(this.sky.c, -((t * 2) % 200), 0, this.sky.w, this.sky.h);
     // a thin warm band opens at the horizon once the chair has its place
     if (this.light > 0) {
       x.save();
@@ -612,21 +876,30 @@
       x.fillRect(0, 200, G.W, 120);
       x.restore();
     }
-    x.drawImage(this.hills.c, -(off * 0.02) % 300, 0, this.hills.w, this.hills.h);
-    x.drawImage(this.valley.c, -Math.min(500, off * 0.06), 0, this.valley.w, G.H);
-    const mt = this.midTrees;
-    x.drawImage(mt.c, -Math.min(mt.w - G.W, off * cam.zoom * 0.35), -(cam.y - 60) * cam.zoom * 0.3, mt.w, G.H);
+    if (!this.painted) {
+      x.drawImage(this.hills.c, -(off * 0.02) % 300, 0, this.hills.w, this.hills.h);
+      x.drawImage(this.valley.c, -Math.min(500, off * 0.06), 0, this.valley.w, G.H);
+      const mt = this.midTrees;
+      x.drawImage(mt.c, -Math.min(mt.w - G.W, off * cam.zoom * 0.35), -(cam.y - 60) * cam.zoom * 0.3, mt.w, G.H);
+    }
 
     x.save();
     cam.apply(x);
     const gl = this.groundL;
-    x.fillStyle = '#3c3c2c';
+    const turf = this.painted && P.pattern(x, ART.ground, 3, 0, 978);
+    x.fillStyle = turf || '#3c3c2c';
     x.fillRect(-3000, 990, gl.W + 6000, 4000);
+    if (turf) {
+      x.fillStyle = 'rgba(20,20,14,0.5)';
+      x.fillRect(-3000, 990, gl.W + 6000, 4000);
+    }
     x.drawImage(gl.L.c, 0, 300 - gl.oy, gl.W, 900);
     // shelter
-    x.drawImage(this.shelter.L.c, 320, 100, 640, 480);
+    if (this.painted) x.drawImage(G.art.get(ART.shelter), SHELTER.x, SHELTER.y, SHELTER.w, SHELTER.h);
+    else x.drawImage(this.shelter.L.c, 320, 100, 640, 480);
     this.drawCanopy(x);
     for (const sd of this.seeds) this.drawSeedling(x, sd);
+    if (this.revisit) this.drawPeas(x);
     // the chair: under the shelter, carried, or by the fence facing the river
     const ch = this.chair;
     if (!ch.carried) {
@@ -640,6 +913,8 @@
     }
     for (const n of this.npcs) this.drawNPC(x, n);
     this.drawPlayer(x);
+    const kn = this.kneeling;
+    if (kn && kn.inHand && this.player.out.hand) this.drawSprout(x, this.player.out.hand.x, this.player.out.hand.y + 7, 1);
     if (ch.carried) {
       const h = this.player.out.hand || { x: this.player.x + 40, y: this.player.y - 180 };
       P.chair(x, h.x + 30 * this.player.dir, h.y + 70, { s: 150, facing: this.player.dir, tip: 0.1 * this.player.dir, throwColor: '#6b3f52' });

@@ -25,7 +25,8 @@
     return { ex: sx + Math.cos(a1) * l1, ey: sy + Math.sin(a1) * l1, hx: sx + dx, hy: sy + dy };
   }
 
-  function limb(x, pts, w, col) {
+  // A sleeve or trouser leg. `dark` lays a shadow over it (for the far side of the body).
+  function limb(x, pts, w, col, dark) {
     x.strokeStyle = col;
     x.lineWidth = w;
     x.lineCap = 'round';
@@ -34,22 +35,29 @@
     x.moveTo(pts[0], pts[1]);
     for (let i = 2; i < pts.length; i += 2) x.lineTo(pts[i], pts[i + 1]);
     x.stroke();
+    if (dark) {
+      x.strokeStyle = 'rgba(0,0,0,' + dark + ')';
+      x.stroke();
+    }
   }
+
+  // Size of one texture pixel of a coat's cloth, in the figure's unit frame.
+  const WEAVE = 0.0045;
 
   const person = (G.person = {});
 
   // Presets
   person.HERO = {
-    coat: C.ochre, trousers: C.linen, boots: '#2e231c', skin: C.skin, hair: C.hair,
-    hairStyle: 'bob', patches: [['#8e4a2a', -0.07, 0.02, 0.07, 0.08], ['#d8b870', 0.035, -0.2, 0.05, 0.05], ['#6d6a60', -0.02, 0.1, 0.06, 0.05]]
+    coat: C.ochre, trousers: C.linen, boots: '#2e231c', skin: C.skin, hair: C.hair, cloth: { coat: 'ochre', trousers: 'linen' },
+    hairStyle: 'bob', patches: [['#8e4a2a', -0.07, 0.02, 0.07, 0.08, 'rust'], ['#d8b870', 0.035, -0.2, 0.05, 0.05, 'mustard'], ['#6d6a60', -0.02, 0.1, 0.06, 0.05, 'tweed']]
   };
   person.ELDER = {
-    coat: '#4f2f3d', trousers: '#3a322d', boots: '#231b16', skin: '#cfae92', hair: '#a8a29a',
-    hairStyle: 'bun', patches: [['#6b4a58', 0.02, -0.1, 0.05, 0.06]]
+    coat: '#4f2f3d', trousers: '#3a322d', boots: '#231b16', skin: '#cfae92', hair: '#a8a29a', cloth: { coat: 'plum', trousers: 'tweed' },
+    hairStyle: 'bun', patches: [['#6b4a58', 0.02, -0.1, 0.05, 0.06, 'rose']]
   };
   person.GARDENER = {
-    coat: '#434a39', trousers: '#2f2b26', boots: '#1f1914', skin: '#c79f82', hair: '#2a211b',
-    hairStyle: 'short', beard: true, patches: [['#5c6450', -0.05, 0.0, 0.06, 0.07]]
+    coat: '#434a39', trousers: '#2f2b26', boots: '#1f1914', skin: '#c79f82', hair: '#2a211b', cloth: { coat: 'sage', trousers: 'tweed' },
+    hairStyle: 'short', beard: true, patches: [['#5c6450', -0.05, 0.0, 0.06, 0.07, 'sage']]
   };
 
   /* p = {
@@ -68,6 +76,10 @@
     const wind = p.wind || 0, loose = p.loose == null ? 0.5 : p.loose;
     const coat = look.coat, coatD = shade(coat, -0.28), coatL = shade(coat, 0.18);
     const trou = look.trousers, trouD = shade(trou, -0.3);
+    // painted cloth where it has loaded; flat colour otherwise
+    const cloth = look.cloth && G.paint.cloth;
+    const coatF = (cloth && G.paint.cloth(x, look.cloth.coat, coat, WEAVE)) || coat;
+    const trouF = (cloth && G.paint.cloth(x, look.cloth.trousers, trou, WEAVE)) || trou;
 
     x.save();
     x.translate(p.x, p.y);
@@ -103,8 +115,8 @@
       return { kx, ky, ax, ay, th, kb };
     });
     const drawLeg = (lp, far) => {
-      const col = far ? trouD : trou;
-      limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, col);
+      if (trouF !== trou) limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, trouF, far ? 0.3 : 0);
+      else limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, far ? trouD : trou);
       // boot
       const bootCol = far ? shade(look.boots, -0.3) : look.boots;
       x.save();
@@ -146,7 +158,8 @@
       const fa = aa - 0.35 - walk * 0.2;
       farHand = { ex, ey, hx: ex + Math.cos(fa) * L_FORE, hy: ey + Math.sin(fa) * L_FORE };
     }
-    limb(x, [shoulder.x, shoulder.y, farHand.ex, farHand.ey, farHand.hx, farHand.hy], 0.05, coatD);
+    if (coatF !== coat) limb(x, [shoulder.x, shoulder.y, farHand.ex, farHand.ey, farHand.hx, farHand.hy], 0.05, coatF, 0.3);
+    else limb(x, [shoulder.x, shoulder.y, farHand.ex, farHand.ey, farHand.hx, farHand.hy], 0.05, coatD);
     x.fillStyle = shade(look.skin, -0.2);
     x.beginPath();
     x.arc(farHand.hx, farHand.hy, 0.022, 0, TAU);
@@ -161,7 +174,7 @@
 
     // ----- coat
     const motion = walk * 0.6 + Math.abs(p.lean || 0) * 0.5;
-    const flare = (0.02 + motion * 0.05 + wind * 0.13) * (0.55 + loose);
+    const flare = (0.02 + motion * 0.065 + wind * 0.13) * (0.55 + loose);
     const lift = wind * 0.06 * (0.5 + loose);
     const hemN = 6;
     const hem = [];
@@ -169,7 +182,7 @@
     for (let i = 0; i <= hemN; i++) {
       const u = i / hemN; // 0 front .. 1 back
       const bx = M.lerp(0.11 + 0.02 * walk * Math.sin(ph), -0.14, u) - flare * u * u * 1.4;
-      const wave = Math.sin(t * (5 + wind * 7) + u * 5.5 + ph * 0.5) * (0.008 + wind * 0.025 + motion * 0.008) * (0.4 + loose) * u;
+      const wave = Math.sin(t * (5 + wind * 7) + u * 5.5 + ph * 0.5) * (0.008 + wind * 0.025 + motion * 0.014) * (0.4 + loose) * u;
       let by = hemLen + 0.005 * Math.sin(u * 9) - lift * u * u + wave;
       hem.push([bx, by]);
     }
@@ -183,7 +196,7 @@
       const wy = groundLocal(h[0], h[1]);
       if (wy > -0.008) h[1] -= (wy + 0.008) / Math.cos(lean);
     }
-    x.fillStyle = coat;
+    x.fillStyle = coatF;
     x.beginPath();
     x.moveTo(0.045, -0.33);
     x.quadraticCurveTo(0.085, -0.28, 0.078, -0.2);
@@ -220,8 +233,8 @@
     x.stroke();
     // repairs
     for (const pa of look.patches || []) {
-      const [pc, px, py, pw, phh] = pa;
-      x.fillStyle = pc;
+      const [pc, px, py, pw, phh, pf] = pa;
+      x.fillStyle = (pf && cloth && G.paint.cloth(x, pf, pc, WEAVE)) || pc;
       x.fillRect(px - pw / 2, py - phh / 2, pw, phh);
       x.strokeStyle = 'rgba(240,230,210,0.75)';
       x.lineWidth = 0.004;
@@ -258,6 +271,19 @@
     x.beginPath();
     x.ellipse(hx, hy, hr * 0.92, hr, 0, 0, TAU);
     x.fill();
+    // a little modelling: the back of the head in shade, a warm cheek
+    x.save();
+    x.clip();
+    x.fillStyle = M.rgba(shade(look.skin, -0.4), 0.32);
+    x.beginPath();
+    x.ellipse(hx - hr * 0.62, hy + hr * 0.15, hr * 0.62, hr * 1.1, 0, 0, TAU);
+    x.fill();
+    x.fillStyle = 'rgba(196,106,86,0.16)';
+    x.beginPath();
+    x.arc(hx + hr * 0.42, hy + hr * 0.38, hr * 0.24, 0, TAU);
+    x.fill();
+    x.restore();
+    x.fillStyle = look.skin;
     // nose hint
     x.beginPath();
     x.moveTo(hx + hr * 0.85, hy - 0.01);
@@ -280,7 +306,7 @@
     // their scarf, once it's been freed from the thorns: wound at the neck, one end loose
     if (p.scarf) {
       const fl = wind * 0.09 + walk * 0.025;
-      const knit = G.paint.fabric && G.paint.fabric(x, 'rust', 0.0011);
+      const knit = G.paint.cloth && G.paint.cloth(x, 'rust', '#8e4a2a', WEAVE * 0.8);
       x.fillStyle = knit || '#8e4a2a';
       x.beginPath();
       x.moveTo(-0.07, -0.345);
@@ -319,7 +345,7 @@
       const fa = aa - 0.3 - walk * 0.25;
       nearHand = { ex, ey, hx: ex + Math.cos(fa) * L_FORE, hy: ey + Math.sin(fa) * L_FORE };
     }
-    limb(x, [shoulder.x, shoulder.y, nearHand.ex, nearHand.ey, nearHand.hx, nearHand.hy], 0.056, coat);
+    limb(x, [shoulder.x, shoulder.y, nearHand.ex, nearHand.ey, nearHand.hx, nearHand.hy], 0.056, coatF);
     limb(x, [shoulder.x, shoulder.y, nearHand.ex, nearHand.ey], 0.02, M.rgba(coatL, 0.4));
     // cuff and hand
     x.fillStyle = look.skin;
@@ -381,8 +407,8 @@
     }
     // loose strands in the wind
     if (wind > 0.05 || walk > 0.2) {
-      x.strokeStyle = look.hair;
-      x.lineWidth = 0.008;
+      x.strokeStyle = M.rgba(look.hair, 0.7);
+      x.lineWidth = 0.005;
       x.lineCap = 'round';
       x.beginPath();
       for (let i = 0; i < 4; i++) {
@@ -414,7 +440,7 @@
     x.ellipse(0.12 - step, 0.16, 0.14, 0.07, 0, 0, TAU);
     x.fill();
     // coat with a trailing hem
-    x.fillStyle = C.ochre;
+    x.fillStyle = (G.paint.cloth && G.paint.cloth(x, 'ochre', C.ochre, 0.016)) || C.ochre;
     x.beginPath();
     x.moveTo(0.18, -0.3);
     x.quadraticCurveTo(0.26, 0, 0.18, 0.3);
@@ -435,6 +461,19 @@
     x.ellipse(0.02 + step * 0.4, -0.3, 0.12, 0.07, 0, 0, TAU);
     x.ellipse(0.02 - step * 0.4, 0.3, 0.12, 0.07, 0, 0, TAU);
     x.fill();
+    // their scarf, round the shoulders, one end trailing
+    if (p.scarf) {
+      x.fillStyle = (G.paint.cloth && G.paint.cloth(x, 'rust', '#8e4a2a', 0.014)) || '#8e4a2a';
+      x.beginPath();
+      x.ellipse(0.0, 0, 0.13, 0.25, 0, 0, TAU);
+      x.fill();
+      x.beginPath();
+      x.moveTo(-0.08, 0.12);
+      x.quadraticCurveTo(-0.3, 0.2 + step * 0.4, -0.46, 0.14 + step * 0.6);
+      x.lineTo(-0.44, 0.06 + step * 0.6);
+      x.quadraticCurveTo(-0.28, 0.1 + step * 0.4, -0.1, 0.04);
+      x.fill();
+    }
     // head and hair
     x.fillStyle = C.hair;
     x.beginPath();

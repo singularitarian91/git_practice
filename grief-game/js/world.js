@@ -273,7 +273,9 @@
       x: pl.x, y: pl.y, s: pl.s, dir: pl.dir, t: this.t,
       walk: pl.walk, phase: pl.phase, kneel: pl.kneel, lean: pl.lean,
       wind: pl.wind, loose: pl.loose, bow: pl.bow, reach: pl.reach,
-      carry: pl.carry, work: pl.work, out: pl.out, look: G.person.HERO
+      carry: pl.carry, work: pl.work, out: pl.out, look: G.person.HERO,
+      // their scarf, once freed from the thorns, stays on for the rest of the journey
+      scarf: pl.scarf || (!!G.save.data.scarf && (G.flow.revisit || G.flow.current > 1))
     };
     if (extra) Object.assign(p, extra);
     G.person.draw(x, p);

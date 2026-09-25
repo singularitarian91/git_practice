@@ -1,5 +1,6 @@
 'use strict';
 // Denial: the room repeats until each change is noticed; the last door is a seam you pull open.
+// The first door waits until you've looked around; from the second room on you can hold to remember.
 module.exports = [{
   name: 'notice each change, pull the seam, reach the Anger plate',
   timeout: 150000,
@@ -12,8 +13,23 @@ module.exports = [{
     await look(905, 436);
     assert((await g.line()) === 'Two cups. One still has tea in it.', 'the first room shows two cups');
 
+    await g.clickWorld(1160, 430);
+    await g.sleep(400);
+    await g.idle();
+    assert((await state()).copy === 0 && (await g.line()) === 'Not yet.', 'the first door stays shut until the room has been looked at');
+    await look(770, 330);
+    await look(380, 320);
     await throughDoor();
     assert((await state()).copy === 1, 'the door leads back into the room (copy 1)');
+
+    assert(await g.eval(() => !!G.ui.action && G.ui.action.key === 'remember'), 'a Remember control appears in the second room');
+    await g.page.keyboard.down('KeyR');
+    await g.sleep(1000);
+    assert(await g.eval(() => G.scene.remember > 0.6), 'holding R brings back the room as it was');
+    await g.shot('denial-remember');
+    await g.page.keyboard.up('KeyR');
+    await g.sleep(1000);
+    assert(await g.eval(() => G.scene.remember < 0.2), 'letting go lets it fade again');
 
     await throughDoor();
     let s = await state();

@@ -534,11 +534,12 @@
     if (o.rot) { x.translate(cx, cy); x.rotate(o.rot); x.translate(-cx, -cy); }
     x.beginPath();
     P.roughPolyPath(x, pts, true, 1.5, r, 6);
-    x.fillStyle = o.color || '#c9b27a';
+    const cloth = o.fabric && P.fabric(x, o.fabric, o.texel || 0.2);
+    x.fillStyle = cloth || o.color || '#c9b27a';
     x.globalAlpha = o.alpha == null ? 1 : o.alpha;
     x.fill();
     x.globalAlpha = 1;
-    if (o.texture !== false) {
+    if (o.texture !== false && !cloth) {
       x.save();
       x.clip();
       P.hatch(x, cx - w / 2, cy - h / 2, w, h, { color: 'rgba(0,0,0,0.12)', gap: 3.5, angle: 0.8, rng: r });
@@ -566,14 +567,59 @@
   G.art.shared = ['shared/chair-ochre.webp', 'shared/chair-grey.webp', 'shared/chair-plum.webp']
     .concat(FABRICS.map(n => 'shared/fabric-' + n + '.webp'));
 
-  // A repeating painted-fabric fill. texel: size of one texture pixel in current drawing units.
+  // A repeating painted fill (fabric, wood). texel: size of one texture pixel in current drawing units.
   const patterns = new WeakMap();
-  P.fabric = function (x, name, texel) {
-    const im = G.art.get('shared/fabric-' + name + '.webp');
+  P.pattern = function (x, path, texel, ox, oy) {
+    const im = G.art.get(path);
     if (!im) return null;
     let m = patterns.get(x);
     if (!m) patterns.set(x, (m = {}));
-    const p = m[name] || (m[name] = x.createPattern(im, 'repeat'));
+    const p = m[path] || (m[path] = x.createPattern(im, 'repeat'));
+    if (p.setTransform && window.DOMMatrix) p.setTransform(new DOMMatrix([texel, 0, 0, texel, ox || 0, oy || 0]));
+    return p;
+  };
+  P.fabric = (x, name, texel) => P.pattern(x, 'shared/fabric-' + name + '.webp', texel);
+
+  // A fabric's weave in any colour: the painted texture, scaled per channel to the colour asked for.
+  // (Mean colour of each texture, measured when the textures were made.)
+  const FAB_MEAN = {
+    ochre: [118, 77, 30], rust: [114, 45, 29], mustard: [162, 121, 49], tweed: [93, 86, 78], linen: [191, 174, 151],
+    plum: [72, 46, 55], sage: [86, 86, 64], rose: [155, 97, 89], oxblood: [97, 33, 33]
+  };
+  const cloths = {};
+  function clothCanvas(name, color) {
+    const key = name + '|' + color;
+    if (cloths[key]) return cloths[key];
+    const im = G.art.get('shared/fabric-' + name + '.webp');
+    if (!im || !FAB_MEAN[name]) return null;
+    const N = 256;
+    const c = document.createElement('canvas');
+    c.width = c.height = N;
+    const cx = c.getContext('2d');
+    const want = M.parseColor(color), mean = FAB_MEAN[name];
+    const g0 = want[0] / mean[0], g1 = want[1] / mean[1], g2 = want[2] / mean[2];
+    cx.drawImage(im, 0, 0, N, N);
+    try {
+      const d = cx.getImageData(0, 0, N, N), a = d.data;
+      for (let i = 0; i < a.length; i += 4) {
+        a[i] = a[i] * g0;
+        a[i + 1] = a[i + 1] * g1;
+        a[i + 2] = a[i + 2] * g2;
+      }
+      cx.putImageData(d, 0, 0);
+    } catch (e) {
+      return null; // pixels unreadable here: the flat colour will do
+    }
+    return (cloths[key] = c);
+  }
+  const clothPatterns = new WeakMap();
+  P.cloth = function (x, name, color, texel) {
+    const c = clothCanvas(name, color);
+    if (!c) return null;
+    let m = clothPatterns.get(x);
+    if (!m) clothPatterns.set(x, (m = {}));
+    const key = name + '|' + color;
+    const p = m[key] || (m[key] = x.createPattern(c, 'repeat'));
     if (p.setTransform && window.DOMMatrix) p.setTransform(new DOMMatrix([texel, 0, 0, texel, 0, 0]));
     return p;
   };

@@ -54,6 +54,7 @@
   });
 
   function lineDur(text) { return 1.8 + text.length * 0.052; }
+  ui.lineDur = lineDur;
 
   // Thought line at the bottom of the stage. Arrays play in order.
   ui.say = function (text, o) {

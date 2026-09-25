@@ -1057,14 +1057,22 @@
     x.beginPath();
     x.rect(d.x, d.y, d.w, d.h);
     x.clip();
-    // the grove waiting behind the cloth
-    x.fillStyle = '#6f6a62';
-    x.fillRect(d.x, d.y, d.w, d.h);
-    x.fillStyle = '#d9d6cf';
-    x.fillRect(d.x + 40, d.y, 40, d.h);
-    x.fillStyle = '#1b1a18';
-    for (const [tx, tw] of [[d.x + 8, 22], [d.x + 60, 16], [d.x + 104, 26]]) x.fillRect(tx, d.y, tw, d.h);
-    x.strokeStyle = C.oxblood;
+    // the grove waiting behind the cloth: the next chapter's painting, if it has arrived
+    const grove = G.art.get('anger/far.webp');
+    if (grove) {
+      const sh = 1000, sw = sh * d.w / d.h;
+      x.drawImage(grove, 1210, 40, sw, sh, d.x, d.y, d.w, d.h);
+      x.fillStyle = 'rgba(40,36,32,0.18)';
+      x.fillRect(d.x, d.y, d.w, d.h);
+    } else {
+      x.fillStyle = '#6f6a62';
+      x.fillRect(d.x, d.y, d.w, d.h);
+      x.fillStyle = '#d9d6cf';
+      x.fillRect(d.x + 40, d.y, 40, d.h);
+      x.fillStyle = '#1b1a18';
+      for (const [tx, tw] of [[d.x + 8, 22], [d.x + 60, 16], [d.x + 104, 26]]) x.fillRect(tx, d.y, tw, d.h);
+    }
+    x.strokeStyle = P.fabric(x, 'oxblood', 0.1) || C.oxblood;
     x.lineWidth = 7;
     x.beginPath();
     x.moveTo(d.x, d.y + 120 + Math.sin(t * 2) * 8);
@@ -1082,17 +1090,38 @@
     if (!this.ending) {
       const N = 9;
       x.save();
-      x.strokeStyle = C.oxbloodLight;
-      x.lineWidth = 2.6;
       x.lineCap = 'round';
       const cx = d.x + d.w / 2;
       for (let i = this.popped; i < N; i++) {
         const y = d.y + 30 + i * ((d.h - 60) / (N - 1));
+        // a stitch of thick thread: its shadow on the cloth, the thread, a glint along it, the two holes
+        x.strokeStyle = 'rgba(38,14,10,0.45)';
+        x.lineWidth = 3.4;
+        x.beginPath();
+        x.moveTo(cx - 8, y - 5.5);
+        x.lineTo(cx + 10, y + 8.5);
+        x.stroke();
+        x.strokeStyle = C.oxbloodLight;
+        x.lineWidth = 2.8;
         x.beginPath();
         x.moveTo(cx - 9, y - 7);
-        x.lineTo(cx + 9, y + 7);
+        x.quadraticCurveTo(cx, y - 1.5, cx + 9, y + 7);
         x.stroke();
+        x.strokeStyle = 'rgba(236,160,130,0.55)';
+        x.lineWidth = 0.9;
+        x.beginPath();
+        x.moveTo(cx - 7, y - 6.4);
+        x.quadraticCurveTo(cx, y - 2.4, cx + 6, y + 4);
+        x.stroke();
+        x.fillStyle = 'rgba(30,22,18,0.6)';
+        x.beginPath();
+        x.arc(cx - 10, y - 8, 1.3, 0, TAU);
+        x.moveTo(cx + 11.3, y + 8);
+        x.arc(cx + 10, y + 8, 1.3, 0, TAU);
+        x.fill();
       }
+      x.strokeStyle = C.oxbloodLight;
+      x.lineWidth = 2.6;
       x.strokeStyle = 'rgba(177,67,47,0.6)';
       x.lineWidth = 1.2;
       x.beginPath();

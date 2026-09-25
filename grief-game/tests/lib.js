@@ -16,7 +16,10 @@ try {
 
 const ROOT = path.resolve(__dirname, '..');
 const OUTPUT = path.join(__dirname, 'output');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.jpg': 'image/jpeg', '.png': 'image/png', '.css': 'text/css', '.json': 'application/json' };
+const TYPES = {
+  '.html': 'text/html', '.js': 'text/javascript', '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp',
+  '.mp4': 'video/mp4', '.css': 'text/css', '.json': 'application/json'
+};
 
 function serve() {
   return new Promise(resolve => {

@@ -1,10 +1,18 @@
 'use strict';
 // Depression: walking gets nowhere; standing still lets small living things appear.
+// Their boots wait by the step.
 module.exports = [{
   name: 'stop four times, notice what appears, reach the Acceptance plate',
   timeout: 150000,
   run: async ({ open, assert }) => {
     const g = await open({ hash: '#ch4' });
+    await g.clickWorld(420, 425);
+    await g.waitFor(() => !!G.ui.card, null, 8000, 'the boots to be picked up and looked at');
+    assert((await g.line()) === 'Their boots, by the step.', 'their boots are by the step');
+    await g.sleep(1400);
+    await g.click(640, 360);
+    await g.waitFor(() => !G.ui.card, null, 5000, 'the boots to be put back');
+    await g.idle();
     for (let n = 0; n < 4; n++) {
       const x0 = await g.eval(() => G.scene.player.x);
       await g.walkRightUntil('G.scene.player.x > ' + (x0 + 420), 20000);

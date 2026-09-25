@@ -583,6 +583,6 @@
       x.restore();
     }
     const h = this.hero;
-    G.person.drawTop(x, { x: h.x, y: h.y, s: 44, ang: h.ang, phase: h.phase, walk: h.walk });
+    G.person.drawTop(x, { x: h.x, y: h.y, s: 44, ang: h.ang, phase: h.phase, walk: h.walk, scarf: !!G.save.data.scarf });
   };
 })();
