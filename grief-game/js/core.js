@@ -231,6 +231,17 @@
   art.ready = paths => (paths || []).every(p => { const e = art.cache[p]; return !!(e && e.ready); });
   art.get = path => { const e = art.cache[path]; return e && e.ready && !e.failed ? e.img : null; };
   // Let go of images nothing needs any more (phones have little memory to spare).
+  // Draw an image once at full size into a 1px canvas, so its first real draw doesn't stall
+  // while it decodes (done one image a frame while a chapter's plate is up).
+  let warmX = null;
+  art.warm = function (path) {
+    const im = art.get(path);
+    if (!im) return;
+    try {
+      if (!warmX) { const c = document.createElement('canvas'); c.width = c.height = 1; warmX = c.getContext('2d'); }
+      warmX.drawImage(im, 0, 0);
+    } catch (e) { /* nothing to warm */ }
+  };
   art.keepOnly = function (paths) {
     const keep = new Set(paths);
     for (const p of Object.keys(art.cache)) if (!keep.has(p) && art.cache[p].ready) delete art.cache[p];

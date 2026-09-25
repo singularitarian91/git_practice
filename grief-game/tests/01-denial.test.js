@@ -18,7 +18,13 @@ module.exports = [{
     await g.idle();
     assert((await state()).copy === 0 && (await g.line()) === 'Not yet.', 'the first door stays shut until the room has been looked at');
     await look(770, 330);
-    await look(380, 320);
+    await g.clickWorld(1045, 330);
+    await g.waitFor(() => !!G.ui.card, null, 8000, 'their coat to be taken down and looked at');
+    assert((await g.line()) === 'Their coat, on its hook.', 'their coat is on its hook');
+    await g.sleep(1400);
+    await g.click(640, 360);
+    await g.waitFor(() => !G.ui.card, null, 5000, 'the coat to be put back');
+    await g.idle();
     await throughDoor();
     assert((await state()).copy === 1, 'the door leads back into the room (copy 1)');
 

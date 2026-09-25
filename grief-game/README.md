@@ -19,6 +19,7 @@ python3 -m http.server 8000
 | Walk | Click or tap the ground (hold to keep walking) | A / D or ← / → |
 | Look at or use something | Click it | E, Space or Enter near it |
 | Pull, untie, sew | Press and hold on it | Hold E / Space |
+| Remember how the room was (chapter 1) | Hold the round button | Hold R |
 | Turn a room (chapter 3) | Click the room | Arrows to choose, Space to turn |
 | Pause | Pause icon, top right | Esc |
 | Sound | Speaker icon, top right | M |
@@ -31,11 +32,32 @@ Progress is saved in the browser. After you finish, **Return to a chapter** lets
 
 | # | Chapter | From the guide | What you do |
 | --- | --- | --- | --- |
-| 01 | Denial | *The room repeats before it can be left.* | Walk through the door and come back into the same bedroom, each copy more see-through, with nested copies showing behind the cloth walls. Find the one thing that changed (one cup, the bare hook, the turned chair), then pull the thread out of the sewn doorway. |
-| 02 | Anger | *The garden resists being crossed.* | Cross a grove of damask-patterned trunks against gusting wind. Untie the three knots on the gate between gusts; pulling during a gust tightens them. |
-| 03 | Bargaining | *Every doorway offers another version.* | Turn fold-out rooms (seen from above) to break the red thread's loop through the lamp-lit rooms and lead it out to the boardwalk. Each turn offers an "if only". |
-| 04 | Depression | *The world is large and hard to reach.* | Walk a long boardwalk under a huge overcast sky. Stand still and small living things appear close by; notice them. The last is the lone white flower. |
-| 05 | Acceptance | *The missing place remains within a shared world.* | Mend the patched shelter and plant seedlings with two gardeners, then carry the empty chair to the fence overlooking the river. The path along the river opens and the camera pulls back. |
+| 01 | Denial | *The room repeats before it can be left.* | The door stays shut ("Not yet.") until you've looked around the bedroom. Then it leads back into the same room, each copy more see-through, with nested copies behind the cloth walls. Hold to remember how the room was, and find the one thing that changed (one cup, the bare hook, the turned chair). Pull the thread out of the sewn doorway, with the grove waiting behind the gauze. |
+| 02 | Anger | *The garden resists being crossed.* | Cross a grove of damask-patterned trunks against gusting wind. The wind takes the chair and tumbles it down to what's left of the wall. A bramble catches at you and slows you, and their scarf is snagged in it. The screen darkens and the grove rustles before each gust. Untie the gate's three knots between gusts; pulling during a gust tightens them. |
+| 03 | Bargaining | *Every doorway offers another version.* | Turn fold-out rooms (seen from above) to break the red thread's loop and lead it out to the boardwalk. Each lit room you turn away puts its lamp out for good, and each "if only" matches the room you turned. |
+| 04 | Depression | *The world is large and hard to reach.* | Walk a long boardwalk under a huge overcast sky. Stand still and small living things appear close by (a moth, a snail, a wagtail, moss); notice them. The last is the lone white flower. |
+| 05 | Acceptance | *The missing place remains within a shared world.* | Mend the patched shelter while a gardener holds the other end of the cloth. Kneel to plant as the elder hands you each seedling. Then carry the empty chair to the fence overlooking the river, and the two of them walk down with you. The path along the river opens and the camera pulls back. |
+
+### Their things
+
+The missing person is never named. Each chapter has one thing of theirs you can pick up and look at before putting it back:
+- the coat on the hook (Denial)
+- their scarf, snagged in the thorns; once freed you wear it for the rest of the journey (Anger)
+- a letter in their handwriting (Bargaining)
+- their muddy boots by the step (Depression)
+- a seed packet in the chair's throw, in their hand: *Sweet peas, by the fence* (Acceptance)
+
+### Coming back
+
+After the end, each chapter can be revisited. The loss is the same, but each return has one new thing, and a line to go with it:
+
+| Chapter | On a return visit |
+| --- | --- |
+| Denial | Warm afternoon light, and the window can be opened |
+| Anger | No gusts, the gate stands open, the chair waits by the wall, and the brambles are flowering |
+| Bargaining | Someone has lit the lamps along the way through |
+| Depression | Lighter; the step is empty because you're wearing their boots ("They nearly fit.") |
+| Acceptance | The garden has come up, and sweet peas flower along the fence by the chair |
 
 ### How the guide's shared grammar shows up
 
@@ -45,6 +67,17 @@ Progress is saved in the browser. After you finish, **Return to a chapter** lets
 - **Small life**: dust in the window light, the moth, snail and flower, the seedlings.
 - **Scale**: the hero is largest in the bedroom and smallest on the open plain at the end (ROOM → OPEN WORLD).
 - **Light**: overcast daylight throughout. Clear warm light is saved for earned moments (the flower, the chair's place).
+
+### The painted look
+
+The scenery is painted, following the guide's studies:
+- Denial's room and its gauze walls
+- the Anger grove with its gate
+- the dusk town and lamp-lit rooms of Bargaining
+- the Depression lake, porch and reeds
+- the Acceptance river plain and shelter
+
+The figures are drawn in code but dressed in painted cloth (ochre wool, plum, sage, linen), cut-paper style. The empty chair is a painting in every chapter. The chapter plates move: gauze stirs, ribbons whip in the wind, rain rings the lake, the canopy billows. The end card is a small painting of the chair by the fence. [`assets/art/README.md`](assets/art/README.md) describes how each picture was made, with the prompts, so the look can be redone in another style.
 
 ## Files
 
@@ -58,7 +91,8 @@ js/ui.js              thought lines, hints, HUD, pause menu, page-tear transitio
 js/world.js           shared side-view walking and interaction
 js/scenes.js          title, chapter plates, return menu, end card, chapter flow
 js/chapters/*.js      the five chapters
-assets/plates/*.jpg   chapter title plates
+assets/art/           painted scenery, sprites and cloth, by chapter (see assets/art/README.md)
+assets/plates/        chapter title plates: stills (.jpg) and short painted loops (.mp4, .webm)
 tests/                automated playthroughs (see Tests)
 ```
 
@@ -78,8 +112,8 @@ npm test -- anger     # only tests whose name contains "anger"
 
 | File | What it checks |
 | --- | --- |
-| `01`–`05` | Each chapter, played through to the next chapter's plate or the end card |
-| `06-flow` | The title, continuing from saved progress, the pause menu, pause holding text and timers, Return |
+| `01`–`05` | Each chapter, played through to the next chapter's plate or the end card, including each chapter's new moments (looking around before the first door, remembering, the chair in the wind, the bramble, lamps going out, the boots, the gardeners' help) |
+| `06-flow` | The title, a plate's painted loop and the painted end card, continuing from saved progress, the pause menu, pause holding text and timers, Return |
 | `07-phone` | An upright phone: the turned stage, taps, holding to walk and to untie |
 | `08-return` | Each chapter's Return version |
 
@@ -92,7 +126,8 @@ Two tools repeat the checks behind the current performance and sound mix. They'r
 
 ## Credits
 
-- The chapter plates are the level studies from the *Grief Game: Visual Direction* PDF, which describes them as original concept studies made for this game.
-- Everything else (drawings, character, sound) is generated in code.
+- The chapter plates are the level studies from the *Grief Game: Visual Direction* PDF, which describes them as original concept studies made for this game. Their moving versions were made from those studies with an image-to-video model.
+- The painted scenery, sprites and cloth in `assets/art/` were made with AI image models (nano banana 2 and GPT Image 2.5, through Higgsfield), each from a layout of the game's own drawn scene plus the guide's study for that chapter. The prompts are in `assets/art/README.md`.
+- Everything else (the figures' shapes and movement, effects, sound) is generated in code.
 - Visual references named in the guide: Shaun Tan, Tove Jansson, Katsumi Komagata, Do Ho Suh, Eyvind Earle, Matt Nava, Claire Mathon, Franz Lustig, Rinko Kawauchi, Siân Davey, Bode, Issey Miyake. These are references only; none of their work is used.
 - Type: IM Fell English and Alegreya Sans from Google Fonts, falling back to Georgia and system sans when offline.

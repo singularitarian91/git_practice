@@ -60,6 +60,22 @@
     hairStyle: 'short', beard: true, patches: [['#5c6450', -0.05, 0.0, 0.06, 0.07, 'sage']]
   };
 
+  // Make the figures' recoloured cloth ahead of time (it's built on first use otherwise).
+  person.warm = function () {
+    if (!G.paint.cloth) return;
+    const c = document.createElement('canvas');
+    c.width = c.height = 1;
+    const x = c.getContext('2d');
+    for (const look of [person.HERO, person.ELDER, person.GARDENER]) {
+      if (!look.cloth) continue;
+      G.paint.cloth(x, look.cloth.coat, look.coat, 1);
+      G.paint.cloth(x, look.cloth.trousers, look.trousers, 1);
+      for (const pa of look.patches || []) if (pa[5]) G.paint.cloth(x, pa[5], pa[0], 1);
+    }
+    G.paint.cloth(x, 'rust', '#8e4a2a', 1);
+    G.paint.cloth(x, 'ochre', C.ochre, 1);
+  };
+
   /* p = {
    *   x, y, s, dir, t,
    *   look: preset, walk: 0..1, phase, kneel: 0..1, lean, wind, loose,

@@ -13,6 +13,36 @@
     return im;
   });
 
+  // Each plate also has a short painted loop (the still stays up until it's playing).
+  // H.264 where the browser has it, VP9 otherwise; nothing at all if neither plays.
+  G.plateVideo = function (i) {
+    const v = document.createElement('video');
+    const mp4 = v.canPlayType && v.canPlayType('video/mp4; codecs="avc1.4d401f"');
+    const webm = v.canPlayType && v.canPlayType('video/webm; codecs="vp9"');
+    if (!mp4 && !webm) return null;
+    v.muted = true;
+    v.defaultMuted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.setAttribute('muted', '');
+    v.setAttribute('playsinline', '');
+    v.setAttribute('aria-hidden', 'true');
+    // kept in the page (invisibly) so phones keep playing it
+    v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;';
+    document.body.appendChild(v);
+    v.src = 'assets/plates/' + files[i] + (mp4 ? '.mp4' : '.webm');
+    const p = v.play();
+    if (p && p.catch) p.catch(() => {});
+    v.release = () => {
+      v.pause();
+      v.removeAttribute('src');
+      try { v.load(); } catch (e) { /* ignore */ }
+      if (v.parentNode) v.parentNode.removeChild(v);
+    };
+    return v;
+  };
+
   // A plain loading page while fonts arrive.
   const loading = {
     t: 0,

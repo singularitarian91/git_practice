@@ -20,6 +20,22 @@ module.exports = [
     }
   },
   {
+    name: 'a chapter plate plays its painted loop, and the ending is painted',
+    run: async ({ open, assert }) => {
+      const g = await open();
+      await g.eval(() => G.flow.plate(1));
+      await g.waitFor(() => G.scene.vidA >= 1, null, 12000, 'the Anger plate to start moving');
+      assert(await g.eval(() => /02-anger\.(mp4|webm)$/.test(G.scene.video.currentSrc)), 'it plays the Anger loop');
+      await g.shot('plate-anger');
+      await g.click(640, 360);
+      await g.waitFor(() => G.ui.label === '02 · Anger' && G.scene.player, null, 12000, 'Anger to start');
+      assert(await g.eval(() => !document.querySelector('video')), 'the plate lets go of its video');
+      await g.eval(() => G.flow.complete(4));
+      await g.waitFor(() => G.scene.constructor.name === 'EndScene', null, 8000, 'the end card');
+      g.assertNoErrors();
+    }
+  },
+  {
     name: 'continue from saved progress',
     run: async ({ open, assert }) => {
       const g = await open({ save: { reached: 3, done: false, sound: true } });

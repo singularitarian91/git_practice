@@ -669,7 +669,7 @@
   }
   Denial.prototype = Object.create(G.SideScene.prototype);
   G.chapters.Denial = Denial;
-  Denial.art = o => (o.revisit ? [ART.warm, ART.open] : [ART.room, ART.gauze, 'denial/cupB.webp', 'denial/coat.webp']);
+  Denial.art = o => (o.revisit ? [ART.warm, ART.open] : [ART.room, ART.gauze, 'denial/cupB.webp', 'denial/coat.webp', 'denial/coat-card.webp']);
 
   Denial.prototype.state = function () {
     const c = this.copy, rv = this.revisit;
@@ -712,6 +712,13 @@
 
   Denial.prototype.look = function (id) {
     if (this.copy === 0) this.looked.add(id);
+    // their coat, the first time: taken down and looked at, then put back
+    if (id === 'hook' && this.copy === 0 && !this.revisit && !this.coatSeen && G.art.get('denial/coat-card.webp')) {
+      this.coatSeen = true;
+      G.audio.chime(64, 0.07);
+      G.ui.keepsake('denial/coat-card.webp', ['Their coat, on its hook.', 'As if they’d only stepped out.']);
+      return;
+    }
     if (this.revisit && id === 'window') { this.openWindow(); return; }
     const ch = CHANGES[this.copy];
     if (!this.revisit && ch && ch.id === id && this.noticed < this.copy) {

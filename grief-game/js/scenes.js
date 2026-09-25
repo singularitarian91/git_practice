@@ -239,6 +239,25 @@
     // gauze at the window
     P.gauze(x, 752, 86, 120, 470, { t, alpha: this.painted ? 0.12 : 0.22, seed: 2, wind: 0.08 });
     P.gauze(x, 930, 86, 110, 440, { t: t + 3, alpha: this.painted ? 0.09 : 0.16, seed: 5, wind: 0.05 });
+    // clouds passing outside: the light in the room swells and fades
+    if (this.painted) {
+      const sun = 0.5 + 0.5 * Math.sin(t * 0.35) * Math.sin(t * 0.13 + 1);
+      const g0 = x.createLinearGradient(0, 110, 0, 720);
+      g0.addColorStop(0, 'rgba(214,226,236,0.16)');
+      g0.addColorStop(1, 'rgba(214,226,236,0.02)');
+      x.save();
+      x.globalCompositeOperation = 'lighter';
+      x.globalAlpha = 0.25 + 0.75 * sun;
+      x.fillStyle = g0;
+      x.beginPath();
+      x.moveTo(770, 110);
+      x.lineTo(1010, 110);
+      x.lineTo(990, 720);
+      x.lineTo(470, 720);
+      x.closePath();
+      x.fill();
+      x.restore();
+    }
     this.motes.draw(x, t, 0.5);
     // the empty chair in the light
     P.chair(x, 690, 628, { s: 190, facing: 1, throwColor: C.ochre });
@@ -341,16 +360,32 @@
     G.audio.scene({ room: 0.5, drone: [[50, 57, 64], [48, 55, 63], [49, 56, 61], [45, 52, 60], [48, 55, 64]][this.i], droneLevel: 0.32 });
     this.art = flow.artFor(this.i, this.o);
     G.art.loadAll(this.art);
+    this.video = G.plateVideo ? G.plateVideo(this.i) : null;
+    this.vidA = 0;
+  };
+  PlateScene.prototype.exit = function () {
+    if (this.video) this.video.release();
+    this.video = null;
   };
   PlateScene.prototype.update = function (dt) {
     this.t += dt;
     const inp = G.input;
+    // once the painted loop is actually moving, let it come up over the still
+    const v = this.video;
+    if (v && v.readyState >= 2 && !v.paused && v.currentTime > 0.05) this.vidA = Math.min(1, this.vidA + dt / 0.8);
     this.ready = G.art.ready(this.art);
     // build the chapter while the plate is up, one piece of scenery per frame
     const Ctor = G.chapters[CH[this.i].ctor];
     if (Ctor && this.t > 0.3 && !this.done && this.ready) {
       if (!this.next) this.next = new Ctor(this.o);
       else G.prepareStep(this.next);
+    }
+    // warm the chapter's paintings (and the figures' cloth), one a frame, while the plate is up
+    if (this.ready && !this.warmList) this.warmList = this.art.concat(G.art.shared, ['cloth']);
+    if (this.warmList && this.warmList.length && this.t > 0.4) {
+      const w = this.warmList.shift();
+      if (w === 'cloth') G.person.warm();
+      else G.art.warm(w);
     }
     G.setCursor(this.t > 1 && this.ready ? 'pointer' : 'default');
     if (!this.done && this.t > 1.0 && this.ready && (inp.pressed || inp.hit.act)) {
@@ -366,11 +401,20 @@
     const c = CH[this.i];
     x.fillStyle = '#1b1e1b';
     x.fillRect(0, 0, G.W, G.H);
-    if (img && img.complete && img.naturalWidth) {
-      const z = 1 + Math.min(this.t, 14) * 0.004;
+    const z = 1 + Math.min(this.t, 14) * 0.004;
+    if (img && img.complete && img.naturalWidth && this.vidA < 1) {
       const sc = Math.max(G.W / img.naturalWidth, G.H / img.naturalHeight) * z;
       const w = img.naturalWidth * sc, h = img.naturalHeight * sc;
       x.drawImage(img, (G.W - w) / 2, (G.H - h) / 2 - 30, w, h);
+    }
+    const v = this.video;
+    if (v && this.vidA > 0 && v.videoWidth) {
+      const sc = Math.max(G.W / v.videoWidth, G.H / v.videoHeight) * z;
+      const w = v.videoWidth * sc, h = v.videoHeight * sc;
+      x.save();
+      x.globalAlpha = this.vidA;
+      x.drawImage(v, (G.W - w) / 2, (G.H - h) / 2 - 30, w, h);
+      x.restore();
     }
     // the dark band with a torn top edge
     x.save();
@@ -427,10 +471,40 @@
   EndScene.prototype.enter = function () {
     G.audio.scene({ wind: 0.15, water: 0.25, drone: [48, 55, 64], droneLevel: 0.32 });
     G.audio.arp([60, 64, 67, 72], 0.4, 0.1);
+    this.vignette = paintEndVignette();
   };
   EndScene.prototype.rects = function () {
-    return [{ x: G.W / 2 - 250, y: 520, w: 240, h: 44 }, { x: G.W / 2 + 10, y: 520, w: 240, h: 44 }];
+    const y = this.vignette ? 566 : 520;
+    return [{ x: G.W / 2 - 250, y, w: 240, h: 44 }, { x: G.W / 2 + 10, y, w: 240, h: 44 }];
   };
+
+  // The river plain from the last chapter, washed onto the paper like a book illustration.
+  const VIG = { w: 680, h: 290, y: 298 };
+  function paintEndVignette() {
+    const im = G.art.get('acceptance/backdrop.webp');
+    if (!im) return null;
+    const L = G.layer(VIG.w, VIG.h);
+    const x = L.x;
+    const sw = im.width * 0.62, sh = sw * VIG.h / VIG.w;
+    x.drawImage(im, im.width * 0.3, im.height * 0.2, sw, sh, 0, 0, VIG.w, VIG.h);
+    // sit it on the paper: warm it, then let it fade out at the edges
+    x.globalCompositeOperation = 'multiply';
+    x.fillStyle = '#efe6d6';
+    x.fillRect(0, 0, VIG.w, VIG.h);
+    x.globalCompositeOperation = 'destination-in';
+    x.save();
+    x.translate(VIG.w / 2, VIG.h / 2);
+    x.scale(1, VIG.h / VIG.w);
+    const g = x.createRadialGradient(0, 0, VIG.w * 0.12, 0, 0, VIG.w * 0.5);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.55, 'rgba(0,0,0,0.85)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = g;
+    x.fillRect(-VIG.w, -VIG.w, VIG.w * 2, VIG.w * 2);
+    x.restore();
+    x.globalCompositeOperation = 'source-over';
+    return L;
+  }
   EndScene.prototype.update = function (dt) {
     this.t += dt;
     if (this.t < 5) return;
@@ -450,6 +524,8 @@
     const t = this.t;
     x.fillStyle = '#e6dfd3';
     x.fillRect(0, 0, G.W, G.H);
+    if (this.vignette) this.drawVignette(x);
+    else {
     // charcoal chair and a single flower
     x.save();
     x.globalAlpha = M.clamp(t / 2, 0, 1) * 0.9;
@@ -478,6 +554,7 @@
     x.lineTo(G.W / 2 + 160, 471);
     x.stroke();
     x.restore();
+    }
 
     x.save();
     x.textAlign = 'center';
@@ -506,7 +583,51 @@
     });
     x.font = '15px ' + G.FONT_SANS;
     x.fillStyle = 'rgba(31,35,31,0.6)';
-    x.fillText('Earlier places remain. Their light has changed.', G.W / 2, 610);
+    x.fillText('Earlier places remain. Their light has changed.', G.W / 2, this.vignette ? 666 : 610);
+    x.restore();
+  };
+
+  // The painted ending: the plain opening up, their chair by the fence, sweet peas on the wire.
+  EndScene.prototype.drawVignette = function (x) {
+    const t = this.t, L = this.vignette;
+    const vx = G.W / 2 - VIG.w / 2, a = M.clamp(t / 2.5, 0, 1);
+    x.save();
+    x.globalAlpha = a;
+    x.drawImage(L.c, vx, VIG.y, VIG.w, VIG.h);
+    // the thin warm band at the horizon, opening slowly
+    x.globalCompositeOperation = 'soft-light';
+    const g = x.createLinearGradient(0, VIG.y + 40, 0, VIG.y + 150);
+    g.addColorStop(0, 'rgba(255,214,160,0)');
+    g.addColorStop(0.6, M.rgba('#f0c987', 0.5 * M.smoothstep(1, 7, t)));
+    g.addColorStop(1, 'rgba(255,214,160,0)');
+    x.fillStyle = g;
+    x.fillRect(vx + 60, VIG.y + 40, VIG.w - 120, 110);
+    x.restore();
+    // their chair, and the sweet peas along the fence
+    const cx = G.W / 2 + 40, gy = VIG.y + VIG.h - 36;
+    x.save();
+    x.globalAlpha = M.clamp((t - 0.6) / 2, 0, 1);
+    x.strokeStyle = 'rgba(60,52,44,0.6)';
+    x.lineWidth = 1;
+    x.beginPath();
+    x.moveTo(cx - 190, gy - 30);
+    x.lineTo(cx + 130, gy - 32);
+    x.stroke();
+    x.fillStyle = 'rgba(60,52,44,0.75)';
+    for (const px of [cx - 190, cx - 30, cx + 130]) x.fillRect(px - 2.5, gy - 52, 5, 54);
+    const peas = G.art.get('acceptance/peas.webp');
+    if (peas) {
+      const w = 118, h = w * peas.height / peas.width;
+      for (const [px, f] of [[cx - 118, 1], [cx + 62, -1]]) {
+        x.save();
+        x.translate(px, gy - 31);
+        x.rotate(Math.sin(t * 0.9 + px) * 0.02);
+        x.scale(f, 1);
+        x.drawImage(peas, -w / 2, -h / 2, w, h);
+        x.restore();
+      }
+    }
+    P.chair(x, cx - 28, gy + 4, { s: 112, facing: 1, throwColor: '#6b3f52', shadow: 0.25 });
     x.restore();
   };
 
