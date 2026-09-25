@@ -46,7 +46,7 @@ export class Assets {
 
   async load(onProgress) {
     // the town kit and street dressing are optional: the game falls back to placeholder shells without them
-    const files = [['props', './assets/props.glb'], ['figure', './assets/figure.glb'], ['town', './assets/town.glb', true], ['street', './assets/street.glb', true]];
+    const files = [['props', './assets/props.glb'], ['figure', './assets/figure.glb'], ['town', './assets/town.glb', true], ['street', './assets/street.glb', true], ['hero', './assets/hero.glb', true]];
     let done = 0;
     const results = await Promise.all(files.map(async ([k, url, optional]) => {
       let g = null;
@@ -74,8 +74,36 @@ export class Assets {
       child.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; this.tuneMaterial(o.material); } });
       this.templates.set(child.name, child);
     }
+    this.dressHeroes();
     for (const [name, k] of [['Sleepwalker', 0.75], ['Unwatched', 0.45]]) if (this.templates.has(name)) inkAll(this.templates.get(name), k);
     this.makeTextures();
+  }
+
+  // Sculpted replacements (assets/hero.glb, blender/build_hero.py): each hero mesh
+  // takes over the look of the procedural template of the same name. The template
+  // keeps its moving parts, pivot and size, so colliders and fracture still agree.
+  dressHeroes() {
+    for (const h of this.hero?.scene.children || []) {
+      const t = this.templates.get(h.name);
+      if (!t || !h.isMesh) continue;
+      h.material.userData.tuned = true;
+      if (t.isMesh) { t.geometry = h.geometry; t.material = h.material; }
+      else {
+        // a multi-material piece loads as a group holding one mesh per material;
+        // those go, the named child parts (hands, flame, pillow) stay
+        const assoc = this.props.parser.associations;
+        for (const c of [...t.children]) if (c.isMesh && assoc.get(c)?.nodes === undefined) t.remove(c);
+        const m = new THREE.Mesh(h.geometry, h.material);
+        m.name = h.name + '_Hero'; m.castShadow = m.receiveShadow = true;
+        t.add(m);
+      }
+      if (h.material.map) h.material.map.anisotropy = 8;
+      for (const n of (h.userData.hide || '').split(',').filter(Boolean)) {
+        const c = t.getObjectByName(n);
+        if (c) c.visible = false;
+      }
+      t.userData.hero = true;
+    }
   }
 
   // Baked tileable PBR textures from Blender (assets/tex): any material named

@@ -182,6 +182,8 @@ juxtapose/
     build_street.py          street dressing: well, lamps, benches, carts, garden walls, gate, boats,
                              cypresses, olives, Dalí eggs -> assets/street.glb
     render_street.py         Cycles contact sheet of the street props -> docs/previews/street_props.png
+    build_hero.py            sculpted replacements: image-to-3D models (art_src/hero/src) fitted onto the
+                             procedural pieces, decimated, baked (albedo/normal/ORM) -> assets/hero.glb
   assets/figure.glb, assets/props.glb, assets/town.glb, assets/street.glb, assets/tex/
   vendor/                    three.js r170 (+ addons), Rapier 0.14 (compat build)
 ```
@@ -194,7 +196,16 @@ python3 juxtapose/blender/build_props.py
 python3 juxtapose/blender/texlib.py           # textures first: the kit and props use them by name (TX_<name>)
 python3 juxtapose/blender/build_town.py      # exports, packs and verifies assets/town.glb
 python3 juxtapose/blender/build_street.py    # imports build_town's helpers; exports assets/street.glb
+python3 juxtapose/blender/build_hero.py      # optional: sculpted props from art_src/hero/manifest.json
 ```
+
+**Hero props.** The procedural kit defines every prop's size, pivot, moving parts, colliders and fracture pieces. A sculpted model can replace just its look. Put the raw image-to-3D download in `art_src/hero/src/` and give it a manifest entry with a triangle budget, a texture size, a yaw to face −Y, and a fit (`height`, or `box` to keep the footprint). `build_hero.py` then:
+- places the model on the procedural piece;
+- removes crumbs and decimates it;
+- bakes albedo, normal and roughness/metal from the full-detail source into the low mesh at game resolution;
+- writes everything to `assets/hero.glb`.
+
+At load, each hero mesh replaces the look of the template with the same name. Named child parts (clock hands, flames) stay unless the entry lists them under `hide`. Without `hero.glb`, the game uses the procedural props.
 
 Hosts that won't serve binary `.glb` files can serve `<name>.glb.gz.b64.txt` instead (`gzip -9 -n -c x.glb | base64 -w0`): the loader falls back to it, and to plain `<name>.glb.b64.txt` after that. Gzip takes the town kit from 10.5 MB to about 2.5 MB.
 
