@@ -9,7 +9,7 @@ import { drawPainting } from './painting.js';
 import { SandField } from './sand.js';
 import { Town } from './town.js';
 import { Sea } from './sea.js';
-import { Knot, KNOTS, KNOTS_NEEDED } from './knots.js';
+import { Knot, Veil, KNOTS } from './knots.js';
 
 // ---------------------------------------------------------------- noise
 function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
@@ -285,6 +285,16 @@ export class Level {
       if (out > (P.soft || 5)) continue;
       const w = 1 - ss(0, P.soft || 5, out);
       h = h + (P.y - h) * w;
+    }
+    // a drift ridge closes the village off from the north dunes: the way in is the gate.
+    // Too steep to climb; broken only by the gate, the chapel's flank and the railway cutting.
+    const band = ss(-32.5, -29.5, z) * (1 - ss(-26.5, -23.5, z));
+    if (band > 0) {
+      const ax = Math.abs(x);
+      const open = Math.max(1 - ss(3.5, 6, ax), ss(47, 49, x) * (1 - ss(55, 57, x))); // the gate; the railway
+      const chapel = ss(-39, -37, x) * (1 - ss(-23, -21, x));
+      const ends = 1 - ss(66, 72, ax);
+      h += band * 6.5 * (1 - open) * (1 - chapel) * ends * (0.85 + 0.15 * vnoise(x * 0.2, z * 0.2));
     }
     return h;
   }
@@ -868,20 +878,59 @@ export class Level {
   startKnots() {
     this.knots = this.knotSpots.map((k) => new Knot(this, k.def, k.pos));
     this.knots.forEach((k, i) => k.spawnGuards(this.knotSpots[i].hp + this.game.depth * 5, this.knotSpots[i].variant));
-    this.knotsNeeded = Math.min(KNOTS_NEEDED, this.knots.length);
-    // patrols: pairs walking loops through the streets between the memories; a lost
-    // patrol is replaced, slowly, from somewhere out of sight
-    const hub = this.key === 'desert' ? new THREE.Vector3(...DESERT.plaza.slice(0, 1), 0, DESERT.plaza[1]) : new THREE.Vector3();
-    // beats run door to door through the plaza: a little short of each memory, never inside a wall
+    // the path: the memories the dream gives up in order (optional ones are off to the side)
+    this.chain = this.knots.filter((k) => !k.def.optional);
+    this.knotsNeeded = this.chain.length;
+    this.relight();
+    const hub = this.key === 'desert' ? new THREE.Vector3(DESERT.plaza[0], 0, DESERT.plaza[1]) : new THREE.Vector3();
     const near = (k) => k.pos.clone().lerp(hub, 5 / Math.max(5, k.pos.distanceTo(hub)));
     const street = (p) => { for (let i = 0; i < 40 && this.town?.inside(p.x, p.z, 1.5); i++) p.lerp(hub, 0.08); return p; };
-    const K = this.knots;
-    const routes = this.key === 'desert' && K.length >= 5
-      ? [[near(K[0]), hub.clone(), near(K[1]), hub.clone().add(new THREE.Vector3(-3, 0, -3)), near(K[2])], [near(K[3]), hub.clone().add(new THREE.Vector3(3, 0, 6)), near(K[4])]]
-      : [[0, 1, 2, 3].map((i) => new THREE.Vector3(Math.cos(i * 1.57 + 0.8) * 33, 0, Math.sin(i * 1.57 + 0.8) * 33)), [0, 1, 2, 3].map((i) => new THREE.Vector3(Math.cos(-i * 1.57 + 2.4) * 16, 0, Math.sin(-i * 1.57 + 2.4) * 16))];
-    for (const r of routes) for (const p of r) { street(p); p.y = this.groundY(p.x, p.z); }
-    this.patrols = routes.map((route) => ({ route, members: [], wait: 0 }));
-    for (const pt of this.patrols) this.spawnPatrol(pt, 0);
+    const V = (x, z) => new THREE.Vector3(x, 0, z);
+    const at = (name) => this.knots.find((k) => k.def.at === name);
+    let routes;
+    if (this.key === 'desert' && this.chain.length >= 4) {
+      // veils: the dream's ink across the streets, holding you in one part of the village at a time.
+      // [x0, z0, x1, z1, opens after this many memories (99: never, the edge of the dream)]
+      const VEILS = [
+        [-60, 11, -17.5, 11, 2], [-8.5, 11, 8.5, 11, 2],                  // the south lanes: after the workshop
+        [-60, -27, -60, 11, 99], [-60, 11, -60, 52, 99],                  // the western edge
+        [10, 19.5, 10, 52, 3], [17.5, 11, 24, 11, 3], [24, -27, 24, 11, 3], // the east: after the boathouse
+        [48.5, -30, 55.5, -30, 99],                                         // the railway cutting through the ridge
+      ];
+      this.veils = VEILS.map(([x0, z0, x1, z1, after]) => Object.assign(new Veil(this, V(x0, z0), V(x1, z1)), { after }));
+      const L = at('B_Loggia'), W = at('B_Workshop'), B = at('B_Boathouse'), S = at('B_Station'), C = at('B_Chapel');
+      routes = [
+        { zone: 0, route: [near(L), hub.clone(), near(W), V(-20, -12), C ? C.pos.clone().lerp(hub, 0.2) : V(-24, -18)] },
+        { zone: 2, route: [V(0, 16), V(-6, 26), B.pos.clone().add(V(4, 0, -3))] },
+        { zone: 3, route: [S.pos.clone().add(V(-4, 0, 0)), V(30, 14), V(16, 26)] },
+      ];
+    } else {
+      routes = [
+        { zone: 0, route: [0, 1, 2, 3].map((i) => V(Math.cos(i * 1.57 + 0.8) * 33, Math.sin(i * 1.57 + 0.8) * 33)) },
+        { zone: 0, route: [0, 1, 2, 3].map((i) => V(Math.cos(-i * 1.57 + 2.4) * 16, Math.sin(-i * 1.57 + 2.4) * 16)) },
+      ];
+    }
+    for (const r of routes) for (const p of r.route) { street(p); p.y = this.groundY(p.x, p.z); }
+    this.patrols = routes.map((r) => ({ ...r, members: [], wait: 0, started: false }));
+    this.startPatrols();
+    this.wisp = null;
+  }
+  // how far along the path: memories of the chain taken back
+  get stage() { return this.chain ? this.chain.filter((k) => k.state === 'taken').length : 0; }
+  get current() { return this.chain?.find((k) => k.state !== 'taken') || null; }
+  relight() { const c = this.current; for (const k of this.knots) k.lit = k === c || !!k.def.optional; }
+  startPatrols() {
+    for (const pt of this.patrols) if (!pt.started && pt.zone <= this.stage) { pt.started = true; this.spawnPatrol(pt, 0); }
+  }
+  // the next stretch of the path: veils that part at this stage
+  veilsFor(stage) { return (this.veils || []).filter((v) => v.after === stage); }
+  // a wisp runs from the memory just taken to the next one, along the way the dream opened
+  guide(from, to) {
+    if (!from || !to) { this.wisp = null; return; }
+    const mid = from.clone().lerp(to, 0.5);
+    const gate = this.veilsFor(this.stage).reduce((b, v) => (!b || v.center.distanceTo(mid) < b.distanceTo(mid) ? v.center.clone() : b), null);
+    const pts = [from.clone(), gate || mid, to.clone()].map((p) => p.setY(this.groundY(p.x, p.z) + 1.6));
+    this.wisp = { curve: new THREE.CatmullRomCurve3(pts), t: 0, len: from.distanceTo(to), to: to.clone() };
   }
   spawnPatrol(pt, at) {
     const hp = 55 + this.game.depth * 5, variant = this.key === 'piazza' ? 'golconda' : undefined;
@@ -898,7 +947,7 @@ export class Level {
     this.pendingWave = { n, hp: 55 + this.game.depth * 5, rain: this.key === 'piazza', msg: this.key === 'piazza' ? 'It begins to rain men.' : 'They surface from the sand.' };
     this.waveDelay = 2.5;
   }
-  get knotsFreed() { return this.knots ? this.knots.filter((k) => k.state === 'taken').length : 0; }
+  get knotsFreed() { return this.stage; }
   nextWave() {
     this.waveIdx++;
     if (this.waveIdx >= this.waves.length) { this.openDoor(); return; }
@@ -1056,7 +1105,7 @@ export class Level {
     this.ambience(dt);
     this.footprints(dt);
     // waves
-    if (this.pendingWave) {
+    if (this.pendingWave && game.state === 'playing') {
       this.waveDelay -= dt;
       if (this.waveDelay <= 0) { const w = this.pendingWave; this.pendingWave = null; this.spawnWave(w); }
     } else if (this.waveIdx >= 0 && this.waveIdx < this.waves.length && this.enemiesAlive() === 0) {
@@ -1067,7 +1116,17 @@ export class Level {
     else if (this.key === 'sandbox') this.objective = 'Lucid sandbox · infinite charges · B for the spawn menu';
     else if (this.knots) {
       for (const k of this.knots) k.update(dt);
+      for (const v of this.veils || []) v.update(dt, this.time);
+      if (this.wisp) { // the guide: a mote running the way to the next memory, until you're nearly there
+        const w = this.wisp, pl = game.player;
+        w.t += dt / Math.max(3, w.len / 9);
+        if (w.t > 1.35) w.t = 0;
+        const p = w.curve.getPointAt(Math.min(1, w.t));
+        for (let i = 0; i < 3; i++) game.vfx.add.spawn({ x: p.x + (Math.random() - 0.5) * 0.2, y: p.y + (Math.random() - 0.5) * 0.2, z: p.z + (Math.random() - 0.5) * 0.2, color: new THREE.Color('#ffd98a').multiplyScalar(5), alpha: 1, alpha1: 0, size: 0.28, size1: 0.04, life: 0.9 });
+        if (pl && pl.pos.distanceTo(w.to) < 12) this.wisp = null;
+      }
       for (const pt of this.patrols || []) {
+        if (!pt.started) continue;
         if (pt.members.some((e) => !e.dead)) { pt.wait = 0; continue; }
         pt.wait += dt;
         if (pt.wait > 45) { // come back from the far end of the route, out of sight
@@ -1077,10 +1136,10 @@ export class Level {
           if (far > 22) { pt.members = []; pt.wait = 0; this.spawnPatrol(pt, at); }
         }
       }
-      const f = this.knotsFreed;
-      if (!this.doorOpen && f >= this.knotsNeeded) this.openDoor();
-      this.objective = !this.doorOpen ? `${this.objectiveName} · ${f}/${this.knotsNeeded} freed`
-        : f < this.knots.length ? `The door in the ${this.key === 'desert' ? 'shallows' : 'square'} is open · ${this.knots.length - f} memories still caught` : 'Every memory is free · step through the door';
+      const f = this.knotsFreed, cur = this.current;
+      if (!this.doorOpen && f >= this.knotsNeeded && game.state === 'playing') this.openDoor();
+      this.objective = !this.doorOpen ? `${cur ? cur.def.name[0].toUpperCase() + cur.def.name.slice(1) + ' is caught' : this.objectiveName} · ${f}/${this.knotsNeeded} memories`
+        : f < this.knots.length ? `The door in the ${this.key === 'desert' ? 'shallows' : 'square'} is open · ${this.knots.length - f} ${this.knots.length - f === 1 ? 'memory' : 'memories'} still caught` : 'Every memory is free · step through the door';
     } else if (!this.doorOpen) this.objective = `${this.objectiveName} · wave ${Math.max(1, Math.min(total, this.waveIdx + 1))}/${total} · ${this.enemiesAlive()} remain`;
     else this.objective = 'Find the open door and step through';
     // the door

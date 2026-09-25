@@ -30,6 +30,10 @@
   </div>
 
   <!-- ============================ HUD ============================ -->
+  <div id="letterbox" hidden aria-live="polite">
+    <div class="lb-bar lb-top"></div>
+    <div class="lb-bar lb-bot"><p class="lb-cap"></p><span class="lb-skip"><kbd>Space</kbd> skip</span></div>
+  </div>
   <div id="hud" hidden>
     <div id="hud-top-left">
       <div id="layer-name" class="display"></div>
@@ -158,6 +162,7 @@
       <p class="tagline">Take a property from one thing. Give it to another. Fight your way down before the dreamer wakes.</p>
       <nav class="menu">
         <button id="btn-run" class="primary">Begin the night</button>
+        <button id="btn-prologue">Prologue</button>
         <button id="btn-sandbox">Lucid sandbox</button>
         <button id="btn-journal">Journal</button>
         <button id="btn-keepsakes">Keepsakes</button>

@@ -593,6 +593,21 @@ export class UI {
   }
 
   // -------------------------------------------------------------- lore
+  // cutscenes: letterbox bars and a line of text under the picture
+  letterbox(on) {
+    const el = document.getElementById('letterbox');
+    if (!el) return;
+    if (on) { el.hidden = false; void el.offsetWidth; el.classList.add('on'); }
+    else { el.classList.remove('on'); clearTimeout(this._lb); this._lb = setTimeout(() => { if (!el.classList.contains('on')) el.hidden = true; }, 500); this.cutCaption(''); }
+  }
+  cutCaption(text) {
+    const p = document.querySelector('#letterbox .lb-cap');
+    if (!p || p.textContent === text) return;
+    p.classList.remove('in'); void p.offsetWidth;
+    p.textContent = text;
+    if (text) p.classList.add('in');
+  }
+
   // Clarity: rank name and progress to the next rank
   clarity(xp, quiet = false) {
     const r = rankOf(xp), el = document.querySelector('.cl-row');

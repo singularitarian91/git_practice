@@ -534,3 +534,14 @@ input[type=checkbox] { width: 16px; height: 16px; }
 .cl-row.gain .cl-bar i { animation: clGain 0.8s ease-out; }
 @keyframes clGain { 0% { box-shadow: 0 0 0 rgba(255,226,160,0); } 30% { box-shadow: 0 0 8px rgba(255,226,160,0.9); } 100% { box-shadow: 0 0 0 rgba(255,226,160,0); } }
 @media (prefers-reduced-motion: reduce) { .cl-row.gain .cl-bar i { animation: none; } .cl-bar i { transition: none; } }
+
+/* cutscenes: letterbox bars, a caption, and how to skip */
+#letterbox { position: fixed; inset: 0; pointer-events: none; z-index: 40; }
+#letterbox .lb-bar { position: absolute; left: 0; right: 0; height: clamp(72px, 14vh, 170px); background: #07060a; transition: transform 0.5s cubic-bezier(.2,.7,.2,1); }
+#letterbox .lb-top { top: 0; transform: translateY(-100%); }
+#letterbox .lb-bot { bottom: 0; transform: translateY(100%); display: flex; align-items: center; justify-content: center; padding: 0 max(120px, 12vw); }
+#letterbox.on .lb-top, #letterbox.on .lb-bot { transform: none; }
+#letterbox .lb-cap { margin: 0; max-width: 56em; text-align: center; font-family: var(--serif, Georgia, serif); font-style: italic; font-size: clamp(12px, 1.5vw, 20px); line-height: 1.4; color: #f1e6cf; opacity: 0; transform: translateY(4px); }
+#letterbox .lb-cap.in { opacity: 1; transform: none; transition: opacity 0.8s ease, transform 0.8s ease; }
+#letterbox .lb-skip { position: absolute; right: 2.2vw; bottom: 1.4vh; font-size: 11px; letter-spacing: 0.08em; color: rgba(241,230,207,0.45); }
+@media (prefers-reduced-motion: reduce) { #letterbox .lb-bar { transition: none; } #letterbox .lb-cap.in { transition: none; } }

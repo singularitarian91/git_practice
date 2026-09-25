@@ -24,6 +24,7 @@ import { CombatHUD } from './combat.js';
 import { defaultMods, SCRAPS, WHIMS } from './meta.js';
 import { PhotoMode } from './photo.js';
 import { RANKS, CLARITY, rankOf, applyRanks } from './knots.js';
+import { Cutscene, orbit } from './cutscene.js';
 
 const $ = (s) => document.querySelector(s);
 // With "Night-Light tips and asides" off, only these lines still play
@@ -310,25 +311,123 @@ class Game {
     this.meta.save();
   }
 
-  // a memory taken back: a whim to choose, and the door once enough are free
+  // ------------------------------------------------------------ cutscenes
+  playCutscene(shots, opts = {}) {
+    if (this.noCutscenes) { const c = new Cutscene(this, shots); c.skip(); opts.onEnd?.(); return; }
+    this.cut = new Cutscene(this, shots, opts);
+    this.state = 'cutscene';
+    this.ui.setHud(false);
+    this.ui.letterbox(true);
+  }
+  endCutscene() {
+    const cb = this.cut?.onEnd;
+    this.cut = null;
+    this.ui.letterbox(false);
+    this.ui.setHud(true);
+    this.state = 'playing';
+    cb?.();
+  }
+  // arriving in a layer: the dream shows you where you are before it hands you the controls
+  playIntro() {
+    const lvl = this.level, p = this.player;
+    if (!lvl || !p || !lvl.knots) return;
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const eye = p.pos.clone().add(V(0, 1.6, 0)), first = lvl.current;
+    const shots = lvl.key === 'desert' ? [
+      { dur: 4.2, pos: [V(-70, 34, 95), V(-20, 26, 78)], look: [V(0, 4, 10), V(0, 3, -6)], fov: 50, caption: 'A fishing village, sunk in soft sand. The dream keeps its memories here.' },
+      first && { dur: 3.2, pos: [first.pos.clone().add(V(-12, 9, 14)), first.pos.clone().add(V(-7, 5, 9))], look: first.pos.clone().add(V(0, 2, 0)), fov: 48, caption: `First, ${first.def.name}.` },
+      { dur: 3, pos: [V(0, 14, -12), eye.clone().add(V(0, 2.2, -5))], look: [V(0, 1, -27), eye], fov: [50, 60] },
+    ] : [
+      { dur: 4, pos: orbit(V(0, 0, 0), 60, 30, 0.6, 1.8), look: V(0, 4, 0), fov: 50, caption: 'The city he left for, where every crowd is the same man.' },
+      first && { dur: 3, pos: [first.pos.clone().add(V(10, 8, 10)), first.pos.clone().add(V(6, 4, 6))], look: first.pos.clone().add(V(0, 2, 0)), fov: 48, caption: `First, ${first.def.name}.` },
+      { dur: 2.6, pos: [V(0, 12, -20), eye.clone().add(V(0, 2.2, -5))], look: eye, fov: [50, 60] },
+    ];
+    this.playCutscene(shots, { onEnd: () => first && lvl.guide(p.pos.clone(), first.pos) });
+  }
+  // the first night: who is dreaming, who you are, and what you're for. Skippable, replayable from the title.
+  playPrologue() {
+    const lvl = this.level, p = this.player;
+    if (!lvl || !p) return;
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const eye = p.pos.clone().add(V(0, 1.5, 0)), fwd = p.flatForward();
+    const bed = V(-40, lvl.groundY(-40, 20) + 0.8, 20), first = lvl.current;
+    const shots = [
+      { dur: 5.5, pos: [V(30, 60, 120), V(10, 30, 70)], look: [V(0, 40, -40), V(0, 4, 0)], fov: 55, caption: 'Odile Vautrin has mended every clock on the Rue des Horloges for sixty years. She has let her own run down.' },
+      { dur: 5.5, pos: orbit(bed, 6, 2.6, 0.4, 1.4), look: bed, fov: 45, caption: 'On a December morning in 1958 her brother Théo caught the 6:40 train. He left a note under a split pomegranate: When you wake up, I will already be gone.' },
+      { dur: 5, pos: [bed.clone().add(V(3, 5, 9)), bed.clone().add(V(1, 3, 5))], look: bed, fov: 40, caption: 'He left a painting too, unfinished. She put it under a sheet in the back bedroom, and has not looked at it since.' },
+      { dur: 5.5, pos: [eye.clone().addScaledVector(fwd, 5).add(V(fwd.z * 2.5, 0.4, -fwd.x * 2.5)), eye.clone().addScaledVector(fwd, 2.4).add(V(fwd.z * 1.2, 0, -fwd.x * 1.2))], look: eye, fov: 40, caption: 'Tonight, in her dream, the figure from that painting gets up. A wooden man in a bowler hat, an apple where his face should be. You.',
+        at: () => p.anim.play('Idle', { fade: 0.2 }) },
+      { dur: 5, pos: [eye.clone().addScaledVector(fwd, -2.2).add(V(1.2, 0.3, 0)), eye.clone().addScaledVector(fwd, -1.6).add(V(0.9, 0.1, 0))], look: eye.clone().addScaledVector(fwd, 6), fov: 50, caption: 'Your gun takes a quality from one thing and gives it to another. Clocks melt. Anvils float. Fears fall asleep.',
+        at: () => { p.anim.trigger?.('Infuse', { speed: 0.8 }); this.vfx.propertyBurst(eye.clone().addScaledVector(fwd, 5), 'melting', 1.2); } },
+      first && { dur: 5.5, pos: [first.pos.clone().add(V(-14, 10, 14)), first.pos.clone().add(V(-8, 5, 8))], look: first.pos.clone().add(V(0, 2, 0)), fov: 48, caption: 'Her anxieties keep what she cannot bear to remember, tangled in ink. Take her memories back, and the dream will let you deeper.', at: () => lvl.relight() },
+      { dur: 5, pos: [V(-6, 5, 70), V(-3, 3, 60)], look: [V(0, 2, 55), V(0, 1.5, 50)], fov: 50, caption: 'Somewhere below is the painting. Reach it before the dream grows too strange, and she wakes.' },
+      { dur: 2.6, pos: [V(0, 14, -12), eye.clone().add(V(0, 2.2, -5))], look: [V(0, 1, -27), eye], fov: [50, 60] },
+    ];
+    this.playCutscene(shots, { onEnd: () => { this.meta.data.seenPrologue = true; this.meta.save(); if (first) lvl.guide(p.pos.clone(), first.pos); } });
+  }
+
+  // a translucent Figment acting out a memory beside the thing it's about
+  memoryGhost(knot) {
+    const fig = this.assets.cloneFigure();
+    fig.traverse((m) => { if (m.isMesh) { m.material.transparent = true; m.material.opacity = 0.32; m.material.depthWrite = false; m.material.emissive = new THREE.Color('#ffd9a0'); m.material.emissiveIntensity = 0.5; } });
+    const g = new THREE.Group(); g.add(fig);
+    const side = new THREE.Vector3(1.5, 0, 0.6);
+    g.position.copy(knot.pos).add(side);
+    g.rotation.y = Math.atan2(-side.x, -side.z);
+    const anim = new FigureAnimator(fig, this.assets.figure.animations);
+    anim.play(['Focus', 'Idle', 'Guard'][Math.floor(Math.random() * 2)], { fade: 0 });
+    return { show: () => this.scene.add(g), update: (dt) => anim.update(dt, { localVel: { x: 0, y: 0, z: 0 } }), remove: () => this.scene.remove(g) };
+  }
+
+  // a memory taken back: see it again, see the way open, then choose a whim
   onKnotFreed(knot) {
     this.stats.memoriesFreed = (this.stats.memoriesFreed || 0) + 1;
-    const lvl = this.level;
-    if (lvl && lvl.knotsFreed === lvl.knotsNeeded) lvl.surge(3 + this.depth, 'The dream notices what you took back. It sends them after you.');
-    setTimeout(() => {
-      if (this.state !== 'playing' || this.player?.dead || WHIMS.length <= this.run.whims.length) return;
-      this.input.exitLock();
-      this.state = 'whims';
-      this.ui.setHud(false);
-      this.ui.showWhims((w) => {
-        if (w) { w.apply(this.run.mods); this.run.whims.push(w.id); this.ui.toast(`Whim: ${w.name}`, 'good'); }
-        this.ui.hideScreens();
-        this.ui.setHud(true);
-        this.state = 'playing';
-        this.input.requestLock();
-      });
-    }, 900);
+    const lvl = this.level, p = this.player;
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const optional = !!knot.def.optional, stage = lvl.stage, next = lvl.current;
+    const opening = optional ? [] : lvl.veilsFor(stage);
+    const doorNow = !optional && lvl.chain && stage === lvl.knotsNeeded && !lvl.doorOpen;
+    const c = knot.pos.clone().setY(knot.pos.y + 1.3), a0 = Math.atan2(p.pos.z - c.z, p.pos.x - c.x);
+    const ghost = this.memoryGhost(knot);
+    const back = (target, d, h) => { const dir = p.pos.clone().sub(target).setY(0); if (dir.lengthSq() < 1) dir.set(0, 0, 1); dir.normalize(); return target.clone().addScaledVector(dir, d).setY(target.y + h); };
+    const shots = [
+      { dur: 4, pos: orbit(c, 4.4, 0.8, a0, a0 + 1.2), look: c, fov: 42, caption: knot.def.text, at: ghost.show, tick: ghost.update, end: ghost.remove },
+    ];
+    if (opening.length) {
+      const v = opening[0], vc = v.center.clone().setY(v.center.y + 3);
+      shots.push({ dur: 3.4, pos: [back(vc, 16, 5), back(vc, 11, 3)], look: vc, fov: 52, caption: 'The dream lets you further in.', at: () => opening.forEach((o) => o.open()) });
+    }
+    if (next && !optional) {
+      const nc = next.pos.clone().setY(next.pos.y + 2);
+      shots.push({ dur: 3, pos: [back(nc, 20, 10), back(nc, 14, 6)], look: [nc.clone().setY(nc.y + 8), nc], fov: 50, caption: `Next: ${next.def.name}.`, at: () => lvl.relight() });
+    }
+    if (doorNow && lvl.door) {
+      const d = lvl.door.pos.clone().setY(lvl.door.pos.y + 2);
+      shots.push({ dur: 3.4, pos: [d.clone().add(V(-6, 4, -14)), d.clone().add(V(-2, 2.5, -8))], look: d, fov: 48, caption: 'A door has opened in the shallows.', at: () => lvl.openDoor() });
+    }
+    this.playCutscene(shots, {
+      onEnd: () => {
+        lvl.relight(); lvl.startPatrols();
+        lvl.guide(knot.pos, next && !optional ? next.pos : doorNow ? lvl.door.pos : null);
+        if (doorNow) lvl.surge(3 + this.depth, 'The dream notices what you took back. It sends them after you.');
+        this.offerWhim();
+      },
+    });
   }
+  offerWhim() {
+    if (this.state !== 'playing' || this.player?.dead || WHIMS.length <= this.run.whims.length) return;
+    this.input.exitLock();
+    this.state = 'whims';
+    this.ui.setHud(false);
+    this.ui.showWhims((w) => {
+      if (w) { w.apply(this.run.mods); this.run.whims.push(w.id); this.ui.toast(`Whim: ${w.name}`, 'good'); }
+      this.ui.hideScreens();
+      this.ui.setHud(true);
+      this.state = 'playing';
+      this.input.requestLock();
+    });
+  }
+
 
   onBossDefeated() {
     this.gainClarity(CLARITY.boss, this.boss?.center?.());
@@ -490,6 +589,10 @@ class Game {
       setTimeout(() => this.audio.stinger('bossIntro'), 1500);
     } else if (lvl.knotSpots?.length) lvl.startKnots();
     else lvl.startWaves();
+    if (lvl.knots && !this.sandbox) setTimeout(() => {
+      if (this.state !== 'playing' || this.level !== lvl) return;
+      if (index === 0 && (this.forcePrologue || !this.meta.data.seenPrologue)) { this.forcePrologue = false; this.playPrologue(); } else this.playIntro();
+    }, 700);
     $('#layer-name').textContent = LAYERS[index].name;
     const roman = ['I', 'II', 'III', 'IV'][index];
     this.ui.card(`LAYER ${roman}`, LAYERS[index].name, LAYERS[index].subtitle);
@@ -605,6 +708,7 @@ class Game {
       fn();
     });
     click('#btn-run', () => this.startRun());
+    click('#btn-prologue', () => { this.forcePrologue = true; this.startRun(); });
     click('#btn-sandbox', () => this.startSandbox());
     click('#btn-journal', () => { this.ui.renderJournal(); this.ui.show('journal'); });
     click('#btn-keepsakes', () => { this.ui.renderKeepsakes(); this.ui.show('keepsakes'); });
@@ -848,6 +952,11 @@ class Game {
       du.uHurt.value = pl ? pl.hurtFlash : 0;
       du.uSlowmo.value += ((this.ui.wheelOpen ? 1 : 0) - du.uSlowmo.value) * Math.min(1, rdt * 8);
       du.uWatched.value = this.boss && !this.boss.dead && this.boss.watched ? Math.min(1, 0.3 + this.boss.stare * 0.25) : 0;
+    } else if (this.state === 'cutscene') {
+      this.cut.update(rdt, input);
+      this.level?.update(rdt);
+      DREAM.uniforms.uLucid.value = this.lucidity.display / 100;
+      if (this.cut.done) this.endCutscene();
     } else if (this.state === 'title') {
       const a = this.time * 0.06;
       const f = this.attractFig;

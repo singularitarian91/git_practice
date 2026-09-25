@@ -95,6 +95,17 @@ Properties interact through shared channels instead of hand-written pairs, so co
 - **Fuse:** a sleeping bomb is a mine, and burning shortens the fuse.
 - **Explosion payloads:** a bursting, floating pomegranate makes everything in the blast float.
 
+**A path through the dream.** The Soft Desert leads you rather than leaving you to wander.
+- **The way in:** a steep drift ridge closes the village off from the north dunes, so you come in through the gate.
+- **The order:** the market loggia, then the clock workshop, then the boathouse, then the station. The chapel is off to the side, for the curious.
+- **Ink veils** hold you in one part of the village at a time. Each memory you take back unravels the next stretch.
+- **A wisp** of light runs ahead to the next memory.
+
+**Cutscenes.** They are letterboxed, captioned and skippable (Space, Escape or a click).
+- **The prologue** plays on your first night and can be replayed from the title screen. It tells who is dreaming, who you are, what your gun does, and why the night ends when she wakes.
+- **On arrival in a layer,** the dream shows you where you are.
+- **Taking back a memory** shows it: the camera circles it while a translucent Figment acts it out. Then the next veils unravel, the next memory's column ignites, and at the end the door opens in the shallows.
+
 **Memories and Clarity.** The anxieties don't come in waves. They guard *knots*: memories the dream has tangled up, each marked by a violet column of dusk and a waypoint.
 - **In the desert:** the unfinished clock at the workshop, the Saturday pomegranate at the loggia, the Sunday candle at the chapel, the hat on the rack at the station, and the finch at the boathouse.
 - **In the piazza:** four memories of the city he left for.

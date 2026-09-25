@@ -6,6 +6,9 @@
 // it makes the Figment a little more itself.
 import * as THREE from 'three';
 import { rnd } from './vfx.js';
+import { RAPIER } from './physics.js';
+import { G, ALL } from './config.js';
+const RAPIER_CUBOID = (x, y, z) => RAPIER.ColliderDesc.cuboid(x, y, z);
 
 // ---------------------------------------------------------------- Clarity
 // the ranks of self-actualization; each perk is kept for good once reached
@@ -43,11 +46,12 @@ export function applyRanks(mods, xp) {
 // where each layer's memories are caught, and what they were
 export const KNOTS = {
   desert: [
-    { at: 'B_Workshop', prop: 'Clock', name: 'the unfinished clock', guards: 4, text: 'The regulator in the shop window stopped at twenty to seven. She took it apart three times and never put it back together.', src: 'the workshop, 1962' },
+    // in the order the village gives them up; the chapel's is off the path, for the curious
     { at: 'B_Loggia', prop: 'Pomegranate', name: 'the Saturday pomegranate', guards: 3, text: 'Every Saturday he bought one pomegranate at the market and ate it seed by seed on the walk home, to make it last.', src: 'the market loggia' },
-    { at: 'B_Chapel', prop: 'Candle', name: 'the Sunday candle', guards: 5, text: 'She lit a candle for Théo every Sunday for a year. Then every other Sunday. Then once, at Christmas, and she felt guilty all night.', src: 'the chapel' },
+    { at: 'B_Workshop', prop: 'Clock', name: 'the unfinished clock', guards: 4, text: 'The regulator in the shop window stopped at twenty to seven. She took it apart three times and never put it back together.', src: 'the workshop, 1962' },
+    { at: 'B_Boathouse', side: -1, prop: 'Birdcage', name: 'the canary', guards: 4, text: 'Pip flew out of the door Théo left open. She kept the cage, and for a month she left its little door open too, every evening, just in case.', src: 'the boathouse' },
     { at: 'B_Station', prop: 'BowlerHat', name: 'the hat on the rack', guards: 4, text: 'He left his hat on the rack of the 6:40. The conductor posted it back to the shop. She never opened the parcel.', src: 'the station' },
-    { at: 'B_Boathouse', side: -1, prop: 'Birdcage', name: 'the finch', guards: 4, text: 'They kept a finch in the boathouse. He let it go the summer he left. It came back to the empty cage every evening for a month.', src: 'the boathouse' },
+    { at: 'B_Chapel', optional: true, prop: 'Candle', name: 'the Sunday candle', guards: 5, text: 'She lit a candle for Théo every Sunday for a year. Then every other Sunday. Then once, at Christmas, and she felt guilty all night.', src: 'the chapel' },
   ],
   piazza: [
     { a: 0.25, prop: 'Mirror', name: 'the window crowd', guards: 4, text: 'In the city every window held the same man in the same hat. She looked for Théo in all of them, and in all of them he looked back.', src: 'a letter, unsent' },
@@ -145,7 +149,8 @@ export class Knot {
     this.beam.material.uniforms.uTime.value = this.t;
     // a landmark from afar, gone up close (the camera inside it would wash the screen)
     const cd = Math.hypot(game.render.camera.position.x - this.pos.x, game.render.camera.position.z - this.pos.z);
-    if (this.state !== 'taken') this.beam.material.uniforms.uA.value = THREE.MathUtils.smoothstep(cd, 5, 16);
+    // the memory you're meant to find next burns bright; the others are only a smudge on the sky
+    if (this.state !== 'taken') this.beam.material.uniforms.uA.value = THREE.MathUtils.smoothstep(cd, 5, 16) * (this.lit ? 1 : 0.15);
     this.relic.rotation.y += dt * 0.6;
     this.relic.position.y = 1.35 + Math.sin(this.t * 1.3) * 0.08;
     for (const c of this.tangle.children) c.rotation.y += c.userData.spin * dt;
@@ -183,5 +188,68 @@ export class Knot {
     game.ui.loreCard({ text: this.def.text, src: this.def.src });
     game.gainClarity(CLARITY.knot, this.pos);
     game.onKnotFreed(this);
+  }
+}
+
+// A veil: a curtain of the dream's ink across a street. It holds you in the part
+// of the village the dream is showing you, and unravels when a memory comes back.
+const veilMat = () => new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uGone: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; varying vec3 vW; void main(){ vUv = uv; vW = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform float uTime, uGone; varying vec2 vUv; varying vec3 vW;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+    float fbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * n(p); p = p * 2.1 + 3.7; a *= 0.5; } return s; }
+    void main(){
+      vec2 p = vec2(vW.x + vW.z, vW.y) * 0.35;
+      float f = fbm(p + vec2(0.0, -uTime * 0.12)) + 0.35 * fbm(p * 2.3 + vec2(uTime * 0.07, 0.0));
+      if (f < uGone * 1.4) discard;
+      float edge = smoothstep(uGone * 1.4 + 0.12, uGone * 1.4, f) * step(0.001, uGone);
+      float top = smoothstep(1.0, 0.55, vUv.y), foot = smoothstep(0.0, 0.08, vUv.y);
+      vec3 ink = mix(vec3(0.05, 0.03, 0.08), vec3(0.28, 0.15, 0.45), f * f);
+      ink += vec3(1.0, 0.8, 0.45) * edge * 2.5;
+      gl_FragColor = vec4(ink, (0.55 + 0.4 * f) * top * foot + edge);
+    }`,
+  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+});
+
+export class Veil {
+  constructor(level, a, b, h = 7) {
+    this.level = level; this.game = level.game;
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const y = Math.min(level.groundY(a.x, a.z), level.groundY(b.x, b.z), level.heightAt((a.x + b.x) / 2, (a.z + b.z) / 2)) - 0.6;
+    this.center = new THREE.Vector3((a.x + b.x) / 2, y, (a.z + b.z) / 2);
+    const rot = -Math.atan2(b.z - a.z, b.x - a.x);
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(len, h, 1, 1), veilMat());
+    this.mesh.position.set(this.center.x, y + h / 2, this.center.z);
+    this.mesh.rotation.y = rot;
+    this.mesh.renderOrder = 4;
+    this.mesh.userData.noAO = true;
+    level.group.add(this.mesh);
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+    this.body = this.game.physics.fixed({ x: this.center.x, y: y + h / 2, z: this.center.z }, q);
+    this.game.physics.collider(RAPIER_CUBOID(len / 2, h / 2, 0.35), this.body, G.WALL, ALL);
+    level.bodies.push(this.body);
+    this.gone = 0; this.opening = false;
+  }
+  open() {
+    if (this.opening) return;
+    this.opening = true;
+    this.game.physics.remove(this.body);
+    this.game.audio.sfx('lore', { position: this.center });
+  }
+  update(dt, time) {
+    const u = this.mesh.material.uniforms;
+    u.uTime.value = time;
+    if (this.opening && this.gone < 1) {
+      this.gone = Math.min(1, this.gone + dt * 0.45);
+      u.uGone.value = this.gone;
+      if (Math.random() < dt * 30) {
+        const s = Math.random() - 0.5, m = this.mesh;
+        const p = new THREE.Vector3(s * m.geometry.parameters.width, (Math.random() - 0.5) * 6, 0).applyQuaternion(m.quaternion).add(m.position);
+        this.game.vfx.add.spawn({ x: p.x, y: p.y, z: p.z, vy: 1.2, color: new THREE.Color('#ffcf8a').multiplyScalar(3), alpha: 1, alpha1: 0, size: 0.12, size1: 0.02, life: 1.2 });
+      }
+      if (this.gone >= 1) this.mesh.visible = false;
+    }
   }
 }
