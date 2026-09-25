@@ -1,0 +1,7 @@
+{
+  "_note": "Higgsfield jobs behind the sculpted Figment. Views: gpt_image_2_5 (the front drawn from the earlier concept sheet, art_src/concept/figment_suit.png; left and back drawn from the front). Model: tripo_h3_1_multiview_to_3d, detailed geometry and texture, views in order front, left, back. Raw download (62 MB) goes to src/figment.glb, not in git.",
+  "front": "3f7868d9-6d68-4e39-b265-3a9ee03413cc",
+  "left": "b7a4bd2d-7b16-4055-aa61-2481b700535b",
+  "back": "16783973-a4dc-4d51-ac4e-202addb55da9",
+  "model": "867365f5-fad1-4626-97df-317c318cf5ba"
+}

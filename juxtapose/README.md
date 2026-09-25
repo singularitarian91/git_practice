@@ -254,6 +254,8 @@ juxtapose/
     render_street.py         Cycles contact sheet of the street props -> docs/previews/street_props.png
     build_hero.py            sculpted replacements: image-to-3D models (art_src/hero/src) fitted onto the
                              procedural pieces, decimated, baked (albedo/normal/ORM) -> assets/hero.glb
+    build_figure_hero.py     the sculpted Figment (art_src/figure/src/figment.glb): fitted, decimated, baked,
+                             weighted to the figure's own bones -> assets/figure_skin.glb
   assets/figure.glb, assets/props.glb, assets/town.glb, assets/street.glb, assets/tex/
   vendor/                    three.js r170 (+ addons), Rapier 0.14 (compat build)
 ```
@@ -267,6 +269,7 @@ python3 juxtapose/blender/texlib.py           # textures first: the kit and prop
 python3 juxtapose/blender/build_town.py      # exports, packs and verifies assets/town.glb
 python3 juxtapose/blender/build_street.py    # imports build_town's helpers; exports assets/street.glb
 python3 juxtapose/blender/build_hero.py      # optional: sculpted props from art_src/hero/manifest.json
+python3 juxtapose/blender/build_figure_hero.py   # optional: the sculpted Figment (add --preview for weight renders)
 ```
 
 **Hero props.** The procedural kit defines every prop's size, pivot, moving parts, colliders and fracture pieces. A sculpted model can replace just its look. Put the raw image-to-3D download in `art_src/hero/src/` and give it a manifest entry with a triangle budget, a texture size, a yaw to face −Y, and a fit (`height`, or `box` to keep the footprint). `build_hero.py` then:
@@ -278,6 +281,18 @@ python3 juxtapose/blender/build_hero.py      # optional: sculpted props from art
 The ten props in the manifest (bed, clock, candle, mirror, bowler hat, birdcage, pomegranate, anvil, chest of drawers, night-light) are built this way. Each started as a Higgsfield concept image (`art_src/concept/`), went through Tripo H3.1 image-to-3D, then build_hero.py; `art_src/hero/jobs.json` records each job, so the raw sources (100 MB, not in git) can be fetched again. Cycles' diffuse bake is black on metal, so the colour is baked with metalness off and the metal comes back as a constant from the manifest.
 
 At load, each hero mesh replaces the look of the template with the same name. Named child parts (clock hands, flames) stay unless the entry lists them under `hide`. Without `hero.glb`, the game uses the procedural props.
+
+**The sculpted Figment.** The player character works the same way, with a skin instead of a swap. Higgsfield drew the Figment in the Magritte suit (an oversized haori over pleated hakama, bowler, red scarf, a faceless wooden egg head) from the front, side and back (`art_src/figure/*.png`). Tripo H3.1 multiview turned those into one model, and `build_figure_hero.py` makes it fit the rig:
+
+- It is fitted to the figure's height, then decimated to 16k triangles and baked.
+- It is weighted by hand, not by bone heat. The rules come from the silhouette and the baked colour:
+  - the wooden head and hands, the red scarf and the black shoes are found by colour
+  - the split hakama follows the legs
+  - the haori skirt is shared between the thighs and the coat cloth bones the game swings with springs
+  - the wide sleeves hang from the sleeve bones
+- The sculpt stands in an A-pose, while the rig rests with its arms straight down. The file therefore carries a bind correction per bone, and the game builds each bone's inverse from it. At the rig's rest pose, the sculpt's hands close onto the hand bones where the gun hangs.
+
+The procedural body is dropped when `figure_skin.glb` is present. The gun and the apple stay procedural.
 
 Hosts that won't serve binary `.glb` files can serve `<name>.glb.gz.b64.txt` instead (`gzip -9 -n -c x.glb | base64 -w0`): the loader falls back to it, and to plain `<name>.glb.b64.txt` after that. Gzip takes the town kit from 10.5 MB to about 2.5 MB.
 

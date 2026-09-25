@@ -46,7 +46,7 @@ export class Assets {
 
   async load(onProgress) {
     // the town kit and street dressing are optional: the game falls back to placeholder shells without them
-    const files = [['props', './assets/props.glb'], ['figure', './assets/figure.glb'], ['town', './assets/town.glb', true], ['street', './assets/street.glb', true], ['hero', './assets/hero.glb', true]];
+    const files = [['props', './assets/props.glb'], ['figure', './assets/figure.glb'], ['town', './assets/town.glb', true], ['street', './assets/street.glb', true], ['hero', './assets/hero.glb', true], ['skin', './assets/figure_skin.glb', true]];
     let done = 0;
     const results = await Promise.all(files.map(async ([k, url, optional]) => {
       let g = null;
@@ -62,7 +62,9 @@ export class Assets {
       for (const m of (Array.isArray(o.material) ? o.material : [o.material])) if (!m.transparent && !(m.emissiveIntensity > 1 && m.emissive?.getHex())) inkify(m, k);
     });
     this.figure.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    this.dressFigure();
     inkAll(this.figure.scene, 0.5);
+    if (this.skinMat) inkify(this.skinMat, 0.5);
     // index every top-level prop object by name
     for (const child of [...this.props.scene.children]) {
       child.traverse((o) => {
@@ -166,10 +168,61 @@ export class Assets {
     return o;
   }
 
+  // The sculpted Figment (assets/figure_skin.glb, blender/build_figure_hero.py): one
+  // skinned mesh weighted to the figure's own bones, so every clip drives it. It
+  // replaces the procedural body and suit; the gun and the apple stay procedural.
+  // The sculpt was bound in an A-pose, so each bone's inverse comes from its rest
+  // pose moved by the file's bind correction (arms out, feet apart): at rest the
+  // sculpt's hands close onto the hand bones, where the gun hangs.
+  dressFigure() {
+    const sm = this.skin && this.skin.scene.getObjectByProperty('isSkinnedMesh', true);
+    if (!sm) return;
+    let bind = {};
+    this.skin.scene.traverse((o) => { if (o.userData.bind) bind = JSON.parse(o.userData.bind); });
+    const fig = this.figure.scene;
+    // the procedural body goes: each piece becomes a bare node, so anything hung from it stays
+    const body = [];
+    fig.traverse((o) => { if (o.isMesh && /^Fig_/.test(o.name) && !/^Fig_Apple/.test(o.name)) body.push(o); });
+    for (const m of body) {
+      const n = new THREE.Object3D();
+      n.name = m.name; n.position.copy(m.position); n.quaternion.copy(m.quaternion); n.scale.copy(m.scale);
+      for (const c of [...m.children]) n.add(c);
+      const p = m.parent;
+      p.children[p.children.indexOf(m)] = n; n.parent = p; m.parent = null;
+    }
+    fig.updateMatrixWorld(true);
+    const toFig = new THREE.Matrix4().copy(fig.matrixWorld).invert();
+    const names = sm.skeleton.bones.map((b) => b.name);
+    const inverses = names.map((n) => {
+      const b = fig.getObjectByName(n);
+      const rest = new THREE.Matrix4().multiplyMatrices(toFig, b.matrixWorld);
+      if (bind[n]) rest.premultiply(new THREE.Matrix4().fromArray(bind[n]));
+      return rest.invert();
+    });
+    // mesh space -> figure space (the sculpt's armature sits at the origin, but be exact)
+    sm.updateMatrixWorld(true);
+    const geo = sm.geometry.clone();
+    geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(new THREE.Matrix4().copy(this.skin.scene.matrixWorld).invert(), sm.matrixWorld));
+    this.skinned = { geo, names, inverses };
+    this.skinMat = sm.material;
+    this.skinMat.name = 'Figment';
+    if (this.skinMat.map) this.skinMat.map.anisotropy = 8;
+  }
+
   cloneFigure() {
     const o = SkeletonUtils.clone(this.figure.scene);
     this.figurePlan ??= rigidPlan(this.figure.scene);
     if (!applyRigidPlan(o, this.figurePlan)) o.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.castShadow = true; m.receiveShadow = true; } });
+    const S = this.skinned;
+    if (S) {
+      const bones = S.names.map((n) => o.getObjectByName(n));
+      const sm = new THREE.SkinnedMesh(S.geo, this.skinMat.clone());
+      sm.name = 'Figment_Sculpt';
+      sm.bind(new THREE.Skeleton(bones, S.inverses.map((m) => m.clone())), new THREE.Matrix4());
+      sm.castShadow = true; sm.receiveShadow = true;
+      sm.frustumCulled = false;
+      o.add(sm);
+    }
     return o;
   }
 
