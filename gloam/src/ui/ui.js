@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { ITEMS, CROPS } from '../data/items.js';
 import { buildPanel } from './panels.js';
 import { FishingGame } from './minigame.js';
+import { Minimap } from './minimap.js';
 import { showTitle, narrate } from './screens.js';
 import { fmtTime } from '../game/util.js';
 import { SEASON_DAYS } from '../game/state.js';
@@ -77,6 +78,8 @@ export class UI {
       <div class="hurt-vignette"></div>`;
     r.appendChild(this.hud);
     this.q = (sel) => this.hud.querySelector(sel);
+    this.minimap = new Minimap(this);
+    this.hud.appendChild(this.minimap.el);
     this.hotbarEl = this.q('.hotbar');
     this.slots = [];
     for (let i = 0; i < 10; i++) {
@@ -140,6 +143,7 @@ export class UI {
       this.updateZone();
     }
     if (this.hotbarDirty) this.renderHotbar();
+    this.minimap.update(dt);
     this.fishingUI.update(dt);
     // damage numbers
     for (let i = this.dmgNums.length - 1; i >= 0; i--) {

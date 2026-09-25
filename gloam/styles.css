@@ -396,3 +396,26 @@ body.is-touch .hud-can { bottom: calc(env(safe-area-inset-bottom, 0px) + 118px);
   body.is-touch .toasts { top: calc(env(safe-area-inset-top, 0px) + 88px); }
   body.is-touch .hud-vitals { width: 130px; bottom: calc(env(safe-area-inset-bottom, 0px) + 60px); }
 }
+
+/* ---------- minimap ---------- */
+.minimap { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 16px); right: calc(env(safe-area-inset-right, 0px) + 16px); width: 148px; height: 148px; border-radius: 50%; background: #0e1418; border: 2px solid rgba(176, 142, 87, 0.75); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.55); cursor: pointer; }
+.minimap:hover { border-color: var(--amber-hi); }
+.minimap canvas { display: block; width: 100%; height: 100%; border-radius: 50%; }
+.minimap.off { display: none; }
+.mm-zone { position: absolute; left: 50%; top: 100%; transform: translate(-50%, 6px); white-space: nowrap; font-family: var(--font-title); font-size: 12px; letter-spacing: 0.08em; color: var(--ink-dim); text-shadow: 0 1px 3px #000, 0 0 6px #000; pointer-events: none; }
+.hud.has-minimap .toasts { top: calc(env(safe-area-inset-top, 0px) + 192px); }
+body.is-touch .minimap { top: calc(env(safe-area-inset-top, 0px) + 52px); width: 116px; height: 116px; }
+body.is-touch .hud.has-minimap .toasts { top: calc(env(safe-area-inset-top, 0px) + 196px); }
+@media (max-width: 480px) {
+  .minimap { width: 104px; height: 104px; }
+  .hud.has-minimap .toasts { top: calc(env(safe-area-inset-top, 0px) + 148px); }
+  body.is-touch .minimap { top: calc(env(safe-area-inset-top, 0px) + 88px); width: 92px; height: 92px; }
+  body.is-touch .prompt { bottom: calc(env(safe-area-inset-bottom, 0px) + 244px); } /* clear of the touch buttons */
+  body.is-touch .hud.has-minimap .toasts { top: calc(env(safe-area-inset-top, 0px) + 208px); }
+}
+@media (max-height: 500px) {
+  .minimap { width: 104px; height: 104px; }
+  .hud.has-minimap .toasts { top: calc(env(safe-area-inset-top, 0px) + 148px); }
+  body.is-touch .minimap { width: 96px; height: 96px; }
+  body.is-touch .hud.has-minimap .toasts { top: calc(env(safe-area-inset-top, 0px) + 176px); }
+}

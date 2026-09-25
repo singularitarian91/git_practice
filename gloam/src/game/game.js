@@ -743,6 +743,7 @@ export class Game {
     this.world.removeModel(b.obj);
     const model = this.state.house === 'longhouse' ? 'house_longhouse' : 'house_hut';
     b.obj = this.world.placeModel(model, b.x - (model === 'house_longhouse' ? 2 : 0), b.z, b.rot);
+    this.mapBase = null; // redraw the map with the new house
     this.npcs.refreshDoors && this.npcs.refreshDoors();
     this.homeDoorChanged && this.homeDoorChanged();
   }

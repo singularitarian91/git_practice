@@ -102,7 +102,7 @@ export function deleteSave() {
 
 export const DEFAULT_SETTINGS = {
   master: 0.8, music: 0.5, sfx: 0.8, ambience: 0.6, voice: 0.7,
-  quality: 'medium', dayLength: 'normal', showTips: true,
+  quality: 'medium', dayLength: 'normal', showTips: true, minimap: 'rotate',
 };
 
 export function loadSettings() {

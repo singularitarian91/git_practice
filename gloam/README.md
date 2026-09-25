@@ -59,7 +59,7 @@ module and model loading over `file://`. You have to serve the folder.
 | **Tab** | pack |
 | **C** | crafting |
 | **J** | journal |
-| **M** | map |
+| **M**, or click the minimap | full map (scroll over the minimap to zoom it) |
 | **T** | help |
 | **Esc** | pause / settings |
 
@@ -67,7 +67,7 @@ On a touchscreen, drag anywhere on the left half to move (drag past the
 ring to run), drag on the right half to turn the camera, and pinch to zoom.
 The buttons on the right use your tool (hold to keep swinging), interact,
 and dodge; the row along the top opens the pack, crafting, journal, map
-and menu. The hotbar slots are tappable.
+and menu. The hotbar slots are tappable, and so is the minimap.
 
 ## What's in it
 
@@ -93,6 +93,7 @@ and menu. The hotbar slots are tappable.
 - Stamina that refills when you stop, dodge-rolling, and **Rested** / **Well Fed** buffs.
 - Crafting and cooking stations, and building with a hammer.
 - **The Gloam** at night: gloamlings, wraiths and draugr. Firelight is sanctuary.
+- A minimap that turns with your view. It marks villagers, home and the Gloam, and after dark it shows how far each fire's light reaches. Esc → Settings can switch it to north-up or hide it.
 - A boss, **Ashhorn the Mist-Stag**.
 
 **Everything is made from scratch.** Around 190 low-poly models are

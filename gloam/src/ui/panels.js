@@ -5,7 +5,7 @@ import { ITEMS, CROPS, FISH, BUGS, RELICS, TOOLS, isFish, isBug, isRelic } from 
 import { RECIPES, UPGRADES, UPGRADABLE } from '../data/recipes.js';
 import { SHOP, OFFERINGS, VILLAGERS, DEBT_START } from '../data/world_data.js';
 import { saveGame, saveSettings, SEASON_DAYS } from '../game/state.js';
-import { BUILDINGS, LOC, WORLD } from '../game/worldmap.js';
+import { getMapBase, homePos, MAP_LABELS } from './mapbase.js';
 
 const h = (tag, cls, html) => {
   const e = document.createElement(tag);
@@ -557,7 +557,6 @@ function journalPanel(ui, g) {
 }
 
 // ---------------------------------------------------------------------
-let mapBase = null;
 function mapPanel(ui, g) {
   const f = frame(ui, 'Map of Gloamhollow', 'map-panel');
   const S = 520;
@@ -565,57 +564,40 @@ function mapPanel(ui, g) {
   cv.width = cv.height = S;
   cv.className = 'map-canvas';
   f.body.appendChild(cv);
-  const t = g.engine.terrain;
-  const W = t.size;
-  const toPx = (x, z) => [((x + W / 2) / W) * S, ((z + W / 2) / W) * S];
-  if (!mapBase) {
-    mapBase = document.createElement('canvas');
-    mapBase.width = mapBase.height = S;
-    const c2 = mapBase.getContext('2d');
-    const img = c2.createImageData(S, S);
-    for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
-      const x = -W / 2 + (i / S) * W, z = -W / 2 + (j / S) * W;
-      const hh = t.heightAt(x, z);
-      const sp = t.splatAt(x, z);
-      let r, gg, b;
-      if (hh < -0.1) { const d = Math.min(1, -hh / 6); r = 28 - d * 14; gg = 44 - d * 20; b = 52 - d * 18; }
-      else {
-        r = 88; gg = 100; b = 60;
-        if (sp.forest > 0.5) { r = 52; gg = 64; b = 44; }
-        if (sp.sand > 0.5) { r = 150; gg = 136; b = 104; }
-        if (sp.rock > 0.5) { r = 110; gg = 110; b = 106; }
-        if (sp.path > 0.5) { r = 120; gg = 96; b = 66; }
-        if (sp.plaza > 0.5) { r = 128; gg = 120; b = 110; }
-        if (sp.farm > 0.5) { r = 96; gg = 70; b = 46; }
-        const shade = 0.75 + Math.min(0.4, hh / 30);
-        r *= shade; gg *= shade; b *= shade;
-      }
-      const k = (j * S + i) * 4;
-      img.data[k] = r; img.data[k + 1] = gg; img.data[k + 2] = b; img.data[k + 3] = 255;
-    }
-    c2.putImageData(img, 0, 0);
-  }
-  const labels = [
-    ['Hollow Green', LOC.hearth], ['Croft', LOC.croftHut], ['The Barrow', LOC.barrow], ['Blackwater', LOC.lake],
-    ['Mistwood', LOC.mistwood], ['Birchmeadow', LOC.meadow], ['Greyshore', { x: 20, z: 96 }], ['Stones', LOC.stones], ['Altar', LOC.altar], ['Heath', LOC.heath],
-  ];
+  const base = getMapBase(g);
+  const toPx = (x, z) => [((x + base.W / 2) / base.W) * S, ((z + base.W / 2) / base.W) * S];
   const draw = () => {
     const c = cv.getContext('2d');
-    c.drawImage(mapBase, 0, 0);
+    c.drawImage(base.canvas, 0, 0, S, S);
     c.font = '12px Cinzel, serif';
     c.textAlign = 'center';
-    for (const [name, p] of labels) {
+    for (const [name, p] of MAP_LABELS) {
       const [x, y] = toPx(p.x, p.z);
       c.fillStyle = 'rgba(10,10,10,0.55)';
       c.fillText(name, x + 1, y + 1);
       c.fillStyle = '#eadfc4';
       c.fillText(name, x, y);
     }
+    const dot = (x, y, r, fill) => {
+      c.beginPath(); c.arc(x, y, r, 0, 6.28);
+      c.fillStyle = fill; c.fill();
+      c.lineWidth = 1; c.strokeStyle = 'rgba(12,8,4,0.9)'; c.stroke();
+    };
+    const hp = homePos(g);
+    const [hx, hy] = toPx(hp.x, hp.z);
+    c.fillStyle = '#f1e6cd';
+    c.beginPath(); c.moveTo(hx, hy - 7); c.lineTo(hx + 6, hy - 1); c.lineTo(hx + 4.5, hy - 1); c.lineTo(hx + 4.5, hy + 6);
+    c.lineTo(hx - 4.5, hy + 6); c.lineTo(hx - 4.5, hy - 1); c.lineTo(hx - 6, hy - 1); c.closePath();
+    c.fill(); c.lineWidth = 1.2; c.strokeStyle = 'rgba(12,8,4,0.9)'; c.stroke();
     for (const n of g.npcs.list) {
       if (!n.visible) continue;
       const [x, y] = toPx(n.pos.x, n.pos.z);
-      c.fillStyle = '#e6a44a';
-      c.beginPath(); c.arc(x, y, 3.5, 0, 6.28); c.fill();
+      dot(x, y, 3.5, '#e6a44a');
+    }
+    for (const e of g.enemies.list) {
+      if (!e.alive) continue;
+      const [x, y] = toPx(e.pos.x, e.pos.z);
+      dot(x, y, e === g.enemies.boss ? 5 : 3, '#d8453a');
     }
     const p = g.player.pos;
     const [px, py] = toPx(p.x, p.z);
@@ -624,11 +606,12 @@ function mapPanel(ui, g) {
     c.rotate(-g.player.facing + Math.PI);
     c.fillStyle = '#fff4d0';
     c.beginPath(); c.moveTo(0, -8); c.lineTo(5, 6); c.lineTo(-5, 6); c.closePath(); c.fill();
+    c.lineWidth = 1; c.strokeStyle = 'rgba(12,8,4,0.9)'; c.stroke();
     c.restore();
   };
   draw();
   const iv = setInterval(draw, 500);
-  f.body.appendChild(h('div', 'muted small', 'Amber dots are villagers. The arrow is you.'));
+  f.body.appendChild(h('div', 'muted small', 'The arrow is you and the house is home. Amber dots are villagers; red ones are the Gloam.'));
   return { name: 'map', el: f.el, onClose: () => clearInterval(iv) };
 }
 
@@ -645,7 +628,7 @@ function helpPanel(ui) {
       <p><b>E</b> talk · pick · harvest · open · sleep at your door</p>
       <p>Tap a hotbar slot to hold that item</p>
       <h3>Menus</h3>
-      <p>The buttons along the top open your pack, crafting, journal, map and the pause menu.</p>
+      <p>The buttons along the top open your pack, crafting, journal, map and the pause menu. Tap the minimap for the full map.</p>
     </div>` : `
     <div><h3>Moving</h3>
       <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> dodge-roll</p>
@@ -656,6 +639,7 @@ function helpPanel(ui) {
       <p><kbd>1</kbd>–<kbd>0</kbd> or <kbd>Q</kbd>/<kbd>R</kbd> choose hotbar slot</p>
       <h3>Menus</h3>
       <p><kbd>Tab</kbd> pack · <kbd>C</kbd> crafting · <kbd>J</kbd> journal · <kbd>M</kbd> map · <kbd>Esc</kbd> pause</p>
+      <p>The minimap turns with your view. Click it for the full map; scroll over it to zoom.</p>
     </div>`;
   const fishHow = touch
     ? 'use the rod to cast, tap again when it bites, then hold a finger down to keep the fish in the green bar'
@@ -693,6 +677,7 @@ function pausePanel(ui, g) {
         <h3>Game</h3>
         <label class="srow"><span>Graphics</span><select data-k="quality" class="interactive"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
         <label class="srow"><span>Day length</span><select data-k="dayLength" class="interactive"><option value="short">Short (~8 min)</option><option value="normal">Normal (~11 min)</option><option value="long">Long (~16 min)</option></select></label>
+        <label class="srow"><span>Minimap</span><select data-k="minimap" class="interactive"><option value="rotate">Turns with view</option><option value="north">North up</option><option value="off">Hidden</option></select></label>
       </div>
     </div>`;
   f.body.querySelectorAll('select').forEach((el) => { el.value = s[el.dataset.k]; });

@@ -6,6 +6,7 @@ import { Input } from './engine/input.js';
 import { IconFactory } from './ui/icons.js';
 import { UI } from './ui/ui.js';
 import { TouchControls, isTouchDevice } from './ui/touch.js';
+import { getMapBase } from './ui/mapbase.js';
 import { Game } from './game/game.js';
 import { newGameState, loadGame, saveGame, hasSave, deleteSave, loadSettings, seasonOf } from './game/state.js';
 import { LOC } from './game/worldmap.js';
@@ -74,6 +75,9 @@ async function boot() {
   await nextFrame();
   const game = new Game({ engine, lib, audio, ui, input, settings, state, content });
   ui.attach(game);
+  setLoading(0.94, 'Charting the isle…');
+  await nextFrame();
+  getMapBase(game);
   window.__gh = { engine, game, THREE, ready: false };
   // keep the session across a republish of this page (Claude artifact hot reload)
   try {

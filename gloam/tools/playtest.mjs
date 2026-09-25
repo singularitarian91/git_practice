@@ -131,6 +131,13 @@ try {
       console.log(`met ${id}:`, await ev((id) => window.__gh.game.state.npcs[id].met, id), 'visible:', np[2]);
     }
     console.log('inv after meeting:', (await state()).inv);
+    // the minimap is drawn, and clicking it opens the full map (without swinging a tool)
+    const mm = await ev(() => { const cv = document.querySelector('.minimap canvas'); const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let lit = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) lit++; return { size: cv.width, lit }; });
+    const mmBox = await page.locator('.minimap').boundingBox();
+    await page.mouse.click(mmBox.x + mmBox.width / 2, mmBox.y + mmBox.height / 2);
+    await sim(0.2);
+    console.log('minimap:', JSON.stringify(mm), 'click opens:', await ev(() => window.__gh.game.ui.stack.map((p) => p.name).join(',')), 'swung:', await ev(() => !!window.__gh.game.player.action));
+    await key('Escape');
     // gift: talk again and choose "Give a gift"
     const b = await ev(() => { const n = window.__gh.game.npcs.byId.corvin; return [n.pos.x, n.pos.z]; });
     await teleport(b[0], b[1] + 1.4, Math.PI);
