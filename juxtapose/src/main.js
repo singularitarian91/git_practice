@@ -12,6 +12,7 @@ import { Lucidity } from './properties.js';
 import { Destruction } from './destruction.js';
 import { Projectiles } from './projectiles.js';
 import { Level, LOOKS, buildBedroom } from './level.js';
+import { drawPainting } from './painting.js';
 import { Player } from './player.js';
 import { Sleepwalker } from './enemies.js';
 import { Unwatched } from './boss.js';
@@ -21,7 +22,7 @@ import { FigureAnimator } from './animator.js';
 import { Portals } from './portals.js';
 import { Narrator } from './narrator.js';
 import { CombatHUD } from './combat.js';
-import { defaultMods, SCRAPS, WHIMS } from './meta.js';
+import { defaultMods, SCRAPS, WHIMS, DIFFICULTY } from './meta.js';
 import { PhotoMode } from './photo.js';
 import { RANKS, CLARITY, rankOf, applyRanks } from './knots.js';
 import { Cutscene, orbit } from './cutscene.js';
@@ -236,7 +237,10 @@ class Game {
         document.body.classList.toggle('sub-small', v === 'small');
         document.body.classList.toggle('sub-large', v === 'large');
         break;
-      default: break; // fov, shake, tips, guardToggle, autoReload are read where they are used
+      case 'difficulty': this.diff = DIFFICULTY[v] || DIFFICULTY.dream; break;
+      case 'renderScale': this.render.renderScale = v; this.render.setQuality(this.render.qualityName); break;
+      case 'padSens': this.input.padLook = v; break;
+      default: break; // fov, shake, tips, guardToggle, autoReload, drawDistance are read where they are used
     }
   }
   applyHudScale() {
@@ -248,24 +252,25 @@ class Game {
   // ------------------------------------------------------------ hooks
   explode(pos, opts) { this.destruction.explode(pos, opts); }
   recordCombo(p) {
+    this.lastGiven = p;
     this.recentCombos.push(p);
     if (this.recentCombos.length > 6) this.recentCombos.shift();
     this.stats.propUse[p] = (this.stats.propUse[p] || 0) + 1;
   }
   spawnEnemy(pos, opts = {}) {
     if (this.state !== 'playing' && this.state !== 'transition') return null;
-    const e = new Sleepwalker(this, pos, { ...opts, fireRate: this.freezeEnemies ? 0 : (opts.fireRate ?? 1 + this.depth * 0.15) });
+    const e = new Sleepwalker(this, pos, { ...opts, hp: (opts.hp ?? 60) * (this.sandbox ? 1 : this.diff?.hp ?? 1), fireRate: this.freezeEnemies ? 0 : (opts.fireRate ?? 1 + this.depth * 0.15) });
     this.entities.add(e);
     return e;
   }
   spawnPickup(pos) { this.pickups.push(new Pickup(this, pos)); }
   spawnCopy(e, pos) {
     if (e.kind === 'enemy') {
-      const c = new Sleepwalker(this, pos, { variant: e.variant, hp: e.hp, fireRate: this.freezeEnemies ? 0 : 1 });
+      const c = new Sleepwalker(this, pos, { variant: e.variant, hp: e.hp / (e.K?.hp || 1), fireRate: this.freezeEnemies ? 0 : 1 });
       this.entities.add(c);
       return c;
     }
-    if (e.kind === 'boss') return null;
+    if (e.kind === 'boss' || e.noCopy) return null;
     const c = spawnEntity(this, e.name, pos, { rotY: e.obj.rotation.y, anchored: e.kind === 'wall' ? true : undefined });
     return c;
   }
@@ -288,7 +293,7 @@ class Game {
 
   newRun() {
     this.run = { mods: defaultMods(), keepsakes: new Set(this.meta.equipped()), whims: [] };
-    applyRanks(this.run.mods, this.meta.data.clarity || 0); // what the Figment has become, it stays
+    applyRanks(this.run.mods, this.meta.data.clarity || 0, this.meta); // what the Figment has become, it stays
   }
 
   // Clarity: kept between nights; each rank reached is a permanent perk
@@ -300,9 +305,7 @@ class Game {
     const r0 = rankOf(before), r1 = rankOf(after);
     for (let r = r0 + 1; r <= r1; r++) {
       const R = RANKS[r];
-      R.apply(this.run.mods);
-      if (R.apply && this.player && this.run.mods.hpBonus) { const add = this.run.mods.hpBonus - (this.player.hpBonusApplied || 0); this.player.maxHp += add; this.player.heal(add); this.player.hpBonusApplied = this.run.mods.hpBonus; }
-      this.ui.card('CLARITY', R.name, R.perk);
+      this.ui.card('CLARITY', R.name, 'A point to spend on who you are, when you wake');
       this.audio.stinger('memory');
       if (this.player) this.vfx.propertyBurst(this.player.pos.clone().setY(this.player.pos.y + 1.2), 'floating', 1.4);
     }
@@ -315,6 +318,7 @@ class Game {
   playCutscene(shots, opts = {}) {
     if (this.noCutscenes) { const c = new Cutscene(this, shots); c.skip(); opts.onEnd?.(); return; }
     this.cut = new Cutscene(this, shots, opts);
+    this.cutAfter = opts.after || 'playing'; // the state to go back to (the bedroom, for the ending)
     this.state = 'cutscene';
     this.ui.setHud(false);
     this.ui.letterbox(true);
@@ -323,8 +327,8 @@ class Game {
     const cb = this.cut?.onEnd;
     this.cut = null;
     this.ui.letterbox(false);
-    this.ui.setHud(true);
-    this.state = 'playing';
+    this.state = this.cutAfter || 'playing';
+    if (this.state === 'playing') this.ui.setHud(true);
     cb?.();
   }
   // arriving in a layer: the dream shows you where you are before it hands you the controls
@@ -340,10 +344,35 @@ class Game {
     ] : [
       { dur: 4, pos: orbit(V(0, 0, 0), 60, 30, 0.6, 1.8), look: V(0, 4, 0), fov: 50, caption: 'The city he left for, where every crowd is the same man.' },
       first && { dur: 3, pos: [first.pos.clone().add(V(10, 8, 10)), first.pos.clone().add(V(6, 4, 6))], look: first.pos.clone().add(V(0, 2, 0)), fov: 48, caption: `First, ${first.def.name}.` },
+      this.narrator.obj && { dur: 3.6, pos: [this.narrator.obj.position.clone().add(V(1.4, 0.3, 1.4)), this.narrator.obj.position.clone().add(V(0.9, 0.1, 0.9))], look: this.narrator.obj.position.clone(), fov: 38, caption: 'Night-Light: He came here to be nobody in particular. It worked. Keep your eyes open.' },
       { dur: 2.6, pos: [V(0, 12, -20), eye.clone().add(V(0, 2.2, -5))], look: eye, fov: [50, 60] },
     ];
     this.playCutscene(shots, { onEnd: () => first && lvl.guide(p.pos.clone(), first.pos) });
   }
+  // the last room: the ring of mirrors, the candles, and the eye, which opens
+  playBossIntro() {
+    const lvl = this.level, p = this.player, b = this.boss;
+    if (!lvl || !p || !b) return;
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const eyeAt = b.center(), eye = p.pos.clone().add(V(0, 1.6, 0));
+    const lids = (k) => { // 1 shut, 0 open
+      const q = new THREE.Quaternion(), X = V(1, 0, 0);
+      if (b.lidTop) b.lidTop.quaternion.copy(b.rest.UW_LidTop.q).multiply(q.setFromAxisAngle(X, k * 0.42));
+      if (b.lidBot) b.lidBot.quaternion.copy(b.rest.UW_LidBottom.q).multiply(q.setFromAxisAngle(X, -k * 0.42));
+      for (const m of b.irisMats) m.emissiveIntensity = m.userData.baseEI * (0.2 + (1 - k) * 3.5);
+    };
+    // frame the eye from the side it looks out of
+    const toCam = new THREE.Vector3(0, 0, 1).applyQuaternion(b.obj.quaternion).setY(0).normalize();
+    const shots = [
+      { dur: 5, pos: orbit(V(0, 0, 0), 36, 11, -2.2, -0.9), look: V(0, 3, 0), fov: 50, caption: 'The last room of the dream. Mirrors, and candles, and something she has never once looked at directly.', at: () => lids(1) },
+      { dur: 4.5, pos: [eyeAt.clone().addScaledVector(toCam, 16).add(V(3, -2, 0)), eyeAt.clone().addScaledVector(toCam, 7).add(V(1, -0.6, 0))], look: eyeAt, fov: [44, 34], caption: 'It has waited sixty years for her to turn around.', tick: (dt, k) => lids(1 - Math.max(0, (k - 0.55) / 0.45)) },
+      { dur: 3, pos: [eyeAt.clone().addScaledVector(toCam, 9).add(V(0, 0.4, 0)), eyeAt.clone().addScaledVector(toCam, 7.5).add(V(0, 0.2, 0))], look: eyeAt, fov: 36, caption: 'The Unwatched. It can only be hurt while you are not looking at it.',
+        at: () => { lids(0); this.audio.sfx('bossRoar', { position: eyeAt, gain: 0.9 }); } },
+      { dur: 2.6, pos: [eyeAt.clone().addScaledVector(toCam, 10).add(V(0, 4, 0)), eye.clone().addScaledVector(toCam, 4.5).add(V(0, 1.8, 0))], look: [eyeAt, eye], fov: [50, 60] },
+    ];
+    this.playCutscene(shots, { onEnd: () => { b.intro = Math.max(b.intro, 1.2); this.meta.data.seenBoss = (this.meta.data.seenBoss || 0) + 1; this.meta.save(); } });
+  }
+
   // the first night: who is dreaming, who you are, and what you're for. Skippable, replayable from the title.
   playPrologue() {
     const lvl = this.level, p = this.player;
@@ -364,6 +393,23 @@ class Game {
       { dur: 2.6, pos: [V(0, 14, -12), eye.clone().add(V(0, 2.2, -5))], look: [V(0, 1, -27), eye], fov: [50, 60] },
     ];
     this.playCutscene(shots, { onEnd: () => { this.meta.data.seenPrologue = true; this.meta.save(); if (first) lvl.guide(p.pos.clone(), first.pos); } });
+  }
+
+  // the first time the Figment meets one of the new anxieties, the dream stops to introduce it
+  introduceEnemy(e) {
+    const K = e.K;
+    if (!K || this.sandbox || this.state !== 'playing' || this.cut) return;
+    const seen = this.meta.data.seenEnemies || (this.meta.data.seenEnemies = {});
+    if (seen[e.variant]) return;
+    seen[e.variant] = true; this.meta.save();
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const c = e.center().add(V(0, 0.4 * e.size, 0)), p = this.player;
+    const dir = p.pos.clone().sub(c).setY(0).normalize(), a0 = Math.atan2(dir.z, dir.x);
+    const r = 3.6 * e.size;
+    this.playCutscene([
+      { dur: 3.6, pos: orbit(c, r, 0.3 * e.size, a0 - 0.5, a0 + 0.35), look: c, fov: 40, caption: `${K.title}. ${K.line}`, at: () => this.audio.sfx('perilous', { position: c, gain: 0.5 }) },
+    ]);
+    this.narrator.say('meet_' + e.variant);
   }
 
   // a translucent Figment acting out a memory beside the thing it's about
@@ -403,7 +449,16 @@ class Game {
     }
     if (doorNow && lvl.door) {
       const d = lvl.door.pos.clone().setY(lvl.door.pos.y + 2);
-      shots.push({ dur: 3.4, pos: [d.clone().add(V(-6, 4, -14)), d.clone().add(V(-2, 2.5, -8))], look: d, fov: 48, caption: 'A door has opened in the shallows.', at: () => lvl.openDoor() });
+      const city = lvl.key === 'piazza';
+      shots.push(city
+        ? { dur: 5, pos: [d.clone().add(V(-30, 8, -26)), d.clone().add(V(-8, 4, -16))], look: [d.clone().add(V(-30, 0, 0)), d], fov: 48, caption: 'The 6:40 comes round the hill, and this time it stops for you.', at: () => lvl.openDoor() }
+        : { dur: 3.4, pos: [d.clone().add(V(-6, 4, -14)), d.clone().add(V(-2, 2.5, -8))], look: d, fov: 48, caption: 'A door has opened in the shallows.', at: () => lvl.openDoor() });
+    }
+    // the Night-Light has the last word on it, close up
+    const nl = this.narrator.obj;
+    if (nl && knot.def.nl) {
+      const at = nl.position.clone(), side = p.flatLeft(new THREE.Vector3());
+      shots.push({ dur: 3.8, pos: [at.clone().addScaledVector(side, 1.6).add(V(0, 0.2, 0)).addScaledVector(p.flatForward(), 1.2), at.clone().addScaledVector(side, 1.1).addScaledVector(p.flatForward(), 0.8)], look: at, fov: 38, caption: `Night-Light: ${knot.def.nl}` });
     }
     this.playCutscene(shots, {
       onEnd: () => {
@@ -428,6 +483,59 @@ class Game {
     });
   }
 
+
+  // The end: Odile lifts the sheet. The painting finishes itself as she remembers,
+  // the apple the Figment wore for a face falls away, and she lets the candle go out.
+  playEnding(lines, done) {
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const B = this.bedroom, easel = B.easel, A = this.assets;
+    easel.updateMatrixWorld(true);
+    const at = (x, y, z) => easel.localToWorld(V(x, y, z));
+    const face = at(0, 1.49, 0.34), mid = at(0, 1.2, 0.3), front = at(0, 1.2, 1.4).sub(mid).setY(0).normalize();
+    const sheet = easel.getObjectByName('Easel_Sheet');
+    const sheet0 = sheet ? { p: sheet.position.clone(), r: sheet.rotation.clone() } : null;
+    // the finished canvas, waiting
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 640;
+    drawPainting(cv, { found: this.meta.scraps, finished: true, frame: false });
+    const done2 = new THREE.CanvasTexture(cv); done2.colorSpace = THREE.SRGBColorSpace; done2.flipY = false; done2.anisotropy = 8;
+    let painting = null;
+    easel.traverse((m) => { if (m.isMesh) for (const mm of Array.isArray(m.material) ? m.material : [m.material]) if (mm.name === 'Painting') painting = mm; });
+    // the candle on the drawers, lit
+    let candle = null;
+    B.group.traverse((o) => { if (o.name === 'Candle' && !candle) candle = o; });
+    if (!candle && A.has('Candle')) { candle = A.clone('Candle', { uniqueMaterials: false }); candle.position.set(1.9, 1.12, 2.2); B.group.add(candle); }
+    const flame = candle?.getObjectByName('Candle_Flame');
+    const cLight = new THREE.PointLight(0xffb865, 1.4, 4); if (candle) { cLight.position.copy(candle.position).add(V(0, 0.65, 0)); B.group.add(cLight); }
+    // the apple
+    const apple = A.has('Apple') ? A.clone('Apple') : new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), new THREE.MeshStandardMaterial({ color: '#7dbb3c' }));
+    apple.scale.setScalar(1.3); apple.visible = false;
+    apple.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    B.group.add(apple);
+    const fall = { p: face.clone().addScaledVector(front, 0.08), v: front.clone().multiplyScalar(0.5).setY(0.6), spin: 0, rest: false };
+    const lift = (k) => { if (!sheet || !sheet0) return; sheet.position.copy(sheet0.p).add(V(0, k * 1.2, 0)); sheet.rotation.set(sheet0.r.x - k * 0.9, sheet0.r.y, sheet0.r.z + k * 0.3); sheet.visible = k < 0.98; };
+    const finish = () => { if (painting && painting.map !== done2) { painting.map = done2; painting.needsUpdate = true; this.vfx.propertyBurst(face, 'floating', 0.9); this.audio.stinger('memory'); } };
+    const drop = (dt) => {
+      apple.visible = true;
+      if (fall.rest) return;
+      fall.v.y -= 9.8 * dt; fall.p.addScaledVector(fall.v, dt); fall.spin += dt * 6;
+      if (fall.p.y < 0.05) { fall.p.y = 0.05; if (Math.abs(fall.v.y) < 0.6) { fall.rest = true; fall.v.set(0, 0, 0); } else { fall.v.y *= -0.35; fall.v.x *= 0.6; fall.v.z *= 0.6; this.audio.sfx('land', { gain: 0.4 }); } }
+      apple.position.copy(fall.p); apple.rotation.set(fall.spin, 0, fall.spin * 0.6);
+    };
+    const settle = () => { apple.visible = true; fall.p.y = 0.05; fall.rest = true; if (fall.p.distanceTo(face) < 0.3) fall.p.addScaledVector(front, 0.5); apple.position.copy(fall.p); };
+    const snuff = () => { if (flame && flame.visible) { flame.visible = false; cLight.intensity = 0; const f = candle.position.clone().add(V(0, 0.6, 0)); for (let i = 0; i < 14; i++) this.vfx.smoke?.spawn?.({ x: f.x, y: f.y, z: f.z, vx: (Math.random() - 0.5) * 0.05, vy: 0.25 + Math.random() * 0.15, vz: (Math.random() - 0.5) * 0.05, color: new THREE.Color('#cfc8c0'), alpha: 0.35, alpha1: 0, size: 0.05, size1: 0.3, life: 2.5 + Math.random() }); } };
+    const E = lines;
+    const view = (d, h) => mid.clone().addScaledVector(front, d).add(V(0, h, 0));
+    const shots = [
+      { dur: 6, pos: [V(2.3, 1.75, -3.0), V(2.0, 1.65, -2.4)], look: [mid.clone().add(V(0, -0.2, 0)), mid], fov: 50, caption: E[0], at: () => lift(0) },
+      { dur: 5, pos: [view(2.6, 0.35), view(2.1, 0.25)], look: mid, fov: 42, caption: E[1], tick: (dt, k) => lift(Math.max(0, (k - 0.25) / 0.6)), end: () => lift(1) },
+      { dur: 5.5, pos: [view(1.4, 0.3), view(1.05, 0.28)], look: [mid, face], fov: 38, caption: E[2] },
+      { dur: 6, pos: [view(1.05, 0.28), view(1.25, 0.1)], look: [face, face.clone().add(V(0, -0.5, 0))], fov: 38, caption: E[3], at: finish, tick: (dt, k) => { if (k > 0.25) drop(dt); }, end: settle },
+      { dur: 7, pos: [view(1.6, 0.35), view(2.4, 0.4)], look: [face, mid], fov: [36, 42], caption: E[4], at: () => { finish(); settle(); } },
+      candle && { dur: 5.5, pos: [candle.position.clone().add(V(-0.6, 0.75, -0.9)), candle.position.clone().add(V(-0.45, 0.7, -0.65))], look: candle.position.clone().add(V(0, 0.55, 0)), fov: 40, caption: E[5], tick: (dt, k) => { if (k > 0.6) snuff(); }, end: snuff },
+      { dur: 4, pos: [V(1.9, 1.6, -2.2), V(1.4, 1.5, -1.4)], look: [mid, mid], fov: 50, at: () => { lift(1); finish(); settle(); snuff(); } },
+    ];
+    this.playCutscene(shots, { after: 'bedroom', onEnd: done });
+  }
 
   onBossDefeated() {
     this.gainClarity(CLARITY.boss, this.boss?.center?.());
@@ -507,6 +615,7 @@ class Game {
     anim.play('Idle', { fade: 0 });
     this.attractFig = { grp, anim };
     this.ui.setHud(false);
+    this.ui.refreshContinue();
     this.ui.show('title');
     this.ui.fade(0, 1.2);
     this.input.exitLock();
@@ -589,15 +698,48 @@ class Game {
       setTimeout(() => this.audio.stinger('bossIntro'), 1500);
     } else if (lvl.knotSpots?.length) lvl.startKnots();
     else lvl.startWaves();
+    if (key === 'boss' && !this.sandbox) setTimeout(() => { if (this.state === 'playing' && this.level === lvl) this.playBossIntro(); }, 900);
     if (lvl.knots && !this.sandbox) setTimeout(() => {
       if (this.state !== 'playing' || this.level !== lvl) return;
       if (index === 0 && (this.forcePrologue || !this.meta.data.seenPrologue)) { this.forcePrologue = false; this.playPrologue(); } else this.playIntro();
     }, 700);
     $('#layer-name').textContent = LAYERS[index].name;
+    this.saveCheckpoint(index, carry);
     const roman = ['I', 'II', 'III', 'IV'][index];
     this.ui.card(`LAYER ${roman}`, LAYERS[index].name, LAYERS[index].subtitle);
     this.audio.setLayer(Math.min(2, index));
     this.enterPlay();
+  }
+
+  // a night can be left and continued: each layer you reach is remembered, with
+  // what you carried into it (the layer itself starts over)
+  saveCheckpoint(index, carry) {
+    if (this.sandbox || !carry) return;
+    this.meta.data.checkpoint = {
+      depth: index, whims: [...this.run.whims], lucid: Math.round(this.lucidity.value), stats: { ...this.stats, propUse: { ...this.stats.propUse } },
+      carry: { charges: [...(carry.charges || [])], roundProps: [...(carry.roundProps || [])], hp: Math.round(carry.hp || TUNE.playerHP), selected: carry.selected || 0, reverie: carry.reverie || 0, armor: carry.armor || 0 },
+      at: Date.now(),
+    };
+    this.meta.save();
+    this.ui.refreshContinue?.();
+  }
+  continueRun() {
+    const cp = this.meta.data.checkpoint;
+    if (!cp) { this.startRun(); return; }
+    this.audio.start();
+    this.sandbox = false; this.meta.sandboxAll = false;
+    this.lucidity.reset(); this.lucidity.cap = 100;
+    this.newRun();
+    for (const id of cp.whims || []) { const w = WHIMS.find((x) => x.id === id); if (w) { w.apply(this.run.mods); this.run.whims.push(id); } }
+    this.stats = { ...this.freshStats(), ...(cp.stats || {}) };
+    this.scrapsAtStart = this.meta.scraps.size;
+    this.recentCombos = [];
+    this.depth = cp.depth;
+    this.narrator.reset();
+    const c = cp.carry;
+    this.loadLayer(cp.depth, { charges: new Map(c.charges), roundProps: new Map(c.roundProps), hp: c.hp, selected: c.selected, reverie: c.reverie, armor: c.armor });
+    this.lucidity.value = Math.min(70, cp.lucid || 0);
+    this.ui.toast('The dream picks up where it left you.', 'good');
   }
 
   enterPlay() {
@@ -640,6 +782,7 @@ class Game {
   endRun(cause) {
     if (this.state === 'waking' || this.state === 'bedroom') return;
     this.state = 'waking';
+    delete this.meta.data.checkpoint; // a night that ends is over
     this.wakeT = 0;
     this.input.exitLock();
     this.narrator.say(cause === 'lucid' ? 'lucidWake' : cause === 'victory' ? 'bossDown' : 'death', { priority: true, force: true });
@@ -656,7 +799,8 @@ class Game {
     const lines = this.meta.vignette(stats);
     this.clearWorld();
     this.render.setLook(LOOKS.bedroom);
-    this.bedroom = buildBedroom(this, this.meta.memories, { victory: stats.victory, found: this.meta.scraps });
+    // the ending starts with the sheet still on and the face still missing; the cutscene finishes both
+    this.bedroom = buildBedroom(this, this.meta.memories, { victory: false, found: this.meta.scraps });
     this.bedroomVictory = !!stats.victory;
     this.scene.add(this.bedroom.group);
     this.state = 'bedroom';
@@ -664,7 +808,9 @@ class Game {
     this.ui.setHud(false);
     this.ui.fade(0, 2.5);
     const causeText = stats.cause === 'victory' ? 'The dreamer slept soundly' : stats.cause === 'lucid' ? 'The dream grew too lucid' : 'The dreamer woke';
-    this.ui.showWaking({ lines, memory, stats, cause: causeText });
+    const waking = () => this.ui.showWaking({ lines, memory, stats, cause: causeText });
+    if (stats.victory && this.bedroom.easel) this.playEnding(lines, () => waking());
+    else waking();
     if (memory) setTimeout(() => this.audio.stinger('memory'), 2800);
     this.audio.setLucidity(0); this.audio.setIntensity(0);
   }
@@ -708,12 +854,15 @@ class Game {
       fn();
     });
     click('#btn-run', () => this.startRun());
+    click('#btn-continue', () => this.continueRun());
     click('#btn-prologue', () => { this.forcePrologue = true; this.startRun(); });
     click('#btn-sandbox', () => this.startSandbox());
     click('#btn-journal', () => { this.ui.renderJournal(); this.ui.show('journal'); });
     click('#btn-keepsakes', () => { this.ui.renderKeepsakes(); this.ui.show('keepsakes'); });
     click('#btn-wake-journal', () => { this.returnTo = 'waking'; this.ui.renderJournal(); this.ui.show('journal'); });
     click('#btn-wake-keepsakes', () => { this.returnTo = 'waking'; this.ui.renderKeepsakes(); this.ui.show('keepsakes'); });
+    click('#btn-clarity', () => { this.ui.renderClarity(); this.ui.show('clarity'); });
+    click('#btn-wake-clarity', () => { this.returnTo = 'waking'; this.ui.renderClarity(); this.ui.show('clarity'); });
     click('#btn-controls', () => this.ui.show('controls'));
     click('#btn-settings', () => this.ui.show('settings'));
     click('#btn-resume', () => this.resume());
@@ -757,6 +906,7 @@ class Game {
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); });
     // sandbox panel
     const spawns = [['Sleepwalker', () => this.spawnEnemy(this.spawnPoint(), {})], ['Golconda man', () => this.spawnEnemy(this.spawnPoint().setY(this.spawnPoint().y + 14), { falling: true, gravity: 0.15, variant: 'golconda' })],
+      ['Hush', () => this.spawnEnemy(this.spawnPoint(), { variant: 'hush' })], ['Mirror', () => this.spawnEnemy(this.spawnPoint(), { variant: 'mirror' })], ['Wardrobe', () => this.spawnEnemy(this.spawnPoint(), { variant: 'wardrobe' })],
       ...['Clock', 'Cloud', 'Mirror', 'Candle', 'Anvil', 'Frame', 'Bed', 'BowlerHat', 'Birdcage', 'Pomegranate', 'Wall', 'Column', 'Drawers', 'Platform'].map((n) => [n.replace('BowlerHat', 'Bowler hat'), () => this.sandboxSpawn(n)])];
     const grid = $('#sb-spawns');
     grid.innerHTML = spawns.map(([n], i) => `<button data-i="${i}">${n}</button>`).join('');
@@ -894,6 +1044,7 @@ class Game {
 
   tick(rdt) {
     const input = this.input;
+    input.pollPad(rdt, !!this.ui.visibleScreen() || this.state === 'title' || this.state === 'bedroom');
     if (this.state !== 'photo') this.time += rdt; // photo mode holds the dream still, sky and grain included
     let dt = rdt;
     if (this.state === 'playing' || this.state === 'transition' || this.state === 'waking') {
@@ -904,6 +1055,7 @@ class Game {
         if (input.hit('help')) { this.pause(); this.ui.show('controls'); this.helpFromGame = true; }
         this.stats.time += rdt;
         if (input.hit('shoulder')) this.player.shoulder *= -1;
+        this.ui.showMap(input.is('map') && !this.player.dead);
         if (input.hit('sandbox') && this.sandbox) this.toggleSandboxPanel(!this.sbOpen);
         // property wheel: hold Tab, slow time
         if (input.is('wheel') && !this.player.dead) {

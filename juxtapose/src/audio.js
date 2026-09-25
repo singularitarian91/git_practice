@@ -2468,6 +2468,34 @@ const SFX = {
     [0, 7, 4, 12, 11].forEach((iv, i) => v.fm(mtof(r + iv + 12), t + 0.1 + i * 0.13, 0.08, 0.002, 0.6, { ratio: 3, index: 1.2 }));
     v.send(0.4);
   },
+  bell(e, v, t) {
+    // A bronze bell: inharmonic partials (hum, prime, tierce, quint, nominal), long tail.
+    const f = mtof(e._ct(0, -1));
+    [[0.5, 0.35, 5], [1, 0.3, 4], [1.19, 0.18, 3], [1.5, 0.12, 2.6], [2, 0.16, 2.2], [2.74, 0.06, 1.4], [3.76, 0.04, 0.9]]
+      .forEach(([k, a, d]) => v.tone('sine', f * k, t, a, 0.004, d));
+    v.noiseHit('pink', t, 0.25, 0.001, 0.05, { type: 'bandpass', f: 3000, Q: 2 });
+    v.send(0.6);
+    v.keep(t + 5.5);
+  },
+  brake(e, v, t) {
+    // Iron on iron: a long squeal sliding down, under a hiss.
+    v.tone('sawtooth', 2200, t, 0.05, 0.1, 2.6, { to: 900, dest: v.f('bandpass', 2000, 8) });
+    v.tone('square', 1480, t + 0.2, 0.03, 0.2, 2.2, { to: 700, dest: v.f('bandpass', 1400, 10) });
+    v.noiseHit('white', t, 0.18, 0.2, 2.8, { type: 'highpass', f: 3000 });
+    v.keep(t + 3.2);
+  },
+  chime(e, v, t) {
+    // A mantel clock striking: four soft, bright strokes.
+    for (let i = 0; i < 4; i++) v.fm(mtof(e._ct(i % 2 ? 4 : 0, 1)), t + i * 0.55, 0.14, 0.002, 1.8, { ratio: 3.01, index: 1.6 });
+    v.send(0.45);
+    v.keep(t + 4);
+  },
+  solve(e, v, t) {
+    // Something in the dream gives way: a rising arpeggio and a soft thump.
+    [0, 2, 4, 7, 9].forEach((k, i) => v.fm(mtof(e._ct(k, 1)), t + i * 0.07, 0.08, 0.002, 0.9, { ratio: 2, index: 0.8 }));
+    v.tone('sine', 90, t, 0.4, 0.004, 0.5, { to: 45 });
+    v.send(0.35);
+  },
   babble(e, v, t, x) {
     // The Night-Light's voice: a tiny formant syllable (pitch via opts.pitch).
     const f = 520 * Math.pow(2, x.pitch / 12) * rand(0.94, 1.06);

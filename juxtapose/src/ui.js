@@ -5,7 +5,7 @@ import { MEMORIES, KEEPSAKES, WHIMS, WHIM_CATS, SCRAPS } from './meta.js';
 import { drawPainting } from './painting.js';
 import { takeCandidate } from './properties.js';
 import { LINES } from './narrator.js';
-import { RANKS, rankOf, rankProgress } from './knots.js';
+import { RANKS, rankOf, rankProgress, TREE, treePoints, canBuy, buy } from './knots.js';
 
 const $ = (s) => document.querySelector(s);
 const ROMAN = ['I', 'II', 'III', 'IV'];
@@ -670,6 +670,107 @@ export class UI {
     $('#dreamer-bio').innerHTML = parts.join('');
   }
 
+  // ---- the map: hold M (or View). The dream's own sketch of where you are:
+  // buildings, the ink, the memories, the door. No enemies on it; it is a memory, not radar.
+  showMap(on) {
+    const el = $('#map');
+    if (!el) return;
+    if (el.hidden === !on) { if (on) this.drawMap(); return; }
+    el.hidden = !on;
+    if (on) { this.game.audio.sfx('lore', { gain: 0.3 }); this.drawMap(); }
+  }
+  drawMap() {
+    const g = this.game, L = g.level, p = g.player;
+    const cv = $('#map-canvas');
+    if (!L || !p || !cv) return;
+    const S = cv.width, R = L.key === 'desert' ? 92 : L.key === 'piazza' ? 72 : 48;
+    const cz = L.key === 'desert' ? 8 : 0;
+    const X = (x) => (x + R) / (2 * R) * S, Z = (z) => (z - cz + R) / (2 * R) * S;
+    const ctx = cv.getContext('2d');
+    // the ground, once per layer: sand, water, the edge of the dream, the buildings
+    if (this._mapFor !== L) {
+      this._mapFor = L;
+      const bg = this._mapBg = document.createElement('canvas'); bg.width = bg.height = S;
+      const b = bg.getContext('2d'), n = 96, cell = S / n;
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const x = -R + (i + 0.5) / n * 2 * R, z = cz - R + (j + 0.5) / n * 2 * R, h = L.heightAt(x, z);
+        const hi = Math.min(40, Math.max(0, h) * 4);
+        b.fillStyle = h < -10 ? '#1b1620' : L.sea && h < L.sea.y ? '#3a5c6e' : `rgb(${196 - hi},${164 - hi},${118 - hi * 0.75})`;
+        b.fillRect(i * cell, j * cell, cell + 0.6, cell + 0.6);
+      }
+      for (const r of L.town?.rects || []) {
+        if (!/^B_/.test(r.name)) continue;
+        b.save(); b.translate(X(r.x), Z(r.z)); b.rotate(-r.rotY);
+        const w = r.hw * 2 / (2 * R) * S, d = r.hd * 2 / (2 * R) * S;
+        b.fillStyle = '#efe4cf'; b.strokeStyle = '#3a2c22'; b.lineWidth = 1.5;
+        b.fillRect(-w / 2, -d / 2, w, d); b.strokeRect(-w / 2, -d / 2, w, d);
+        b.restore();
+      }
+    }
+    ctx.clearRect(0, 0, S, S);
+    ctx.drawImage(this._mapBg, 0, 0);
+    // the ink: closed lines dark, parted ones a ghost
+    for (const v of L.veils || []) {
+      const m = v.mesh, half = m.geometry.parameters.width / 2, dir = new THREE.Vector3(1, 0, 0).applyQuaternion(m.quaternion);
+      const a = m.position.clone().addScaledVector(dir, -half), bb = m.position.clone().addScaledVector(dir, half);
+      ctx.strokeStyle = v.opening ? 'rgba(90,60,140,0.3)' : '#3b1f5c'; ctx.lineWidth = v.opening ? 2 : 5; ctx.setLineDash(v.opening ? [4, 6] : []);
+      ctx.beginPath(); ctx.moveTo(X(a.x), Z(a.z)); ctx.lineTo(X(bb.x), Z(bb.z)); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // the memories: taken ones ticked, the one you're after glowing
+    for (const k of L.knots || []) {
+      const x = X(k.pos.x), y = Z(k.pos.z), cur = L.current === k;
+      ctx.textAlign = 'center';
+      if (k.state === 'taken') { ctx.fillStyle = '#ffd27a'; ctx.font = 'bold 16px Georgia, serif'; ctx.fillText('✓', x, y + 5); continue; }
+      ctx.beginPath(); ctx.arc(x, y, cur ? 8 + Math.sin(g.time * 4) * 2 : 6, 0, Math.PI * 2);
+      ctx.fillStyle = cur ? '#ffd27a' : k.def.optional ? '#b89cff' : '#6d4aa8'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#1b1620'; ctx.stroke();
+      if (cur) { ctx.fillStyle = '#f5ecd8'; ctx.font = '13px Georgia, serif'; ctx.fillText(k.def.name, x, y - 14); }
+    }
+    // the way out, once it's open
+    if (L.doorOpen && L.door) { const d = L.door.pos; ctx.fillStyle = '#fff2c0'; ctx.fillRect(X(d.x) - 4, Z(d.z) - 7, 8, 14); }
+    // you: an arrow along the camera
+    ctx.save(); ctx.translate(X(p.pos.x), Z(p.pos.z)); ctx.rotate(Math.PI - p.camYaw);
+    ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(7, 8); ctx.lineTo(0, 4); ctx.lineTo(-7, 8); ctx.closePath();
+    ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = '#1b1620'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+    const cur = L.current;
+    $('#map-note').textContent = cur ? `${cur.def.name[0].toUpperCase() + cur.def.name.slice(1)}${cur.lock && !cur.lock.solved ? ': ' + cur.lock.hint : ''}` : L.objective || '';
+  }
+  // the title's Continue button: shown when a night was left mid-way
+  refreshContinue() {
+    const b = $('#btn-continue'), cp = this.game.meta.data.checkpoint;
+    if (!b) return;
+    b.hidden = !cp;
+    if (cp) b.textContent = `Continue the night · ${LAYERS[cp.depth]?.name || ''}`;
+  }
+
+  // the Clarity tree: four branches, bought from the top down, one point per rank
+  renderClarity() {
+    const meta = this.game.meta;
+    const own = new Set(meta.data.tree || []);
+    const { free, earned } = treePoints(meta);
+    const xp = meta.data.clarity || 0, r = rankOf(xp), next = RANKS[r + 1];
+    $('#clarity-rank').textContent = `${RANKS[r].name} · ${Math.round(xp)} clarity${next ? ` · ${Math.ceil(next.at - xp)} to ${next.name}` : ''} · ${earned} point${earned === 1 ? '' : 's'} earned`;
+    const pc = $('#clarity-points');
+    pc.innerHTML = `<i class="notch${free ? ' on' : ''}"></i><span class="mono fine">&nbsp;${free}</span>`;
+    const icon = { blade: 'blade', gun: 'gun', mind: 'mind', legs: 'motion' };
+    $('#clarity-tree').innerHTML = Object.entries(TREE).map(([k, b]) => `<div class="branch"><h3>${catSVG(icon[k], 16)}${b.label}</h3>${b.nodes.map((n) => {
+      const st = own.has(n.id) ? 'own' : canBuy(meta, n.id) ? 'can' : 'locked';
+      return `<button class="tnode ${st}" data-id="${n.id}" aria-pressed="${st === 'own'}" ${st === 'locked' ? 'aria-disabled="true"' : ''}><div class="tn">${n.name}</div><div class="td">${n.desc}</div></button>`;
+    }).join('')}</div>`).join('');
+    for (const b of document.querySelectorAll('#clarity-tree .tnode')) {
+      b.addEventListener('click', () => {
+        if (b.classList.contains('own')) return;
+        const ok = buy(meta, b.dataset.id);
+        this.game.audio.sfx(ok ? 'memory' : 'fireEmpty');
+        if (!ok) this.toast(treePoints(meta).free ? 'Take the one above it first.' : 'No Clarity to spend. Rank up to earn more.');
+        this.renderClarity();
+        document.querySelector(`#clarity-tree .tnode[data-id="${b.dataset.id}"]`)?.focus({ preventScroll: true });
+      });
+    }
+  }
+
   renderKeepsakes() {
     const meta = this.game.meta;
     const eq = new Set(meta.equipped());
@@ -786,5 +887,6 @@ export class UI {
       wm.querySelector('.wm-unlock').innerHTML = memory.unlock ? this.chip(memory.unlock, ' now appears in the dream') : '';
     } else wm.hidden = true;
     $('#wake-stats').textContent = `depth ${stats.depth + 1} · strangeness ${Math.round(stats.strangeness)} · ${stats.kills} anxieties silenced · ${stats.destroyed} things broken · ${stats.explosions} explosions · ${stats.memoriesFreed || 0} memories freed · +${stats.clarity || 0} clarity (${RANKS[rankOf(this.game.meta.data.clarity || 0)].name})`;
+    { const { free } = treePoints(this.game.meta), b = $('#btn-wake-clarity'); if (b) { b.textContent = free ? `Clarity · ${free} to spend` : 'Clarity'; b.classList.toggle('has-points', free > 0); } }
   }
 }

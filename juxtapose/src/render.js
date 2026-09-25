@@ -301,7 +301,7 @@ export class Renderer {
     this.qualityName = q;
     const Q = this.quality = QUALITY[q] || QUALITY.high;
     const r = this.renderer;
-    r.setPixelRatio(Math.min(devicePixelRatio || 1, Q.pixelRatio)); // never pay for a retina screen twice over
+    r.setPixelRatio(Math.min(devicePixelRatio || 1, Q.pixelRatio) * (this.renderScale || 1)); // never pay for a retina screen twice over
     this.sun.shadow.mapSize.set(Q.shadows, Q.shadows);
     // a smaller shadow box draws fewer casters twice (and keeps its texels sharp)
     const sc = this.sun.shadow.camera, ext = Q.shadowExtent || 38;

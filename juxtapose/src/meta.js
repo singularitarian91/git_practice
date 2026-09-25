@@ -21,6 +21,16 @@ export const SETTING_DEFAULTS = {
   hudScale: 'auto',   // 'auto' or a number
   subSize: 'medium',  // narrator subtitles: small | medium | large
   tips: true,         // the Night-Light's tips and asides (story lines always play)
+  difficulty: 'dream', // gentle | dream | nightmare
+  renderScale: 1,     // multiplies the quality's resolution
+  drawDistance: 1,    // how far small props keep drawing
+  padSens: 1,         // right-stick look speed
+};
+// what each difficulty does: damage you take, anxieties' health, how fast lucidity rises
+export const DIFFICULTY = {
+  gentle: { dmg: 0.55, hp: 0.75, lucid: 0.8 },
+  dream: { dmg: 1, hp: 1, lucid: 1 },
+  nightmare: { dmg: 1.45, hp: 1.35, lucid: 1.12 },
 };
 
 // Keepsakes: memories equipped like charms, in a limited number of notches

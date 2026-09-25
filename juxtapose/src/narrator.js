@@ -42,6 +42,20 @@ export const LINES = {
   idleHint: ["If you're stuck: take something, give it to something else, and see what happens. That's the whole philosophy.",
     "Walls can be walked on, you know. Briefly. Run alongside one and jump."],
   whim: ["A whim. Take one. Dreams are made of these."],
+  puzzleDrift: ["It's under the sand. Of course it is. She buried everything in that shop. Something that softens, perhaps?"],
+  puzzleBoat: ["Out on the rock. You can't swim, you're made of wood and good intentions. That boat, though. Boats want to float. Help it."],
+  puzzleTrain: ["The 6:40. It has never once stopped here. It doesn't feel the weight of anything. Maybe it should."],
+  puzzleBell: ["That bell hasn't rung since the war. Too heavy, they said. Everything's too heavy until it isn't."],
+  puzzleEgg: ["The sun comes in low here, and never goes anywhere useful. An egg can't catch the light. A mirror could."],
+  puzzleSeal: ["His letters, sealed with his ring. She never broke one. Wax is only stubborn until it's warm."],
+  puzzleClock: ["Paris time. It stopped when she stopped winding it. The weight's just painted on, you know. Make it mean it."],
+  puzzleVitrine: ["Under glass, like something in a museum. And look: an anvil, being two things at once. Heavy, and not falling. Take away the part that's lying."],
+  meet_hush: ["That one's a Hush. It's the quiet after an argument. Nothing works near it. Not the gun, not me. Mostly me."],
+  meet_mirror: ["A Mirror. She stopped looking in them after he left. It gives back whatever you give. So give it something that hurts."],
+  meet_wardrobe: ["The wardrobe. His coats are still in it. It won't open for bullets. It'll open when it's too tired to hold shut."],
+  scrapNear: ["Wait. Up there. That glint. That's a piece of the painting.", "Another scrap, close by. I can feel it. It hums.", "There. Follow the motes. I'm pointing, I just don't have hands."],
+  dark: ["Dark in here. Stay close, I'll light it.", "Indoors. She never liked the house after dark. I was always on the landing."],
+  puzzleSolved: ["There. The dream has its own logic. You just speak it better than she does.", "See? Wrong in exactly the right way.", "She'd have laughed at that. She used to laugh."],
 };
 
 const RULES = {
@@ -69,6 +83,9 @@ export class Narrator {
     this.vel = new THREE.Vector3();
     this.light = null;
     this.muted = false;
+    this.pointed = new Set(); // scraps it has already shown you
+    this.point = null;        // { to, t }: motes running from the jar to something worth finding
+    this.lookT = 0;
   }
 
   // ---------------------------------------------------------------- body
@@ -132,6 +149,31 @@ export class Narrator {
     this.say(key);
   }
 
+  // it notices scraps of the painting nearby, says so once, and sends motes their way
+  seek(dt, p) {
+    const game = this.game;
+    this.lookT -= dt;
+    if (this.lookT <= 0) {
+      this.lookT = 1;
+      let best = null, bd = 26;
+      for (const k of game.pickups) {
+        if (!k.scrap || k.dead || this.pointed.has(k.scrap.id)) continue;
+        const d = k.obj.position.distanceTo(p.pos);
+        if (d < bd) { bd = d; best = k; }
+      }
+      if (best && game.state === 'playing') { this.pointed.add(best.scrap.id); this.point = { to: best.obj.position, t: 6 }; this.say('scrapNear'); }
+    }
+    if (this.point) {
+      this.point.t -= dt;
+      if (this.point.t <= 0) { this.point = null; return; }
+      if (Math.random() < dt * 14) {
+        const from = this.obj.position, d = this.point.to.clone().sub(from), L = d.length();
+        d.normalize();
+        game.vfx.add.spawn({ x: from.x, y: from.y, z: from.z, vx: d.x * Math.min(9, L), vy: d.y * Math.min(9, L), vz: d.z * Math.min(9, L), color: new THREE.Color('#ffd27a').multiplyScalar(4), alpha: 1, alpha1: 0, size: 0.09, size1: 0.03, life: Math.min(1.2, L / 9) });
+      }
+    }
+  }
+
   // one-shot line by key (no rule table needed)
   event2(key) { if (this.done.has('k:' + key)) return; this.done.add('k:' + key); this.say(key); }
 
@@ -178,11 +220,19 @@ export class Narrator {
       if (this.flame) this.flame.scale.setScalar(1 + Math.sin(game.time * 23) * 0.08 + (talking ? Math.sin(game.time * 40) * 0.25 : 0));
       // the light sits outside the jar, between it and the Figment: it warms the figure
       // without searing the glass it lives in
+      // indoors it turns itself up: the lamp on the landing, all over again
+      const inside = !!game.level?.town?.inside(p.pos.x, p.pos.z, -0.6);
+      if (inside && !this.wasInside) { this.darkT = (this.darkT || 0) + 1; if (this.darkT === 1 || Math.random() < 0.15) this.say('dark'); }
+      this.wasInside = inside;
+      this.glow = (this.glow || 0) + ((inside ? 1 : 0) - (this.glow || 0)) * Math.min(1, dt * 2);
       if (this.light) {
         this.light.position.copy(this.obj.position).lerp(p.renderPos, 0.35);
         this.light.position.y = this.obj.position.y - 0.3;
-        this.light.userData.base = talking ? 3.2 : 2.2;
+        this.light.userData.base = (talking ? 3.2 : 2.2) + this.glow * 3.5;
+        this.light.distance = 5 + this.glow * 7;
       }
+      if (this.flame) this.flame.scale.multiplyScalar(1 + this.glow * 0.4);
+      this.seek(dt, p);
       // fade out if the camera swings right up to it
       const camD = this.obj.position.distanceTo(game.render.camera.position);
       this.obj.visible = camD > 0.7;

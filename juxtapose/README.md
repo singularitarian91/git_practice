@@ -42,6 +42,19 @@ Choose **Lucid sandbox** on the title screen to test mechanics freely. It has ev
 | `R` | Reload (break-open revolver) |
 | `V` · `H` · `Esc` | Swap shoulder · help · pause |
 | `P` | **Photo mode**: freeze the dream and fly a free camera. Adjust exposure, vignette, grain and FOV, then press `C` to save a PNG. |
+| `M` (hold) | **The map**: buildings, the ink veils (closed or parted), the memories (the next one glowing, taken ones ticked), the way out and you. It shows no enemies. |
+
+**Controller.** Any standard gamepad works; the menus follow the d-pad and A/B too.
+
+| | |
+|---|---|
+| Sticks | Move and look. Click the left stick to slide, the right stick to swap shoulder. |
+| A · B | Jump · dash |
+| RT · LT | Fire · deflect and guard |
+| LB · RB | Take · give |
+| X · Y (hold) | Blade · focus |
+| D-pad | Left and right choose a property. Up gives it to yourself; down loads your rounds. |
+| View (hold) · Start | Map · pause |
 
 **Parkour.** You can wall-run along walls, wall-jump off them, climb a wall by jumping straight at it, mantle up ledges up to 2.5 m, and speed-vault over low cover. Other moves:
 
@@ -53,7 +66,12 @@ Choose **Lucid sandbox** on the title screen to test mechanics freely. It has ev
 - Blast-jump while you're bursting.
 - Step through a pair of **framed** portals with your speed intact.
 
-**Settings** cover field of view, camera shake, dream warp (motion comfort for the lucidity effects), film grain, reduce flashing, and HUD scale. They also cover subtitle size, Night-Light tips (the story lines always play), toggle or hold guard, auto-reload, and separate master, music and effects volumes. Everything applies live and has a reset.
+**Settings** cover:
+- **Picture:** graphics quality, resolution scale and draw distance (for weaker machines), field of view, camera shake, dream warp (motion comfort for the lucidity effects), film grain and reduce flashing.
+- **Controls:** mouse and controller look speed, toggle or hold guard, auto-reload, and **difficulty**. *Gentle dream* has them hit softer and fall faster; *Nightmare* is the opposite.
+- **Interface and sound:** HUD scale, subtitle size, Night-Light tips (the story lines always play), and separate master, music and effects volumes.
+
+Everything applies live and has a reset. **Continue the night** appears on the title screen when you leave a run mid-way. It resumes at the start of the layer you reached, with what you carried into it.
 
 **In-fight feedback:**
 - Hit markers distinguish hits, heavy hits, kills, posture breaks and deflects.
@@ -95,26 +113,55 @@ Properties interact through shared channels instead of hand-written pairs, so co
 - **Fuse:** a sleeping bomb is a mine, and burning shortens the fuse.
 - **Explosion payloads:** a bursting, floating pomegranate makes everything in the blast float.
 
-**A path through the dream.** The Soft Desert leads you rather than leaving you to wander.
+**A path through the dream.** Both layers lead you rather than leaving you to wander.
 - **The way in:** a steep drift ridge closes the village off from the north dunes, so you come in through the gate.
 - **The order:** the market loggia, then the clock workshop, then the boathouse, then the station. The chapel is off to the side, for the curious.
 - **Ink veils** hold you in one part of the village at a time. Each memory you take back unravels the next stretch.
 - **A wisp** of light runs ahead to the next memory.
+- **Golconda Piazza** is cut into four quarters by ink running out from a sleeping statue, one memory to a quarter. Each memory you free parts the next line. The way out is the 6:40 itself: once every memory is free it comes round the hill and stops for you.
+
+**Puzzles.** Some memories are held by more than anxieties, and the gun is the way in. The objective line and the map say what is wrong. Each puzzle has the property it needs close by, so a first night can solve it.
+
+| Memory | What holds it | The answer |
+|---|---|---|
+| The unfinished clock | Buried under a sand drift at the workshop door | *Melting* softens the drift until it slumps away |
+| The canary | Caught on a rock out past where you can wade | *Floating* lifts a beached boat, which drifts out to moor as a stepping stone |
+| The hat on the rack | The 6:40 never stops | Make the train *heavy*: it brakes, screaming, at the platform, and the hat arrives |
+| The Sunday candle | The chapel bell is too heavy to ring | Give the bell *floating* and it swings and rings |
+| The window crowd | A shaft of low sun falls on a Dalí egg | Make the egg *reflecting* and the light turns onto the memory |
+| The second drawer | Sealed in red wax | Heat: *burning* or *melting* |
+| Paris time | A stopped clock whose weight is only painted on | Make the weight *heavy* and the clock runs, and strikes |
+| The unfinished portrait | Under glass, with an anvil hovering above it (heavy and floating at once) | *Take* the anvil's floating |
 
 **Cutscenes.** They are letterboxed, captioned and skippable (Space, Escape or a click).
 - **The prologue** plays on your first night and can be replayed from the title screen. It tells who is dreaming, who you are, what your gun does, and why the night ends when she wakes.
 - **On arrival in a layer,** the dream shows you where you are.
-- **Taking back a memory** shows it: the camera circles it while a translucent Figment acts it out. Then the next veils unravel, the next memory's column ignites, and at the end the door opens in the shallows.
+- **Taking back a memory** shows it: the camera circles it while a translucent Figment acts it out. Then the next veils unravel, the next memory's column ignites, and at the end the door opens in the shallows. The Night-Light has the last word on each one, close up.
+- **Solving a puzzle** holds on what gave way.
+- **Meeting a new anxiety** stops the dream once, the first time, to introduce it.
+- **The Unwatched** gets an entrance: the ring of mirrors, then the eye, shut, which opens on you.
+- **The ending** is staged in the bedroom. Odile lifts the sheet, and the painting finishes itself as she remembers the face. The apple the Figment wore falls to the floorboards, and she lets the candle go out.
 
 **Memories and Clarity.** The anxieties don't come in waves. They guard *knots*: memories the dream has tangled up, each marked by a violet column of dusk and a waypoint.
-- **In the desert:** the unfinished clock at the workshop, the Saturday pomegranate at the loggia, the Sunday candle at the chapel, the hat on the rack at the station, and the finch at the boathouse.
+- **In the desert:** the Saturday pomegranate at the loggia, the unfinished clock at the workshop, the canary at the boathouse, the hat on the rack at the station, and the Sunday candle at the chapel.
 - **In the piazza:** four memories of the city he left for.
 - **Guards:** they idle half-asleep around the knot until you come close, or until one of them is hit. The more lucid the dream, the more come to its defence.
 - **Patrols:** pairs of anxieties walk beats through the streets between the memories, and turn on you when you cross their path. A lost patrol is replaced slowly, from out of sight.
 - **Surges:** waves come only when something provokes them. Taking back the memory that opens the door, picking up a lore scrap, or pushing Lucidity past 50, 75 or 90 each makes the dream send them after you, with a warning first.
 - **Freeing a memory:** silence its guards and walk into it. You get the memory's story back, a whim, and Clarity. Free three and the door opens.
 
-**Clarity** is kept between nights. Every anxiety silenced adds to it, deathblows more, and freed memories and the boss most of all. Each rank is a small permanent perk, from *Stirring* (+10 Figment) to *Self-actualized* (deathblows mend more).
+**The anxieties.** Most are Sleepwalkers (in the city, Golconda men in bowler hats). Three others guard the later memories:
+- **The Hush** wears a nightcap. Near it the gun goes quiet: nothing given, nothing taken. Every few seconds it breathes out, and the properties you gave to things around it fall asleep, along with any you gave yourself. Puzzles you've solved stay solved.
+- **The Mirror** is chrome. Your rounds glance off it, and its orbs carry the last property you gave, back at you. Take its shine, or use the blade.
+- **The Wardrobe** is large, walnut and slow. It takes no harm until it is staggered, so break its posture with the blade and deflects, then finish it.
+
+**Clarity** is kept between nights. Every anxiety silenced adds to it, deathblows more, and puzzles, freed memories and the boss most of all. Each rank earns a point to spend when you wake, on a tree of four branches bought from the top down:
+- **The blade:** damage, posture, deflect window, deathblow healing.
+- **The gun:** carried charges, fire rate, extra charges from taking.
+- **The mind:** slower Lucidity, faster focus, a bigger reverie vessel.
+- **The legs:** more Figment, faster dash recovery, an extra air jump.
+
+**The Night-Light** is a companion, not only a narrator. It turns itself up indoors to light the rooms, notices scraps of the painting nearby and sends motes toward them, has something to say about every puzzle and every new anxiety, and gets its own moments in the cutscenes.
 
 **Lucidity** rises with absurdity: stacking properties, new pairings, or giving things to yourself. Higher Lucidity makes every property stronger, warps the picture (FOV dolly zoom, chromatic smear, swirling sky, tempo drag in the score), and brings more anxieties. At 100 the dreamer wakes and the run ends.
 

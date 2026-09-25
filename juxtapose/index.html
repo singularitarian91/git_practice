@@ -161,11 +161,13 @@
       <h1 class="display title-word">Juxtapose</h1>
       <p class="tagline">Take a property from one thing. Give it to another. Fight your way down before the dreamer wakes.</p>
       <nav class="menu">
+        <button id="btn-continue" class="primary" hidden>Continue the night</button>
         <button id="btn-run" class="primary">Begin the night</button>
         <button id="btn-prologue">Prologue</button>
         <button id="btn-sandbox">Lucid sandbox</button>
         <button id="btn-journal">Journal</button>
         <button id="btn-keepsakes">Keepsakes</button>
+        <button id="btn-clarity">Clarity</button>
         <button id="btn-controls">How to play</button>
         <button id="btn-settings">Settings</button>
       </nav>
@@ -197,6 +199,8 @@
         <fieldset>
           <legend>Picture</legend>
           <div class="set-row"><label for="set-quality">Graphics quality</label><select id="set-quality" data-k="quality"><option value="high">High: soft shadows, AO, MSAA</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
+          <div class="set-row"><label for="set-rscale" title="Multiplies the quality's resolution. Lower is faster.">Resolution</label><input id="set-rscale" data-k="renderScale" data-fmt="pct" type="range" min="0.5" max="1.25" step="0.05"><output class="mono" for="set-rscale"></output></div>
+          <div class="set-row"><label for="set-draw" title="How far small props keep drawing">Draw distance</label><input id="set-draw" data-k="drawDistance" data-fmt="pct" type="range" min="0.5" max="1.6" step="0.05"><output class="mono" for="set-draw"></output></div>
           <div class="set-row"><label for="set-fov">Field of view</label><input id="set-fov" data-k="fov" data-fmt="deg" type="range" min="60" max="95" step="1"><output class="mono" for="set-fov"></output></div>
           <div class="set-row"><label for="set-shake">Camera shake</label><input id="set-shake" data-k="shake" data-fmt="pct" type="range" min="0" max="1.5" step="0.05"><output class="mono" for="set-shake"></output></div>
           <div class="set-row"><label for="set-comfort" title="The lucid warp, colour smear, sway and breathing zoom">Dream warp</label><input id="set-comfort" data-k="comfort" data-fmt="pct" type="range" min="0" max="1" step="0.05"><output class="mono" for="set-comfort"></output></div>
@@ -213,6 +217,8 @@
           <legend>Controls</legend>
           <div class="set-row"><label for="set-sens">Mouse sensitivity</label><input id="set-sens" data-k="sens" data-fmt="x" type="range" min="0.4" max="2.5" step="0.05"><output class="mono" for="set-sens"></output></div>
           <div class="set-row"><label for="set-guard">Guard</label><select id="set-guard" data-k="guardToggle" data-bool><option value="0">Hold right mouse</option><option value="1">Tap to raise, tap to lower</option></select></div>
+          <div class="set-row"><label for="set-pad">Controller look speed</label><input id="set-pad" data-k="padSens" data-fmt="x" type="range" min="0.4" max="2.5" step="0.05"><output class="mono" for="set-pad"></output></div>
+          <div class="set-row"><label for="set-diff">Difficulty</label><select id="set-diff" data-k="difficulty"><option value="gentle">Gentle dream: they hit softer, fall faster</option><option value="dream">Dream</option><option value="nightmare">Nightmare</option></select></div>
           <label class="check set-check"><input id="set-invert" data-k="invert" type="checkbox"> Invert mouse Y</label>
           <label class="check set-check"><input id="set-reload" data-k="autoReload" type="checkbox"> Reload when the cylinder runs dry</label>
         </fieldset>
@@ -263,11 +269,24 @@
             <dt>R</dt><dd>Reload</dd>
             <dt>V · H · Esc</dt><dd>Swap shoulder · this page · pause</dd>
             <dt>P</dt><dd>Photo mode: the dream holds still for a picture</dd>
+            <dt>M (hold)</dt><dd>The map: where the memories are, and where the ink still bars the way</dd>
+          </dl>
+          <h3>Controller</h3>
+          <dl class="keys">
+            <dt>Sticks</dt><dd>Move · look (click the left to slide, the right to swap shoulder)</dd>
+            <dt>A · B</dt><dd>Jump · dash</dd>
+            <dt>RT · LT</dt><dd>Fire · deflect and guard</dd>
+            <dt>LB · RB</dt><dd>Take · give</dd>
+            <dt>X · Y (hold)</dt><dd>Blade · focus</dd>
+            <dt>D-pad</dt><dd>Left and right choose a property · up gives it to yourself · down loads your rounds</dd>
+            <dt>View (hold) · Start</dt><dd>Map · pause</dd>
           </dl>
           <h3>Lucidity</h3>
           <p>Absurd combos, such as stacking properties, new pairings, or giving things to yourself, raise Lucidity. That makes every property stronger and the dream stranger. At 100 the dreamer wakes and your run ends. Focusing calms it down.</p>
           <h3>Between nights</h3>
-          <p>Waking leaves <b>memories</b>, which become <b>keepsakes</b> you equip in notches. Scraps of the painting are hidden in every layer. Between layers, choose a <b>whim</b>.</p>
+          <p>Waking leaves <b>memories</b>, which become <b>keepsakes</b> you equip in notches. Scraps of the painting are hidden in every layer. Between layers, choose a <b>whim</b>. <b>Clarity</b> ranks earn points to spend on who the Figment becomes. Leave mid-night and <b>Continue</b> picks up at the layer you reached.</p>
+          <h3>Puzzles</h3>
+          <p>Some memories are held by more than anxieties: buried, stranded, stopped, sealed. The objective says what is wrong. The answer is always a property, given or taken.</p>
         </div>
       </div>
       <div id="prop-table"></div>
@@ -317,6 +336,18 @@
     </div>
   </section>
 
+  <div id="map" hidden aria-hidden="true"><div class="map-frame"><canvas id="map-canvas" width="560" height="560"></canvas><p id="map-note"></p></div></div>
+
+  <section id="clarity" class="screen modal" hidden>
+    <div class="panel wide">
+      <h2 class="display">Clarity</h2>
+      <div class="keep-head"><p class="fine" id="clarity-rank"></p><div class="notch-meter"><span class="nm-label">To spend</span><span id="clarity-points"></span></div></div>
+      <div id="clarity-tree"></div>
+      <p class="fine">Every anxiety silenced, puzzle solved and memory freed adds to Clarity. Each rank is a point. What you choose here is kept, night after night.</p>
+      <nav class="menu"><button class="back primary">Done</button></nav>
+    </div>
+  </section>
+
   <section id="whims" class="screen modal" hidden>
     <div class="whims-wrap">
       <p class="eyebrow">between layers</p>
@@ -334,7 +365,7 @@
       <div id="wake-lines"></div>
       <div id="wake-memory" hidden><div class="eyebrow">A memory surfaces</div><div class="wm-title display"></div><div class="wm-text"></div><div class="wm-unlock"></div></div>
       <div id="wake-stats" class="mono"></div>
-      <nav class="menu row"><button id="btn-sleep" class="primary">Fall asleep again</button><button id="btn-wake-keepsakes">Keepsakes</button><button id="btn-wake-journal">Journal</button><button id="btn-wake-title">Title</button></nav>
+      <nav class="menu row"><button id="btn-sleep" class="primary">Fall asleep again</button><button id="btn-wake-clarity">Clarity</button><button id="btn-wake-keepsakes">Keepsakes</button><button id="btn-wake-journal">Journal</button><button id="btn-wake-title">Title</button></nav>
     </div>
   </section>
 

@@ -8,6 +8,7 @@ import { FigureAnimator } from './animator.js';
 import { giveTo, takeFrom, takeCandidate, lucidityForGive } from './properties.js';
 import { rnd } from './vfx.js';
 import { addPosture, canDeathblow, slashArc } from './combat.js';
+import { hushedAt } from './enemies.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
@@ -831,6 +832,7 @@ export class Player {
   hurt(amount, opts = {}) {
     if (this.dead || this.iframes > 0 || this.self.has('hollow') || this.game.godMode) return;
     if (this.state === 'mantle' || this.state === 'vault') amount *= 0.5;
+    if (opts.type !== 'fall') amount *= this.game.diff?.dmg ?? 1; // the difficulty setting
     if (this.state === 'deathblow') return;
     if (this.focusing) this.stopFocus();
     if (this.armor > 0) { const a = Math.min(this.armor, amount); this.armor -= a; amount -= a; this.game.vfx.impact(this.renderPos.clone().setY(this.renderPos.y + 1.2), new THREE.Vector3(0, 1, 0), '#fff4d6', 0.8); }
@@ -1035,8 +1037,19 @@ export class Player {
   }
 
   // RMB: take a property from what you aim at
+  // near a Hush the gun goes quiet: nothing given, nothing taken
+  hushed(at) {
+    const h = hushedAt(this.game, this.pos) || (at && hushedAt(this.game, at));
+    if (!h) return false;
+    this.game.ui.toast('The Hush smothers it. Get away from it, or put it to sleep for good.', 'warn');
+    this.game.audio.sfx('fireEmpty');
+    this.game.vfx.propertyBurst(this.pos.clone().setY(this.pos.y + 1.4), 'sleeping', 0.4);
+    return true;
+  }
+
   take() {
     const game = this.game;
+    if (this.hushed(this.aimPoint)) return;
     const target = this.aimEntity;
     const from = this.muzzle('Take');
     this.aimHold = 1.2;
@@ -1069,6 +1082,7 @@ export class Player {
 
   give() {
     const game = this.game;
+    if (this.hushed(this.aimPoint)) return;
     const p = this.selectedProp;
     this.aimHold = 1.2;
     if (this.chargesOf(p) <= 0) { game.ui.toast(`No ${PROP_INFO[p].label.toLowerCase()} left. Take it from a ${PROP_INFO[p].source.toLowerCase()}.`); game.audio.sfx('fireEmpty'); return; }
@@ -1101,6 +1115,7 @@ export class Player {
 
   giveSelf() {
     const game = this.game;
+    if (this.hushed()) return;
     const p = this.selectedProp;
     if (p === 'framed' && game.portals) {
       // framed on yourself: hang a return frame; use it again to step back through
@@ -1132,6 +1147,7 @@ export class Player {
 
   giveRounds() {
     const game = this.game;
+    if (this.hushed()) return;
     const p = this.selectedProp;
     if (this.chargesOf(p) <= 0) { game.ui.toast(`No ${PROP_INFO[p].label.toLowerCase()} to load.`); game.audio.sfx('fireEmpty'); return; }
     this.spend(p);

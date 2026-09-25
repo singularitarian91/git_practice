@@ -28,7 +28,7 @@ export class Lucidity {
   reset() { this.value = 0; this.display = 0; this.idle = 0; this.seenPairs.clear(); this.total = 0; this.warned = false; }
   gain(v, reason) {
     if (v <= 0) return;
-    v *= this.game.run?.mods.lucidGain ?? 1;
+    v *= (this.game.run?.mods.lucidGain ?? 1) * (this.game.diff?.lucid ?? 1);
     this.value = Math.min(this.cap, this.value + v);
     this.total += v;
     this.idle = 0;
@@ -284,6 +284,7 @@ export function lucidityForGive(game, target, prop) {
 export function giveTo(game, target, prop) {
   if (!target || target.dead) return false;
   if (target.kind === 'boss' && prop === 'multiplying') { game.ui.toast('It refuses to be more than one.'); return false; }
+  if (target.refuses?.(prop)) { game.ui.toast(`${target.displayName || target.name} will not take ${prop}.`); return false; }
   if (target.props.has(prop) && !target.innate.has(prop)) {
     // re-giving restarts the effect (e.g. a fresh fuse) but earns little
     if (prop === 'bursting') target.fuse = target.fuseMax;

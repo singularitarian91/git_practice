@@ -4,22 +4,40 @@
 import * as THREE from 'three';
 import { Entity } from './entities.js';
 import { RAPIER } from './physics.js';
-import { G, ALL, TUNE } from './config.js';
+import { G, ALL, TUNE, PROP_INFO } from './config.js';
 import { rnd } from './vfx.js';
 import { initPosture, updatePosture, canDeathblow } from './combat.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
+// the anxieties that are not plain sleepwalkers: how they look and what they are
+export const KINDS = {
+  hush: { title: 'The Hush', line: 'It puts things to sleep. Near it, your gun forgets what it holds.', tint: '#b9a8e6', hp: 0.9, speed: 0.8, fire: 0.6 },
+  mirror: { title: 'The Mirror', line: 'Your rounds come back off it. It throws your last trick back at you. Take its shine, or use the blade.', hp: 1, speed: 1.05, fire: 1.1 },
+  wardrobe: { title: 'The Wardrobe', line: 'Nothing gets in until its doors give. Stagger it with the blade, then finish it.', tint: '#4a3222', hp: 2.4, speed: 0.72, fire: 0.5, scale: 1.5, posture: 95 },
+};
 const PARTS = ['SW_Hips', 'SW_Torso', 'SW_Head', 'SW_ArmL', 'SW_ArmR', 'SW_ForearmL', 'SW_ForearmR', 'SW_LegL', 'SW_LegR', 'SW_ShinL', 'SW_ShinR', 'SW_Drawer', 'SW_Core'];
+
+// the radius a hush keeps quiet (the gun fails inside it)
+export const Hush = { R: 7.5 };
+export function hushedAt(game, pos) {
+  for (const e of game.entities) if (e.variant === 'hush' && !e.dead && !e.props.has('sleeping') && e.obj.position.distanceTo(pos) < Hush.R) return e;
+  return null;
+}
 
 export class Sleepwalker extends Entity {
   constructor(game, pos, opts = {}) {
     const obj = game.assets.clone('Sleepwalker');
     obj.position.copy(pos);
     game.scene.add(obj);
-    super(game, { kind: 'enemy', name: 'Sleepwalker', obj, hp: opts.hp ?? 60, group: G.ENEMY, density: 1, linDamp: 0.3, flammable: true });
+    const K = KINDS[opts.variant];
+    const S = K?.scale || 1;
+    if (S !== 1) obj.scale.setScalar(S);
+    super(game, { kind: 'enemy', name: 'Sleepwalker', obj, hp: (opts.hp ?? 60) * (K?.hp || 1), group: G.ENEMY, density: 1, linDamp: 0.3, flammable: true });
     this.variant = opts.variant || 'desert';
+    this.K = K || null;
+    this.size = S;
     this.dustColor = '#f1ece2';
     this.meltColor = '#efe7da';
     this.p = {};
@@ -43,6 +61,7 @@ export class Sleepwalker extends Entity {
         head.add(hat);
       }
     }
+    if (K) this.dress(K);
     this.coreMats = [];
     obj.traverse((m) => {
       if (!m.isMesh) return;
@@ -52,11 +71,11 @@ export class Sleepwalker extends Entity {
     const body = game.physics.dynamic(pos, null, { linDamp: 0.3, angDamp: 1, gravityScale: opts.gravity ?? 1, ccd: true });
     body.lockRotations(true, true);
     // Min combine: its zero friction wins, or sand and stone grip its feet
-    const col = game.physics.collider(RAPIER.ColliderDesc.capsule(0.55, 0.34).setTranslation(0, 0.95, 0).setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min), body, G.ENEMY, ALL, { friction: 0.0, restitution: 0.0, density: 1 });
+    const col = game.physics.collider(RAPIER.ColliderDesc.capsule(0.55 * S, 0.34 * S).setTranslation(0, 0.95 * S, 0).setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min), body, G.ENEMY, ALL, { friction: 0.0, restitution: 0.0, density: 1 });
     this.attachBody(body, [col]);
     this.localCenter.set(0, 0.95, 0);
-    this.extent.set(0.35, 0.95, 0.35);
-    this._r = 0.45;
+    this.extent.set(0.35 * S, 0.95 * S, 0.35 * S);
+    this._r = 0.45 * S;
     this.baseGravity = opts.gravity ?? 1;
     this.falling = opts.falling || false;
     this.yaw = Math.random() * Math.PI * 2;
@@ -72,15 +91,57 @@ export class Sleepwalker extends Entity {
     this.patrol = opts.patrol || null; // { route, i }: a beat through the streets
     this.losT = 0; this.canSee = false;
     this.meleeT = 0;
-    this.speedMul = opts.speed || 1;
-    this.fireRate = opts.fireRate || 1;
+    this.speedMul = (opts.speed || 1) * (K?.speed || 1);
+    this.fireRate = (opts.fireRate || 1) * (K?.fire || 1);
+    this.hushT = rnd(1, 3);
+    if (this.variant === 'mirror') this.addProp('reflecting', { innate: true });
     this.t = 0;
     this.maxVy = 0;
-    initPosture(this, this.variant === 'golconda' ? 80 : 70);
+    initPosture(this, K?.posture || (this.variant === 'golconda' ? 80 : 70));
     this.lungeCool = rnd(2.5, 5);
     this.lunge = null;
     this.recoilT = 0;
   }
+
+  // the new anxieties' looks: lavender porcelain, chrome, dark walnut
+  dress(K) {
+    const game = this.game;
+    this.obj.traverse((m) => {
+      if (!m.isMesh) return;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      for (const mm of mats) {
+        if (/EnemyCore/.test(mm.name)) { if (this.variant === 'hush') mm.emissive?.set('#a58bff'); if (this.variant === 'wardrobe') mm.emissive?.set('#ffb347'); continue; }
+        if (this.variant === 'mirror') { mm.color.set('#dfe8f0'); mm.metalness = 1; mm.roughness = 0.05; mm.envMapIntensity = 1.8; }
+        else if (K.tint) { mm.color.set(K.tint); if (this.variant === 'wardrobe') { mm.roughness = 0.7; } }
+      }
+    });
+    // a wardrobe wears its doors: two panels on the chest, with brass knobs
+    if (this.variant === 'wardrobe') {
+      const torso = this.p?.SW_Torso?.o || this.obj.getObjectByName('SW_Torso');
+      if (torso) {
+        const wood = new THREE.MeshStandardMaterial({ color: '#5a3b24', roughness: 0.65 });
+        const brass = new THREE.MeshStandardMaterial({ color: '#c9a04a', metalness: 0.9, roughness: 0.3 });
+        for (const x of [-0.13, 0.13]) {
+          const door = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.55, 0.04), wood); door.position.set(x, 0.1, 0.2); door.castShadow = true;
+          const knob = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), brass); knob.position.set(x - Math.sign(x) * 0.09, 0.1, 0.23);
+          torso.add(door, knob);
+        }
+      }
+    }
+    // a hush wears a nightcap
+    if (this.variant === 'hush') {
+      const head = this.obj.getObjectByName('SW_Head');
+      if (head) {
+        const cap = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.42, 16).translate(0, 0.21, 0), new THREE.MeshStandardMaterial({ color: '#6a5acd', roughness: 0.9 }));
+        cap.rotation.z = -0.5; cap.position.set(0, 0.2, 0); head.add(cap);
+        const bob = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshStandardMaterial({ color: '#f5f0ff', roughness: 1 }));
+        bob.position.set(0.2, 0.52, 0); head.add(bob);
+      }
+    }
+  }
+
+  // a wardrobe only feels anything once its doors give (staggered)
+  get armoured() { return this.variant === 'wardrobe' && !(this.staggered > 0); }
 
   // a deflected lunge throws it back on its heels
   recoil() {
@@ -100,6 +161,16 @@ export class Sleepwalker extends Entity {
   damage(amount, opts = {}) {
     if (this.dead) return;
     if (this.props.has('hollow')) return;
+    if (this.armoured && !['deathblow', 'void', 'melt', 'crush', 'fall', 'sky'].includes(opts.type)) {
+      if (!opts.silent && this.game.time - (this._clonk || 0) > 0.15) {
+        this._clonk = this.game.time;
+        this.game.audio.sfx('guardHit', { position: this.center(), gain: 0.7, pitch: -5 });
+        this.game.vfx.impact(opts.point || this.center(), new THREE.Vector3(0, 1, 0), '#c9a04a', 0.6);
+        this.postureShow = 2;
+        if (this.dormant && this.guard) this.guard.wake();
+      }
+      return;
+    }
     if (this.props.has('sleeping')) {
       amount *= 2;
       if (amount > 28 && opts.type !== 'fire' && opts.type !== 'melt') this.removeProp('sleeping');
@@ -211,6 +282,7 @@ export class Sleepwalker extends Entity {
       // a patrol notices you at street distance, then keeps after you until you're well away
       const sight = this.patrol && !this.engaged ? 24 : this.patrol ? 40 : 48;
       this.canSee = !hit && L < sight && !pl.dead && !pl.self.has('sleeping') && !pl.self.has('hollow');
+      if (this.canSee && this.K && !this.dormant && L < 22) game.introduceEnemy?.(this);
       if (this.canSee) this.engaged = true; else if (L > 40) this.engaged = false;
       if (pl.decoys && pl.decoys.length) this.decoy = pl.decoys[Math.floor(Math.random() * pl.decoys.length)];
       else this.decoy = null;
@@ -223,6 +295,7 @@ export class Sleepwalker extends Entity {
     const toT = target.clone().sub(pos); toT.y = 0;
     const dT = toT.length();
     updatePosture(this, dt);
+    if (this.variant === 'hush' && !asleep && !this.dormant) this.hushPulse(dt);
     this.recoilT = Math.max(0, this.recoilT - dt);
     const staggered = this.staggered > 0;
     const controllable = !asleep && !floating && !this.falling && !hollow && !staggered && this.recoilT <= 0;
@@ -283,7 +356,7 @@ export class Sleepwalker extends Entity {
     // ---- lunge (melee): a white glint can be deflected, a red 危 must be dodged
     this.lungeCool -= dt;
     if (controllable && this.canSee && pl && !pl.dead && !this.lunge && this.windup <= 0 && this.lungeCool <= 0 && dT < 5.5 && this.decoy == null) {
-      const perilous = Math.random() < (this.variant === 'golconda' ? 0.35 : 0.25);
+      const perilous = Math.random() < (this.variant === 'wardrobe' ? 0.6 : this.variant === 'golconda' ? 0.35 : 0.25);
       this.lunge = { phase: 'wind', t: 0, perilous, hit: false, dir: toT.clone().normalize() };
       if (perilous) game.audio.sfx('perilous', { position: pos });
       else game.vfx.add.spawn({ x: pos.x, y: pos.y + 1.4, z: pos.z, color: new THREE.Color('#ffffff').multiplyScalar(8), alpha: 1, alpha1: 0, size: 0.7, size1: 0.1, life: 0.3, rot: 0.78 });
@@ -324,7 +397,9 @@ export class Sleepwalker extends Entity {
         const aim = target.clone().setY(target.y + 1.0);
         if (pl && this.decoy == null) aim.addScaledVector(pl.vel.clone().setY(0), dT / 16 * 0.6);
         const vel = aim.sub(origin).normalize().multiplyScalar(13);
-        game.projectiles.enemyOrb(origin, vel, { damage: 8, homing: 0.35, shooter: this, color: '#7ff7ff' });
+        // a mirror throws your last trick back at you
+        const echo = this.variant === 'mirror' && game.lastGiven && game.lastGiven !== 'framed' ? game.lastGiven : null;
+        game.projectiles.enemyOrb(origin, vel, { damage: echo ? 9 : 8, homing: 0.35, shooter: this, color: echo ? PROP_INFO[echo].color : this.variant === 'hush' ? '#a58bff' : '#7ff7ff', props: echo ? [echo] : [], size: this.variant === 'wardrobe' ? 1.5 : 1 });
         game.audio.sfx('enemyShoot', { position: origin });
       }
     }
@@ -377,6 +452,28 @@ export class Sleepwalker extends Entity {
     const glory = canDeathblow(this);
     const glow = 1 + this.flash * 5 + open * 4 + (P.has('burning') ? 1 : 0) + (glory ? 3 + Math.sin(this.t * 14) * 2 : 0);
     for (const m of this.coreMats) m.emissiveIntensity = m.userData.baseEI * glow * (asleep ? 0.2 : 1);
+  }
+
+  // every few seconds a hush breathes out: given properties nearby fall asleep
+  hushPulse(dt) {
+    const game = this.game, c = this.center();
+    if (Math.random() < dt * 3) game.vfx.zs?.spawn({ x: c.x + rnd(-0.5, 0.5), y: c.y + 0.9, z: c.z + rnd(-0.5, 0.5), vy: 0.5, vx: rnd(-0.2, 0.2), color: new THREE.Color('#c9b8ff').multiplyScalar(2), alpha: 0.9, alpha1: 0, size: 0.25, life: 1.6 });
+    this.hushT -= dt;
+    if (this.hushT > 0) return;
+    this.hushT = 4.5;
+    const R = Hush.R;
+    game.vfx.ring(c.clone().setY(this.obj.position.y + 0.1), 0.5, R, 1.1, 0xa58bff, 0.6);
+    game.audio.sfx('sleep', { position: c, gain: 0.5 });
+    for (const e of game.entities) {
+      if (e === this || e.dead || e.kind === 'boss' || !e.props.size || e.puzzle) continue; // a puzzle you solved stays solved
+      if (e.center().distanceTo(c) > R) continue;
+      for (const p of [...e.props]) if (!e.innate.has(p) && p !== 'sleeping') e.removeProp(p);
+    }
+    const pl = game.player;
+    if (pl && !pl.dead && pl.pos.distanceTo(c) < R && pl.self?.size) {
+      for (const p of [...pl.self.keys()]) pl.self.set(p, 0.01); // they wear off, the usual way, next frame
+      game.ui.toast('The Hush breathes out. Your borrowed qualities fall asleep.', 'warn');
+    }
   }
 
   drawerWorld() {

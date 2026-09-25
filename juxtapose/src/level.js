@@ -10,6 +10,7 @@ import { SandField } from './sand.js';
 import { Town } from './town.js';
 import { Sea } from './sea.js';
 import { Knot, Veil, KNOTS } from './knots.js';
+import * as PZ from './puzzles.js';
 
 // ---------------------------------------------------------------- noise
 function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
@@ -94,6 +95,7 @@ export const DESERT = {
   // plot sizes to flatten: the kit's real extents (the chapel's tower and apse overhang its nave)
   sizes: { B_Workshop: [12.6, 9.7], B_House: [9, 14], B_Loggia: [17.5, 7], B_Cottage: [9.5, 9], B_Chapel: [20, 24], B_Tower: [7, 7.2], B_Station: [17, 8.5], B_StationPlatform: [34, 6.5], B_Boathouse: [11, 12] },
   plaza: [0, 1, 11],
+  canaryRock: [-19, 74],
   cliffs: [
     // name, x, z, rotY, scale: a ring of headlands; the valley is inside them
     ['H_Cliff_A', -74, -30, Math.PI / 2, 1.1], ['H_Cliff_B', -70, 22, Math.PI / 2 + 0.2, 1.0], ['H_Cliff_C', -64, 66, Math.PI / 2 + 0.6, 1.1],
@@ -109,6 +111,9 @@ export const PIAZZA = {
     ['B_House', -15, -59, 0], ['B_House', 15, -59, 0], ['B_Loggia', 0, 64, Math.PI],
     ['B_Workshop', 30, -52, -0.6], ['B_Cottage', -34, 50, Math.PI - 0.7],
   ],
+  trainZ: 92,
+  // the ink runs from the statue out to the edge along these bearings, between the quarters
+  veils: [[-Math.PI / 4, 1], [Math.PI / 4, 2], [3 * Math.PI / 4, 3], [5 * Math.PI / 4, 99]],
 };
 
 // ---------------------------------------------------------------- textures
@@ -526,9 +531,10 @@ export class Level {
     this.addRail([ramp, a, a.clone().lerp(b, 0.5), b]);
   }
 
-  staticPiece(name, pos, rotY) {
+  staticPiece(name, pos, rotY, scale) {
     const o = this.game.assets.clone(name, { uniqueMaterials: false });
     o.position.copy(pos); o.rotation.y = rotY;
+    if (Array.isArray(scale)) o.scale.set(...scale); else if (scale) o.scale.setScalar(scale);
     o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
     this.group.add(o);
     // trimesh collider from its geometry
@@ -590,6 +596,7 @@ export class Level {
   build() {
     const game = this.game;
     game.render.setLook(LOOKS[this.key]);
+    this.sunDir = LOOKS[this.key].sunDir;
     this.dressTemplates(LOOKS[this.key]);
     // the living sand covers the valley floor, not the cliff slopes or the sea bed
     // grid density follows the graphics setting; fine prints come from the imprint texture either way
@@ -675,6 +682,15 @@ export class Level {
       const x = r ? r.x + Math.sin(r.rotY) * lz : 0, z = r ? r.z + Math.cos(r.rotY) * lz : 0;
       if (r) this.knotSpots.push({ def, pos: new THREE.Vector3(x, this.groundY(x, z), z), hp: 60 });
     }
+    // the canary is caught on a rock out past where you can wade; its guards keep the shore
+    const canary = this.knotSpots.find((k) => k.def.at === 'B_Boathouse');
+    if (canary) {
+      const rock = this.put('Rock_A', DESERT.canaryRock[0], DESERT.canaryRock[1], { rotY: 0.6, scale: 1.4, dy: -0.3 });
+      rock.immutable = true;
+      game.physics.world.updateSceneQueries?.();
+      canary.guardAt = canary.pos.clone();
+      canary.pos = new THREE.Vector3(DESERT.canaryRock[0], this.groundY(DESERT.canaryRock[0], DESERT.canaryRock[1]), DESERT.canaryRock[1]);
+    }
     this.waves = [];
     this.objectiveName = 'Free the memories the anxieties are guarding';
   }
@@ -726,40 +742,54 @@ export class Level {
     }
     if (this.game.assets.has('T_Gate')) this.town.place('T_Gate', X, -72, 0, { lock: false, scale: 1.5, y: this.heightAt(X, -72) }); // the tunnel mouth
     this.train = this.decoration('Train', new THREE.Vector3(X, this.heightAt(X, -80), -140), 0, 1.4);
+    this.trainX = X;
     this.trainAxis = 'z';
   }
 
+  // Golconda Piazza: de Chirico's square, cut into four by ink. Each quarter keeps
+  // one of his memories behind a puzzle; the arcades throw the long shadows, and
+  // the 6:40 runs along the hill to the north, until it stops for you.
   buildPiazza(R) {
-    this.spawn = new THREE.Vector3(0, 0.5, -40);
+    this.spawn = new THREE.Vector3(0, 0.5, -38);
     this.spawnYaw = 0;
-    const ring = 44;
+    // an arcade in the middle of each quarter, facing the centre
     for (let k = 0; k < 4; k++) {
-      const a = k * Math.PI / 2 + Math.PI / 4;
-      this.arcade(Math.cos(a) * ring, Math.sin(a) * ring, -a + Math.PI / 2, 5);
+      const a = k * Math.PI / 2;
+      this.arcade(Math.cos(a) * 44, Math.sin(a) * 44, -a + Math.PI / 2, 5);
     }
-    // colonnades and wall ruins inside the square
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2 + R() * 0.2, d = 16 + R() * 4;
+    // colonnades inside the square, kept off the lines the ink will draw
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + Math.PI / 12 + (R() - 0.5) * 0.15, d = 15 + R() * 4;
       this.put('Column', Math.cos(a) * d, Math.sin(a) * d, {});
     }
-    this.ruins(-18, 8, 0.4);
-    this.ruins(20, -6, 2.2);
-    this.bedroomOutdoors(0, 22, Math.PI);
+    // what each quarter holds: south (you arrive), east, north (the train), west
     this.anvilGarden(-14, -20, 1.1);
-    this.floatingStairs(24, 20, 0.2);
-    this.clockGrove(0, 0, R() * 6);
-    // a statue-plinth of drawers and clocks in the centre
-    this.put('Mirror', -4, -6, { rotY: 0.4 });
-    this.put('Mirror', 5, -5, { rotY: -0.5 });
-    this.put('Frame', 0, -9, { rotY: 0 });
+    this.put('Mirror', -4, -9, { rotY: 0.4 });
+    this.put('Mirror', 5, -12, { rotY: -0.5 });
+    this.put('Frame', 0, -14, { rotY: 0 });
+    this.ruins(20, -6, 2.2);
+    this.floatingStairs(26, 18, 0.2);
+    this.bedroomOutdoors(4, 22, Math.PI);
+    this.clockGrove(-8, 38, R() * 6);
+    this.ruins(-36, 6, 1.4);
+    // a statue on a plinth where the four quarters meet: Ariadne, asleep
+    this.staticPiece('Column', new THREE.Vector3(0, -1.2, 0), 0, [4.2, 1, 4.2]);
+    if (this.game.assets.has('Sleepwalker')) {
+      const st = this.decoration('Sleepwalker', new THREE.Vector3(0, 2.8, 0), 0.6, 1.6);
+      st.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.material.color?.set('#e9dfcc'); if (m.material.emissive) m.material.emissiveIntensity = 0; m.material.roughness = 0.7; } });
+      st.rotation.z = Math.PI / 2 - 0.2; st.position.y = 3.3; // lying down, like the statue in the paintings
+    }
     // palazzi you can walk into, if the town kit is here
     if (this.game.assets.has('B_House')) {
       this.town = new Town(this);
       for (const [name, x, z, rotY] of PIAZZA.buildings) this.town.place(name, x, z, rotY, { y: 0 });
     }
-    const trainY = this.heightAt(0, 95);
-    this.train = this.decoration('Train', new THREE.Vector3(-120, trainY, 92), Math.PI / 2, 1.6);
-    this.door = this.makeDoor(new THREE.Vector3(0, 0, 50), Math.PI);
+    // the train along the hill to the north; when the door opens it stops and waits
+    const trainY = this.heightAt(0, PIAZZA.trainZ);
+    this.train = this.decoration('Train', new THREE.Vector3(-120, trainY, PIAZZA.trainZ), Math.PI / 2, 1.6);
+    this.trainX = 0;
+    this.door = this.makeDoor(new THREE.Vector3(0, 0, PIAZZA.trainZ - 3.2), Math.PI);
+    this.door.o.visible = false;
     { const a = Math.PI / 4, gy = this.heightAt(Math.cos(a) * 44, Math.sin(a) * 44); this.scrapSpots.push(new THREE.Vector3(Math.cos(a) * 44, gy + 6.2, Math.sin(a) * 44)); }
     if (this.stairsTop) this.scrapSpots.push(this.stairsTop);
     this.scrapSpots.push(new THREE.Vector3(0, 3.6, 0).add(this.groveBranch || new THREE.Vector3(2, 0, 0)));
@@ -867,6 +897,8 @@ export class Level {
   openDoor() {
     if (this.doorOpen || !this.door) return;
     this.doorOpen = true;
+    // in the city the way out is the train: it comes round the hill and stops for you
+    if (this.key === 'piazza' && this.train && this.train.position.x > -38) this.train.position.x = -64;
     this.game.audio.sfx('pickup');
     this.game.ui.toast('A door has opened somewhere in the dream.', 'good');
     this.door.glow = this.game.render.claim(this.door, 0xffe2a0, 18, 16);
@@ -876,7 +908,8 @@ export class Level {
   startWaves() { this.waveIdx = -1; this.waveDelay = 4; this.nextWave(); }
   // knots: each memory with its half-asleep guards; enough freed opens the door
   startKnots() {
-    this.knots = this.knotSpots.map((k) => new Knot(this, k.def, k.pos));
+    this.knots = this.knotSpots.map((k) => { const n = new Knot(this, k.def, k.pos); n.guardAt = k.guardAt || null; return n; });
+    this.locks = this.makeLocks();
     this.knots.forEach((k, i) => k.spawnGuards(this.knotSpots[i].hp + this.game.depth * 5, this.knotSpots[i].variant));
     // the path: the memories the dream gives up in order (optional ones are off to the side)
     this.chain = this.knots.filter((k) => !k.def.optional);
@@ -901,8 +934,19 @@ export class Level {
       const L = at('B_Loggia'), W = at('B_Workshop'), B = at('B_Boathouse'), S = at('B_Station'), C = at('B_Chapel');
       routes = [
         { zone: 0, route: [near(L), hub.clone(), near(W), V(-20, -12), C ? C.pos.clone().lerp(hub, 0.2) : V(-24, -18)] },
-        { zone: 2, route: [V(0, 16), V(-6, 26), B.pos.clone().add(V(4, 0, -3))] },
+        { zone: 2, route: [V(0, 16), V(-6, 26), (B.guardAt || B.pos).clone().add(V(4, 0, -3))] },
         { zone: 3, route: [S.pos.clone().add(V(-4, 0, 0)), V(30, 14), V(16, 26)] },
+      ];
+    } else if (this.key === 'piazza' && this.chain.length >= 4) {
+      // four quarters, one memory each: the ink between them parts one line at a time
+      this.veils = PIAZZA.veils.map(([a, after]) => Object.assign(new Veil(this, V(Math.cos(a) * 3.2, Math.sin(a) * 3.2), V(Math.cos(a) * 104, Math.sin(a) * 104), 10), { after }));
+      // a beat through each quarter, along an arc
+      const arc = (a0, a1, r) => [0, 1, 2, 3].map((i) => { const a = a0 + (a1 - a0) * (i / 3); return V(Math.cos(a) * r, Math.sin(a) * r); });
+      routes = [
+        { zone: 0, route: arc(-2.2, -0.95, 32) },
+        { zone: 1, route: arc(-0.6, 0.6, 34) },
+        { zone: 2, route: arc(0.95, 2.2, 30) },
+        { zone: 3, route: arc(2.5, 3.8, 33) },
       ];
     } else {
       routes = [
@@ -914,6 +958,33 @@ export class Level {
     this.patrols = routes.map((r) => ({ ...r, members: [], wait: 0, started: false }));
     this.startPatrols();
     this.wisp = null;
+  }
+  // the puzzles that hold some of the memories (puzzles.js)
+  makeLocks() {
+    const at = (name) => this.knots.find((k) => k.def.at === name);
+    const V = (x, z) => new THREE.Vector3(x, 0, z);
+    const out = [];
+    const add = (fn) => { try { const l = fn(); if (l) out.push(l); } catch (e) { console.warn('puzzle skipped', e); } };
+    if (this.key === 'desert') {
+      const W = at('B_Workshop'), B = at('B_Boathouse'), S = at('B_Station'), C = at('B_Chapel');
+      if (W) add(() => PZ.drift(this, W));
+      if (B && B.guardAt) add(() => PZ.boat(this, B, { beach: { x: B.pos.x + 5, z: 54, rotY: 0.5 }, mooring: { x: B.pos.x + 1.5, z: B.pos.z - 6.5, rotY: 0.2 } }));
+      if (S) add(() => PZ.train(this, S, { stopZ: 6 }));
+      if (C) {
+        // under an arch beside the chapel's door
+        const r = this.town.rects.find((q) => q.name === 'B_Chapel');
+        const side = V(Math.cos(r.rotY), Math.sin(-r.rotY)).multiplyScalar(6);
+        add(() => PZ.bell(this, C, { at: C.pos.clone().add(side), rotY: r.rotY }));
+      }
+    } else if (this.key === 'piazza') {
+      const by = (prop) => this.knots.find((k) => k.def.prop === prop);
+      const M = by('Mirror'), D = by('Drawers'), C = by('Clock'), F = by('Frame');
+      if (M) add(() => PZ.sunEgg(this, M, { at: M.pos.clone().lerp(V(0, 0), 0.22).add(V(-4, 0)) }));
+      if (D) add(() => PZ.waxSeal(this, D, { at: D.pos.clone().lerp(V(0, 0), 0.14), rotY: Math.atan2(-D.pos.x, -D.pos.z) }));
+      if (C) add(() => PZ.counterweight(this, C, { at: C.pos.clone().add(V(-4.5, 4)) }));
+      if (F) add(() => PZ.vitrine(this, F));
+    }
+    return out;
   }
   // how far along the path: memories of the chain taken back
   get stage() { return this.chain ? this.chain.filter((k) => k.state === 'taken').length : 0; }
@@ -1078,7 +1149,7 @@ export class Level {
     for (const e of this.game.entities) {
       if (e.kind === 'enemy' || e.kind === 'boss' || e.dead || !e.obj) continue;
       const r = e._cullR ?? (e._cullR = e.radius ? e.radius() : 1);
-      const far = 42 + r * 18;
+      const far = (42 + r * 18) * (this.game.opts?.drawDistance ?? 1);
       const vis = e.obj.position.distanceToSquared(cam) < far * far;
       if (e.obj.visible !== vis && !e.hollowHidden) e.obj.visible = vis;
     }
@@ -1089,13 +1160,26 @@ export class Level {
     this.time += dt;
     this.sand?.update(dt);
     for (const d of this.deco) { d.o.rotation.y += d.spin * dt; d.o.position.y += Math.sin(this.time * 0.2 + d.bob) * 0.01; }
-    if (this.train && this.trainAxis === 'z') {
+    if (this.trainMove) this.trainMove(dt);
+    else if (this.train && this.trainAxis === 'z') {
       // out of the cliff, past the platform without slowing, and on into the sea
       const t = this.train; t.position.z += dt * 9;
       if (t.position.z > 150) t.position.z = -150;
       t.position.y = this.heightAt(DESERT.trackX, Math.max(-80, Math.min(90, t.position.z))) + 0.1;
       t.visible = t.position.z > -78;
-    } else if (this.train) { this.train.position.x += dt * 6; if (this.train.position.x > 140) this.train.position.x = -140; }
+    } else if (this.train) {
+      // the 6:40 in the city: runs along the hill, until the dream opens the door on it
+      const t = this.train;
+      let v = 6;
+      if (this.doorOpen) {
+        const gap = -t.position.x;
+        if (gap > 0 && gap < 40) v = Math.min(6, Math.sqrt(Math.max(0, 2 * 0.6 * gap)));
+        if (gap <= 0.05 && gap > -1) { v = 0; t.position.x = 0; }
+        if (!this.trainArrived && v === 0) { this.trainArrived = true; if (this.door) this.door.o.visible = true; }
+      }
+      t.position.x += dt * v;
+      if (t.position.x > 140) t.position.x = -140;
+    }
     this.town?.update(dt);
     this.sea?.update(dt);
     this.cullProps(dt);
@@ -1116,6 +1200,7 @@ export class Level {
     else if (this.key === 'sandbox') this.objective = 'Lucid sandbox · infinite charges · B for the spawn menu';
     else if (this.knots) {
       for (const k of this.knots) k.update(dt);
+      for (const l of this.locks || []) { l.update(); l.tick?.(dt, this.time); }
       for (const v of this.veils || []) v.update(dt, this.time);
       if (this.wisp) { // the guide: a mote running the way to the next memory, until you're nearly there
         const w = this.wisp, pl = game.player;
@@ -1138,8 +1223,10 @@ export class Level {
       }
       const f = this.knotsFreed, cur = this.current;
       if (!this.doorOpen && f >= this.knotsNeeded && game.state === 'playing') this.openDoor();
-      this.objective = !this.doorOpen ? `${cur ? cur.def.name[0].toUpperCase() + cur.def.name.slice(1) + ' is caught' : this.objectiveName} · ${f}/${this.knotsNeeded} memories`
-        : f < this.knots.length ? `The door in the ${this.key === 'desert' ? 'shallows' : 'square'} is open · ${this.knots.length - f} ${this.knots.length - f === 1 ? 'memory' : 'memories'} still caught` : 'Every memory is free · step through the door';
+      const held = cur && cur.lock && !cur.lock.solved ? cur.lock.hint : 'is caught';
+      this.objective = !this.doorOpen ? `${cur ? cur.def.name[0].toUpperCase() + cur.def.name.slice(1) + (held === 'is caught' ? ' is caught' : ': ' + held) : this.objectiveName} · ${f}/${this.knotsNeeded} memories`
+        : f < this.knots.length ? `The door in the ${this.key === 'desert' ? 'shallows' : 'square'} is open · ${this.knots.length - f} ${this.knots.length - f === 1 ? 'memory' : 'memories'} still caught`
+          : this.key === 'piazza' ? 'Every memory is free · the 6:40 is waiting on the hill' : 'Every memory is free · step through the door';
     } else if (!this.doorOpen) this.objective = `${this.objectiveName} · wave ${Math.max(1, Math.min(total, this.waveIdx + 1))}/${total} · ${this.enemiesAlive()} remain`;
     else this.objective = 'Find the open door and step through';
     // the door
@@ -1152,7 +1239,7 @@ export class Level {
       if (this.doorOpen) {
         if (Math.random() < dt * 30) game.vfx.trail(door.pos.clone().add(new THREE.Vector3(rnd(-0.6, 0.6), rnd(0, 2.4), rnd(-0.3, 0.3))), '#ffe2a0', 0.12, 1.2);
         const d = game.player.pos.clone().sub(door.pos); d.y = 0;
-        if (d.length() < 1.1 && !game.transitioning) game.descend();
+        if (d.length() < 1.1 && !game.transitioning && (this.key !== 'piazza' || this.trainArrived)) game.descend();
       }
     }
   }
