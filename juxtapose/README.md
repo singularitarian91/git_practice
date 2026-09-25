@@ -254,8 +254,8 @@ juxtapose/
     render_street.py         Cycles contact sheet of the street props -> docs/previews/street_props.png
     build_hero.py            sculpted replacements: image-to-3D models (art_src/hero/src) fitted onto the
                              procedural pieces, decimated, baked (albedo/normal/ORM) -> assets/hero.glb
-    build_figure_hero.py     the sculpted Figment (art_src/figure/src/figment.glb): fitted, decimated, baked,
-                             weighted to the figure's own bones -> assets/figure_skin.glb
+    build_figure_v3.py       the Figment's body and suit: the sculpted mannequin cut at its ball joints onto
+                             the rig, and the haori, hakama, kimono and scarf as cloth -> assets/figure_skin.glb
   assets/figure.glb, assets/props.glb, assets/town.glb, assets/street.glb, assets/tex/
   vendor/                    three.js r170 (+ addons), Rapier 0.14 (compat build)
 ```
@@ -269,7 +269,7 @@ python3 juxtapose/blender/texlib.py           # textures first: the kit and prop
 python3 juxtapose/blender/build_town.py      # exports, packs and verifies assets/town.glb
 python3 juxtapose/blender/build_street.py    # imports build_town's helpers; exports assets/street.glb
 python3 juxtapose/blender/build_hero.py      # optional: sculpted props from art_src/hero/manifest.json
-python3 juxtapose/blender/build_figure_hero.py   # optional: the sculpted Figment (add --preview for weight renders)
+python3 juxtapose/blender/build_figure_v3.py     # optional: the Figment's mannequin body and cloth suit (--preview, --reuse)
 ```
 
 **Hero props.** The procedural kit defines every prop's size, pivot, moving parts, colliders and fracture pieces. A sculpted model can replace just its look. Put the raw image-to-3D download in `art_src/hero/src/` and give it a manifest entry with a triangle budget, a texture size, a yaw to face −Y, and a fit (`height`, or `box` to keep the footprint). `build_hero.py` then:
@@ -282,17 +282,29 @@ The ten props in the manifest (bed, clock, candle, mirror, bowler hat, birdcage,
 
 At load, each hero mesh replaces the look of the template with the same name. Named child parts (clock hands, flames) stay unless the entry lists them under `hide`. Without `hero.glb`, the game uses the procedural props.
 
-**The sculpted Figment.** The player character works the same way, with a skin instead of a swap. Higgsfield drew the Figment in the Magritte suit (an oversized haori over pleated hakama, bowler, red scarf, a faceless wooden egg head) from the front, side and back (`art_src/figure/*.png`). Tripo H3.1 multiview turned those into one model, and `build_figure_hero.py` makes it fit the rig:
+**The Figment: a mannequin in a suit of cloth.** The body and the suit are separate, so the skeleton is right and the suit can move.
 
-- It is fitted to the figure's height, then decimated to 16k triangles and baked.
-- It is weighted by hand, not by bone heat. The rules come from the silhouette and the baked colour:
-  - the wooden head and hands, the red scarf and the black shoes are found by colour
-  - the split hakama follows the legs
-  - the haori skirt is shared between the thighs and the coat cloth bones the game swings with springs
-  - the wide sleeves hang from the sleeve bones
-- The sculpt stands in an A-pose, while the rig rests with its arms straight down. The file therefore carries a bind correction per bone, and the game builds each bone's inverse from it. At the rig's rest pose, the sculpt's hands close onto the hand bones where the gun hangs.
+- **The body.** Higgsfield drew the bare wooden mannequin (bowler and shoes on) from the front, side and back; Tripo multiview built it (`art_src/figure/jobs.json`). `build_figure_v3.py` fits a sphere to every ball joint. The rig's pivots come from those centres (`build_figure.JOINTS`): the first rig had its shoulders 7 cm low and inside the upper arm, a short chest and short arms. The sculpt is then cut apart at its crevices and each piece is carried onto its bone and bound to it alone, so shoulders, elbows and knees turn where the wood does.
+- **The clips, retargeted.** The clips are rotations, so they carry over to the new joints. On the corrected chest, arms folded across the body (supporting the gun, guard, reload) would pass into the wood. So the clip bake swings such an elbow out around its shoulder-to-wrist line, just far enough to clear the torso and its clothing:
+  - the hand stays where the clip put it, and keeps its orientation;
+  - one direction per arm per clip, eased in and out, so it never pops or sweeps across the chest.
+- **The suit** is cut, not sculpted: thin sheets with free edges, the way the garments are made.
+  - A haori with open armholes and sleeve bags built around the arm, from the shoulder to past the wrist.
+  - A split hakama: one wide leg per leg.
+  - The kimono worn underneath, all the way round, painted with the shirt and tie at the front.
+  - A scarf.
 
-The procedural body is dropped when `figure_skin.glb` is present. The gun and the apple stay procedural.
+  Fabrics are Higgsfield swatches made tileable. Each garment carries skin weights and a per-vertex reach (`_maxd`): none at the yoke and the sash, most at the hems, sleeve bags and scarf ends.
+- **Cloth at runtime** (`src/cloth.js`). The player's suit is simulated in world space:
+  - **What moves it:** Verlet integration, edge and bend constraints, and a leash to the skinned pose no longer than the reach.
+  - **What limbs do:** capsules on the limbs push cloth aside. Cloth lying on the torso goes under an arm that presses it; everything else goes to its own side, so a strip never ends up straddling a limb.
+  - **When it steps:** from the scene's render hook, once per advance of the game clock.
+
+  Decoys and memory ghosts wear the suit skinned.
+
+The suit was checked by testing every clip's limb axes against every garment triangle, with and without the aim overlay, both skinned and simulated. With cloth, the crossings fell from 732 to about 285. What remains is almost all in tucks and rolls (knees to the chest); idle, run, sprint, aim, fire and reload have none.
+
+The procedural body is dropped when `figure_skin.glb` is present.
 
 Hosts that won't serve binary `.glb` files can serve `<name>.glb.gz.b64.txt` instead (`gzip -9 -n -c x.glb | base64 -w0`): the loader falls back to it, and to plain `<name>.glb.b64.txt` after that. Gzip takes the town kit from 10.5 MB to about 2.5 MB.
 

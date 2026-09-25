@@ -1,7 +1,20 @@
 {
-  "_note": "Higgsfield jobs behind the sculpted Figment. Views: gpt_image_2_5 (the front drawn from the earlier concept sheet, art_src/concept/figment_suit.png; left and back drawn from the front). Model: tripo_h3_1_multiview_to_3d, detailed geometry and texture, views in order front, left, back. Raw download (62 MB) goes to src/figment.glb, not in git.",
-  "front": "3f7868d9-6d68-4e39-b265-3a9ee03413cc",
-  "left": "b7a4bd2d-7b16-4055-aa61-2481b700535b",
-  "back": "16783973-a4dc-4d51-ac4e-202addb55da9",
-  "model": "867365f5-fad1-4626-97df-317c318cf5ba"
+  "_note": "Higgsfield jobs behind the Figment. v3 (current): the bare mannequin drawn front, left and back (gpt_image_2_5), built with tripo_h3_1_multiview_to_3d (views in that order) -> src/mannequin.glb (not in git); fabric swatches drawn with gpt_image_2_5, made tileable by hand (fabric/*_albedo, *_normal; the *_raw downloads are not in git). v2 (superseded, kept as reference art): the suited sculpt, front.png/left.png/back.png -> src/figment.glb.",
+  "mannequin": {
+    "front": "08cab260-a6c3-49b5-9dd4-c79f297d4b6b",
+    "left": "2f7a2285-7a21-4f04-b14e-dd720acf1363",
+    "back": "9659f81d-da5b-48dd-a4ca-34ce719e4d16",
+    "model": "9c6e3c1e-a318-4c27-9a69-bf2c391933ac"
+  },
+  "fabric": {
+    "haori": "4a75b459-3a84-45c2-a817-281b4406e3c4",
+    "hakama": "7f67c56a-e5a2-4c86-ab9a-afa23770224e",
+    "scarf": "df7a071b-2fdc-4263-8419-be966a95765a"
+  },
+  "v2_suit": {
+    "front": "3f7868d9-6d68-4e39-b265-3a9ee03413cc",
+    "left": "b7a4bd2d-7b16-4055-aa61-2481b700535b",
+    "back": "16783973-a4dc-4d51-ac4e-202addb55da9",
+    "model": "867365f5-fad1-4626-97df-317c318cf5ba"
+  }
 }

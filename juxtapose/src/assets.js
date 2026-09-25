@@ -40,6 +40,24 @@ async function fetchModel(url) {
 export class Assets {
   constructor() {
     this.loader = new GLTFLoader();
+    // Images packed inside a .glb are decoded straight from their bytes. GLTFLoader would hand
+    // them to the browser as blob: URLs, which a sandboxed page (the published artifact) may
+    // refuse: the textures then fail quietly and the model draws white.
+    this.loader.register((parser) => {
+      const own = parser.loadImageSource.bind(parser);
+      parser.loadImageSource = (index, loader) => {
+        const def = parser.json.images[index];
+        if (def.bufferView === undefined || typeof createImageBitmap === 'undefined') return own(index, loader);
+        if (parser.sourceCache[index]) return parser.sourceCache[index].then((t) => t.clone());
+        const p = parser.getDependency('bufferView', def.bufferView)
+          .then((buf) => createImageBitmap(new Blob([buf], { type: def.mimeType }), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }))
+          .then((bmp) => { const t = new THREE.Texture(bmp); t.needsUpdate = true; t.userData.mimeType = def.mimeType; return t; })
+          .catch(() => own(index, loader));
+        parser.sourceCache[index] = p;
+        return p;
+      };
+      return { name: 'JUX_bytes_images' };
+    });
     this.templates = new Map();
     this.textures = {};
   }
@@ -64,7 +82,7 @@ export class Assets {
     this.figure.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     this.dressFigure();
     inkAll(this.figure.scene, 0.5);
-    if (this.skinMat) inkify(this.skinMat, 0.5);
+    for (const S of this.skinned || []) inkify(S.mat, 0.5);
     // index every top-level prop object by name
     for (const child of [...this.props.scene.children]) {
       child.traverse((o) => {
@@ -168,15 +186,17 @@ export class Assets {
     return o;
   }
 
-  // The sculpted Figment (assets/figure_skin.glb, blender/build_figure_hero.py): one
-  // skinned mesh weighted to the figure's own bones, so every clip drives it. It
-  // replaces the procedural body and suit; the gun and the apple stay procedural.
-  // The sculpt was bound in an A-pose, so each bone's inverse comes from its rest
-  // pose moved by the file's bind correction (arms out, feet apart): at rest the
-  // sculpt's hands close onto the hand bones, where the gun hangs.
+  // The sculpted Figment (assets/figure_skin.glb, blender/build_figure_v3.py): a jointed
+  // mannequin whose pieces each ride one bone, and the suit (haori, hakama, the kimono
+  // front, the scarf) as separate skinned sheets. Every clip drives them; the gun and
+  // the apple stay procedural. The file was bound with the arms turned out, so each
+  // bone's inverse comes from its rest pose moved by the file's bind correction.
+  // Garments carry a reach per vertex (_maxd): the player's are handed to the cloth
+  // solver (src/cloth.js); decoys and ghosts wear them skinned.
   dressFigure() {
-    const sm = this.skin && this.skin.scene.getObjectByProperty('isSkinnedMesh', true);
-    if (!sm) return;
+    const meshes = [];
+    this.skin?.scene.traverse((o) => { if (o.isSkinnedMesh) meshes.push(o); });
+    if (!meshes.length) return;
     let bind = {};
     this.skin.scene.traverse((o) => { if (o.userData.bind) bind = JSON.parse(o.userData.bind); });
     const fig = this.figure.scene;
@@ -191,36 +211,37 @@ export class Assets {
       p.children[p.children.indexOf(m)] = n; n.parent = p; m.parent = null;
     }
     fig.updateMatrixWorld(true);
+    this.skin.scene.updateMatrixWorld(true);
     const toFig = new THREE.Matrix4().copy(fig.matrixWorld).invert();
-    const names = sm.skeleton.bones.map((b) => b.name);
-    const inverses = names.map((n) => {
-      const b = fig.getObjectByName(n);
-      const rest = new THREE.Matrix4().multiplyMatrices(toFig, b.matrixWorld);
-      if (bind[n]) rest.premultiply(new THREE.Matrix4().fromArray(bind[n]));
-      return rest.invert();
+    const toSkin = new THREE.Matrix4().copy(this.skin.scene.matrixWorld).invert();
+    this.skinned = meshes.map((sm) => {
+      const names = sm.skeleton.bones.map((b) => b.name);
+      const inverses = names.map((n) => {
+        const b = fig.getObjectByName(n);
+        const rest = new THREE.Matrix4().multiplyMatrices(toFig, b.matrixWorld);
+        if (bind[n]) rest.premultiply(new THREE.Matrix4().fromArray(bind[n]));
+        return rest.invert();
+      });
+      const geo = sm.geometry.clone();
+      geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(toSkin, sm.matrixWorld)); // mesh space -> figure space
+      const mat = sm.material;
+      if (mat.map) mat.map.anisotropy = 8;
+      return { name: sm.name, geo, names, inverses, mat, cloth: !!geo.attributes._maxd };
     });
-    // mesh space -> figure space (the sculpt's armature sits at the origin, but be exact)
-    sm.updateMatrixWorld(true);
-    const geo = sm.geometry.clone();
-    geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(new THREE.Matrix4().copy(this.skin.scene.matrixWorld).invert(), sm.matrixWorld));
-    this.skinned = { geo, names, inverses };
-    this.skinMat = sm.material;
-    this.skinMat.name = 'Figment';
-    if (this.skinMat.map) this.skinMat.map.anisotropy = 8;
   }
 
   cloneFigure() {
     const o = SkeletonUtils.clone(this.figure.scene);
     this.figurePlan ??= rigidPlan(this.figure.scene);
     if (!applyRigidPlan(o, this.figurePlan)) o.traverse((m) => { if (m.isMesh) { m.material = m.material.clone(); m.castShadow = true; m.receiveShadow = true; } });
-    const S = this.skinned;
-    if (S) {
+    for (const S of this.skinned || []) {
       const bones = S.names.map((n) => o.getObjectByName(n));
-      const sm = new THREE.SkinnedMesh(S.geo, this.skinMat.clone());
-      sm.name = 'Figment_Sculpt';
+      const sm = new THREE.SkinnedMesh(S.geo, S.mat.clone());
+      sm.name = 'Figment_' + S.name;
       sm.bind(new THREE.Skeleton(bones, S.inverses.map((m) => m.clone())), new THREE.Matrix4());
       sm.castShadow = true; sm.receiveShadow = true;
       sm.frustumCulled = false;
+      sm.userData.cloth = S.cloth;
       o.add(sm);
     }
     return o;

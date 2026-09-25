@@ -3,3 +3,4 @@ __pycache__/
 art_src/hero/src/*.glb
 art_src/figure/src/*.glb
 art_src/figure/src/*.blend*
+art_src/figure/fabric/*_raw.png

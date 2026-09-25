@@ -1,6 +1,7 @@
 // The Figment: parkour character controller (Rapier kinematic character
 // controller, run at a fixed 60 Hz), the Ratchet & Clank style chase camera,
 // and the two-barrelled Juxtaposition Gun.
+import { ClothGarment } from './cloth.js';
 import * as THREE from 'three';
 import { RAPIER } from './physics.js';
 import { G, groups, ALL, TUNE, PROPS, PROP_INFO } from './config.js';
@@ -50,6 +51,13 @@ export class Player {
     this.visual = new THREE.Group();
     this.figure = game.assets.cloneFigure();
     this.visual.add(this.figure);
+    // the suit moves as cloth on the player (decoys and ghosts wear it skinned)
+    this.cloth = [];
+    for (const sm of this.figure.children.filter((c) => c.userData.cloth)) {
+      const c = new ClothGarment(sm, this.figure, () => game.time);
+      this.figure.add(c.mesh); this.figure.remove(sm);
+      this.cloth.push(c);
+    }
     game.scene.add(this.visual);
     this.anim = new FigureAnimator(this.figure, game.assets.figure.animations);
     this.anim.play('Idle', { fade: 0 });
@@ -1796,6 +1804,7 @@ export class Player {
     this.game.physics.remove(this.body);
     this.game.physics.world.removeCharacterController(this.kcc);
     this.visual.parent?.remove(this.visual);
+    for (const c of this.cloth) c.dispose();
     for (const d of this.decoys) d.grp.parent?.remove(d.grp);
     for (const [e] of this.faded) this.setFade(e, 1);
   }

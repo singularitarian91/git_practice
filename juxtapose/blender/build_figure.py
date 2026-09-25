@@ -299,7 +299,8 @@ def pleat(ph, n, amp):
 # Skeleton definition (name, parent, head position in Blender coords)
 # Character faces -Y in Blender (= +Z in three.js). Left side is +X.
 # --------------------------------------------------------------------------
-HAND_R = Vector((-0.205, 0.0, 0.875))
+# the grip sits in the right palm, 7.5 cm below the wrist pivot (the rig is v3: see JOINTS below)
+HAND_R = Vector((-0.163, 0.0, 0.885))
 GUN_S = 1.3
 GUN_W = Matrix.Translation(HAND_R) @ Matrix.Rotation(math.radians(90), 4, 'X') @ Matrix.Diagonal((GUN_S, GUN_S, GUN_S, 1))
 
@@ -351,7 +352,25 @@ BONES = [
     ('muzzleTake', 'gunBreak', tuple(G(0, -0.37, 0.104))),
     ('muzzleGive', 'gunBreak', tuple(G(0, -0.395, 0.05))),
 ]
+# v3 joints: measured on the sculpted mannequin (blender/build_figure_v3.py fits a sphere to each
+# ball joint), arms and legs then hung straight down from their shoulder and hip balls. The
+# first rig had the shoulders 7 cm low and inside the upper arm, a short chest and short arms.
+# Clips are rotations, so they carry over; the procedural parts above were modelled on the old
+# joints and are moved with their bones, which keeps the fallback figure (no sculpt) assembled.
+JOINTS = {
+    'hips': (0, 0, 0.98), 'spine': (0, 0, 1.215), 'chest': (0, 0, 1.30),
+    'neck': (0, 0, 1.585), 'head': (0, 0, 1.632), 'appleFace': (0, -0.165, 1.735),
+    'upperarmL': (0.163, 0, 1.523), 'forearmL': (0.163, 0, 1.224), 'handL': (0.163, 0, 0.960),
+    'upperarmR': (-0.163, 0, 1.523), 'forearmR': (-0.163, 0, 1.224), 'handR': (-0.163, 0, 0.960),
+    'thighL': (0.09, 0, 0.96), 'shinL': (0.09, 0, 0.554), 'footL': (0.09, 0, 0.149),
+    'thighR': (-0.09, 0, 0.96), 'shinR': (-0.09, 0, 0.554), 'footR': (-0.09, 0, 0.149),
+    'scarf1': (0.02, 0.105, 1.64), 'scarf2': (0.03, 0.188, 1.46), 'scarf3': (0.035, 0.198, 1.30),
+    'sleeveL1': (0.163, 0.07, 1.219), 'sleeveR1': (-0.163, 0.07, 1.219),
+}
+OLD_HEAD = {n: Vector(h) for n, _, h in BONES}
+BONES = [(n, p, JOINTS.get(n, h)) for n, p, h in BONES]
 BONE_HEAD = {n: Vector(h) for n, _, h in BONES}
+MOVED = {n: BONE_HEAD[n] - OLD_HEAD[n] for n in JOINTS}
 
 # --------------------------------------------------------------------------
 # Body modelling
@@ -834,6 +853,8 @@ bpy.ops.object.mode_set(mode='OBJECT')
 bpy.context.view_layer.update()
 
 for p in PARTS.values():
+    if p.bone in MOVED and MOVED[p.bone].length > 0:
+        bmesh.ops.translate(p.bm, verts=p.bm.verts[:], vec=MOVED[p.bone])
     me = bpy.data.meshes.new(p.name)
     p.bm.to_mesh(me)
     p.bm.free()
@@ -914,15 +935,126 @@ def apply_pose(pose):
         pose_cloth(pose)
 
 
+# --------------------------------------------------------------------------
+# Retarget: the clips were first authored on a rig with the shoulders 4 cm wider and 7 cm
+# lower, and a thinner chest. On the measured mannequin an arm folded across the body (the
+# left hand under the gun, guard, deflect) would pass into the wooden chest. Per frame, an
+# arm that enters the torso is turned about its shoulder-wrist line (the elbow swings out,
+# the hand stays exactly where the clip put it) by the smallest angle that clears it, and
+# the hand keeps its orientation, so the gun still points where it did.
+# --------------------------------------------------------------------------
+# torso blocks in their bone's rest frame (armature space): centre, radii, fattened by the arm
+# (the chest's front and back carry the clothing too: kimono front and scarf, 3 cm)
+TORSO = [('chest', Vector((0, 0.0, 1.44)), Vector((0.14, 0.14, 0.155))),
+         ('spine', Vector((0, 0.0, 1.26)), Vector((0.085, 0.08, 0.05))),
+         ('hips', Vector((0, 0.0, 1.07)), Vector((0.16, 0.09, 0.13)))]
+ARM_R = 0.03
+SWIVEL = {'n': 0, 'max': 0.0}
+
+
+def _torso_frames():
+    out = []
+    for b, c, r in TORSO:
+        pb = arm.pose.bones[b]
+        M = pb.matrix @ pb.bone.matrix_local.inverted()   # rest -> pose, armature space
+        out.append((M.inverted(), c, r + Vector((ARM_R, ARM_R, ARM_R))))
+    return out
+
+
+def _inside(frames, pts):
+    for Mi, c, r in frames:
+        for p in pts:
+            q = Mi @ p - c
+            if (q.x / r.x) ** 2 + (q.y / r.y) ** 2 + (q.z / r.z) ** 2 < 1:
+                return True
+    return False
+
+
+def _samples(S, E, W):
+    pts = []
+    for a, b, skip in ((S, E, 0.11), (E, W, 0.0)):
+        L = (b - a).length
+        for i in range(1, 9):
+            t = i / 8
+            if t * L > skip:
+                pts.append(a.lerp(b, t))
+    return pts
+
+
+def swivel_needed():
+    """per side: the smallest elbow swing (degrees) that takes the arm out of the torso, turning
+    each way: (outward-first magnitude for +, for -); 0 when the arm is clear"""
+    bpy.context.view_layer.update()
+    frames = _torso_frames()
+    out = {}
+    for side in 'LR':
+        ua, fa, hd = (arm.pose.bones[n + side] for n in ('upperarm', 'forearm', 'hand'))
+        S, E, W = ua.head.copy(), fa.head.copy(), hd.head.copy()
+        out[side] = (0.0, 0.0)
+        if not _inside(frames, _samples(S, E, W)):
+            continue
+        axis = (W - S).normalized()
+        best = []
+        for sgn in (1, -1):
+            found = 90.0
+            for step in range(1, 13):
+                E2 = S + (Matrix.Rotation(math.radians(5 * step * sgn), 3, axis) @ (E - S))
+                if not _inside(frames, _samples(S, E2, W)):
+                    found = 5.0 * step
+                    break
+            best.append(found)
+        out[side] = tuple(best)
+    return out
+
+
+def swivel(angles):
+    for side, ang in angles.items():
+        if abs(ang) < 0.5:
+            continue
+        ua, hd = arm.pose.bones['upperarm' + side], arm.pose.bones['hand' + side]
+        bpy.context.view_layer.update()
+        S, W = ua.head.copy(), hd.head.copy()
+        keep = hd.matrix.copy()
+        R = Matrix.Translation(S) @ Matrix.Rotation(math.radians(ang), 4, (W - S).normalized()) @ Matrix.Translation(-S)
+        ua.matrix = R @ ua.matrix
+        bpy.context.view_layer.update()
+        hd.matrix = keep
+        bpy.context.view_layer.update()
+        SWIVEL['n'] += 1; SWIVEL['max'] = max(SWIVEL['max'], abs(ang))
+
+
+def smooth_track(vals, loop, reach=3):
+    """hold the largest swing a few frames either side, then ease it, so it never pops"""
+    n = len(vals)
+    idx = (lambda i: i % n) if loop else (lambda i: min(max(i, 0), n - 1))
+    held = [max((vals[idx(i + k)] for k in range(-reach, reach + 1)), key=abs) for i in range(n)]
+    return [sum(held[idx(i + k)] for k in range(-2, 3)) / 5 for i in range(n)]
+
+
 def bake_clip(name, fn, frames, loop):
     act = bpy.data.actions.new(name)
     act.use_fake_user = True
     arm.animation_data.action = act
     prev = {}
+    need = {'L': [], 'R': []}
+    for f in range(frames + 1):
+        apply_pose(fn(f / frames))
+        for side, v in swivel_needed().items():
+            need[side].append(v)
+    # one way per arm for the whole clip: an elbow that swung out one way on this frame and the
+    # other way on the next would sweep across the chest between them
+    track = {}
+    for side, v in need.items():
+        cost = [sum(x[k] for x in v) for k in (0, 1)]
+        k = 0 if cost[0] <= cost[1] else 1
+        sgn = 1 if k == 0 else -1
+        # where no swing up to 60 degrees clears the arm, leave the clip alone
+        track[side] = smooth_track([sgn * (x[k] if x[k] <= 60.0 else 0.0) for x in v], loop)
     for f in range(frames + 1):
         t = f / frames
         pose = fn(t)
         apply_pose(pose)
+        swivel({side: track[side][f] for side in 'LR'})
         for n in KEYED:
             pb = arm.pose.bones[n]
             q = pb.rotation_quaternion.copy()
@@ -946,8 +1078,9 @@ def bake_clip(name, fn, frames, loop):
 
 for name, (fn, seconds, loop) in FA.CLIPS.items():
     frames = max(2, round(seconds * FPS))
+    n0 = SWIVEL['n']; SWIVEL['max'] = 0.0
     bake_clip(name, fn, frames, loop)
-    print('clip', name, frames, 'frames')
+    print('clip', name, frames, 'frames', f'(elbow swung clear of the torso on {SWIVEL["n"] - n0} arm-frames, up to {SWIVEL["max"]:.0f} deg)' if SWIVEL['n'] > n0 else '')
 
 CLOTH_PREVIEW[0] = True
 # rest pose for export

@@ -1,4 +1,5 @@
 // Juxtapose - boot, game loop and run structure.
+import { stepCloth } from './cloth.js';
 import * as THREE from 'three';
 import { Renderer, DREAM, suggestQuality } from './render.js';
 import { Physics } from './physics.js';
@@ -64,6 +65,7 @@ class Game {
     this.watchContext();
     this.grainBase = this.render.dream.uniforms.uGrain.value;
     this.scene = this.render.scene;
+    this.scene.onBeforeRender = () => stepCloth(this.scene); // after the frame's matrices, before its geometry goes up
     fill.style.width = '15%';
     msg.textContent = 'Waking the physics...';
     this.physics = await Physics.create();
