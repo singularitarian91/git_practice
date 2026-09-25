@@ -1023,6 +1023,84 @@ def swivel(angles):
         SWIVEL['n'] += 1; SWIVEL['max'] = max(SWIVEL['max'], abs(ang))
 
 
+# The suit (build_figure_v3) hangs a loose haori from the shoulders; a real one is worn with the
+# arms and their sleeves outside its body. Where a forearm or hand would be inside the coat's
+# skirt, the whole arm is raised out sideways (about the chest's forward axis) by the least
+# angle that clears it: the coat, in the hips' frame, plus the sleeve round the forearm.
+COAT_Z = (0.58, 1.22)
+COAT_A = ((0.62, 1.0, 1.3), (0.285, 0.265, 0.25))
+COAT_B = ((0.62, 1.0, 1.3), (0.175, 0.16, 0.145))
+SLEEVE_R = 0.055
+
+
+def _lerp_table(tab, z):
+    zs, vs = tab
+    if z <= zs[0]:
+        return vs[0]
+    for (z0, v0), (z1, v1) in zip(zip(zs, vs), zip(zs[1:], vs[1:])):
+        if z <= z1:
+            return v0 + (v1 - v0) * (z - z0) / (z1 - z0)
+    return vs[-1]
+
+
+def _in_coat(Mi, pts):
+    for p in pts:
+        q = Mi @ p
+        if COAT_Z[0] < q.z < COAT_Z[1]:
+            a = _lerp_table(COAT_A, q.z) + SLEEVE_R; b = _lerp_table(COAT_B, q.z) + SLEEVE_R
+            if (q.x / a) ** 2 + (q.y / b) ** 2 < 1:
+                return True
+    return False
+
+
+def _arm_points(side):
+    fa, hd = arm.pose.bones['forearm' + side], arm.pose.bones['hand' + side]
+    E, W = fa.head.copy(), hd.head.copy()
+    tip = W + (W - E).normalized() * 0.15
+    return [E.lerp(W, 0.5), W, W.lerp(tip, 0.5), tip]
+
+
+def abduct_needed():
+    """per side: the least sideways raise (degrees, signed outward) that takes forearm and hand
+    out of the coat"""
+    bpy.context.view_layer.update()
+    hips = arm.pose.bones['hips']
+    Mi = (hips.matrix @ hips.bone.matrix_local.inverted()).inverted()
+    fwd = (arm.pose.bones['chest'].matrix.to_3x3() @ Vector((0, 0, 1))).normalized()   # a bone's local Z is the body's forward
+    out = {}
+    for side, sg in (('L', 1), ('R', -1)):
+        out[side] = 0.0
+        pts = _arm_points(side)
+        if not _in_coat(Mi, pts):
+            continue
+        S = arm.pose.bones['upperarm' + side].head.copy()
+        # outward is whichever way moves the wrist away from the body's midline
+        R1 = Matrix.Rotation(math.radians(4), 3, fwd)
+        sgn = 1 if (Mi @ (S + R1 @ (pts[1] - S))).x * sg > (Mi @ pts[1]).x * sg else -1
+        for step in range(1, 16):
+            R = Matrix.Rotation(math.radians(2 * step * sgn), 3, fwd)
+            if not _in_coat(Mi, [S + R @ (p - S) for p in pts]):
+                out[side] = 2.0 * step * sgn
+                break
+    return out, fwd
+
+
+def abduct(angles):
+    for side, ang in angles.items():
+        if abs(ang) < 0.3:
+            continue
+        bpy.context.view_layer.update()
+        fwd = (arm.pose.bones['chest'].matrix.to_3x3() @ Vector((0, 0, 1))).normalized()   # a bone's local Z is the body's forward
+        ua = arm.pose.bones['upperarm' + side]
+        S = ua.head.copy()
+        ua.matrix = Matrix.Translation(S) @ Matrix.Rotation(math.radians(ang), 4, fwd) @ Matrix.Translation(-S) @ ua.matrix
+        bpy.context.view_layer.update()
+        ABDUCT['n'] += 1; ABDUCT['max'] = max(ABDUCT['max'], abs(ang))
+
+
+ABDUCT = {'n': 0, 'max': 0.0}
+
+
 def smooth_track(vals, loop, reach=3):
     """hold the largest swing a few frames either side, then ease it, so it never pops"""
     n = len(vals)
@@ -1050,11 +1128,20 @@ def bake_clip(name, fn, frames, loop):
         sgn = 1 if k == 0 else -1
         # where no swing up to 60 degrees clears the arm, leave the clip alone
         track[side] = smooth_track([sgn * (x[k] if x[k] <= 60.0 else 0.0) for x in v], loop)
+    # then the hands out of the coat, on top of the swivel
+    lift = {'L': [], 'R': []}
+    for f in range(frames + 1):
+        apply_pose(fn(f / frames))
+        swivel({side: track[side][f] for side in 'LR'})
+        for side, v in abduct_needed()[0].items():
+            lift[side].append(v)
+    lift = {side: smooth_track(v, loop) for side, v in lift.items()}
     for f in range(frames + 1):
         t = f / frames
         pose = fn(t)
         apply_pose(pose)
         swivel({side: track[side][f] for side in 'LR'})
+        abduct({side: lift[side][f] for side in 'LR'})
         for n in KEYED:
             pb = arm.pose.bones[n]
             q = pb.rotation_quaternion.copy()
@@ -1078,8 +1165,10 @@ def bake_clip(name, fn, frames, loop):
 
 for name, (fn, seconds, loop) in FA.CLIPS.items():
     frames = max(2, round(seconds * FPS))
-    n0 = SWIVEL['n']; SWIVEL['max'] = 0.0
+    n0 = SWIVEL['n']; SWIVEL['max'] = 0.0; a0 = ABDUCT['n']; ABDUCT['max'] = 0.0
     bake_clip(name, fn, frames, loop)
+    if ABDUCT['n'] > a0:
+        print('clip', name, f'arms raised clear of the coat on {ABDUCT["n"] - a0} arm-frames, up to {ABDUCT["max"]:.0f} deg')
     print('clip', name, frames, 'frames', f'(elbow swung clear of the torso on {SWIVEL["n"] - n0} arm-frames, up to {SWIVEL["max"]:.0f} deg)' if SWIVEL['n'] > n0 else '')
 
 CLOTH_PREVIEW[0] = True

@@ -146,6 +146,7 @@ def segments(P, J, N):
     seg[z >= 1.585] = 'neck'
     seg[np.linalg.norm(P - J['neckball'], axis=1) < J['rneck'] * 1.15] = 'head'
     seg[z >= J['neckball'][2] + 0.02] = 'head'
+    arms_seen = np.zeros(n, bool)
     for side, sg in (('L', 1), ('R', -1)):
         S, E, W, K, A = (J[k + side] for k in 'SEWKA')
         Hp = J['Hp' + side]
@@ -170,8 +171,10 @@ def segments(P, J, N):
         seg[arm & (t2 > 1.0)] = 'hand' + side
         seg[arm & (np.linalg.norm(P - E, axis=1) < J['rE'] * 1.1)] = 'forearm' + side
         seg[arm & (np.linalg.norm(P - W, axis=1) < J['rW'] * 1.1)] = 'hand' + side
-        # legs: below the hip balls, this side of the crotch
-        leg = ((x * sg) > 0.004) & (z < Hp[2]) & ~((np.abs(x) < 0.05) & (z > 0.86))
+        arms_seen = arms_seen | arm
+        # legs: below the hip balls, this side of the crotch -- and never what the arms took
+        # (the hands hang below the hips: left to this rule they would ride the thighs)
+        leg = ((x * sg) > 0.004) & (z < Hp[2]) & ~((np.abs(x) < 0.05) & (z > 0.86)) & ~arms_seen
         seg[leg] = 'thigh' + side
         seg[leg & (z < K[2])] = 'shin' + side
         seg[leg & (np.linalg.norm(P - K, axis=1) < J['rK'] * 0.9)] = 'shin' + side
@@ -264,6 +267,9 @@ def build_body():
     kd.balance()
     L = H_verts(lo)
     lseg = np.array([vseg[kd.find(p)[1]] for p in L], object)
+    for b in ('handL', 'handR', 'thighL', 'thighR'):
+        m = lseg == b
+        print(f'  piece {b}: {int(m.sum())} verts, height {L[m, 2].min():.3f}..{L[m, 2].max():.3f}, x {L[m, 0].min():.3f}..{L[m, 0].max():.3f}')
     bpy.data.objects.remove(hi, do_unlink=True)
     lo.name = lo.data.name = 'Body'
     lo['seg'] = json.dumps(lseg.tolist())
@@ -407,15 +413,15 @@ def sleeve(side):
     out = out * 0.72 + np.array([0, 0.69, 0])                    # and back: the bag falls behind the arm
     out = out - d * (out @ d); out /= np.linalg.norm(out)
     yv = np.cross(d, out); yv /= np.linalg.norm(yv)            # the bag's thickness: square to arm and bag
-    ts = np.linspace(-0.09, 1.04, 20)
+    ts = np.linspace(-0.09, 0.9, 19)   # the cuff stops short: the wooden wrist and the hand hang from it, visibly
     nl = 30
     psi = np.linspace(0, 2 * math.pi, nl, endpoint=False)
     L = np.linalg.norm(Wr - S)
     P = np.zeros((len(ts), nl, 3)); UV = np.zeros((len(ts), nl, 2)); RING = np.zeros((len(ts), nl))
     for a, t in enumerate(ts):
         A = S + (Wr - S) * t
-        w = np.interp(t, [-0.09, 0.3, 0.6, 1.04], [0.08, 0.17, 0.21, 0.21])   # how far the bag stands out
-        r_in = np.interp(t, [-0.09, 0.2, 1.04], [0.09, 0.07, 0.062])    # room for the shoulder ball, then the arm
+        w = np.interp(t, [-0.09, 0.3, 0.6, 0.9], [0.08, 0.17, 0.21, 0.21])   # how far the bag stands out
+        r_in = np.interp(t, [-0.09, 0.2, 0.9], [0.09, 0.07, 0.062])    # room for the shoulder ball, then the arm
         cu, hu = (w - r_in) / 2, (w + r_in) / 2
         u = cu + hu * np.cos(psi)
         tw = 0.022 + (r_in - 0.012) * np.exp(-(u / 0.09) ** 2)

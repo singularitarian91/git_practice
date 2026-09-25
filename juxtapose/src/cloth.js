@@ -35,9 +35,11 @@ const CAPSULES = [
   ['shinL', 'footL', 0.06], ['shinR', 'footR', 0.06],
   ['upperarmL', 'forearmL', 0.056], ['upperarmR', 'forearmR', 0.056],
   ['forearmL', 'handL', 0.045], ['forearmR', 'handR', 0.045],
+  // hands: no bone past the wrist, so the capsule runs on along the forearm's line through the palm
+  ['handL', null, 0.045, false, 'forearmL', 0.62], ['handR', null, 0.045, false, 'forearmR', 0.62],
 ];
 
-const WANTS = { Hakama: /thigh|shin|forearm/, Inner: /arm/, Scarf: /arm|thigh/ };
+const WANTS = { Hakama: /thigh|shin|forearm|hand/, Inner: /arm|hand/, Scarf: /arm|thigh|hand/ };
 // garments that lie on the torso and never wrap an arm: an arm pressing them always has them under it
 const UNDER = { Inner: true, Scarf: true };
 
@@ -102,10 +104,10 @@ export class ClothGarment {
     // each garment meets the limbs that can reach it (the torso pair always first: the side rule uses it)
     const want = WANTS[sm.name.replace(/^Figment_/, '')] || /./;
     this.caps = CAPSULES.filter(([a], k) => k < 2 || want.test(a))
-      .map(([a, b, r, torso]) => ({ a: root.getObjectByName(a), b: b && root.getObjectByName(b), r, torso: !!torso })).filter((c) => c.a && (c.b || c.b === null));
+      .map(([a, b, r, torso, from, ext]) => ({ a: root.getObjectByName(a), b: b && root.getObjectByName(b), r, torso: !!torso, from: from && root.getObjectByName(from), ext })).filter((c) => c.a && (c.b || c.from));
     this.capBuf = new Float32Array(this.caps.length * 7);
     this.capTorso = this.caps.map((c) => c.torso);
-    this.capArm = this.caps.map((c) => /arm|hand/.test(c.a.name));
+    this.capArm = this.caps.map((c) => /arm|hand/.test(c.a.name) && !/^hand/.test(c.a.name));
     this.under = !!UNDER[sm.name.replace(/^Figment_/, '')];
     this.last = null;
     this.ready = false;
@@ -166,8 +168,10 @@ export class ClothGarment {
     // capsule endpoints this frame
     const cb = this.capBuf;
     this.caps.forEach((c, i) => {
-      const a = c.a.matrixWorld.elements, b = (c.b || c.a).matrixWorld.elements;
-      cb[i * 7] = a[12]; cb[i * 7 + 1] = a[13]; cb[i * 7 + 2] = a[14]; cb[i * 7 + 3] = b[12]; cb[i * 7 + 4] = b[13]; cb[i * 7 + 5] = b[14]; cb[i * 7 + 6] = c.r;
+      const a = c.a.matrixWorld.elements;
+      cb[i * 7] = a[12]; cb[i * 7 + 1] = a[13]; cb[i * 7 + 2] = a[14]; cb[i * 7 + 6] = c.r;
+      if (c.b) { const b = c.b.matrixWorld.elements; cb[i * 7 + 3] = b[12]; cb[i * 7 + 4] = b[13]; cb[i * 7 + 5] = b[14]; }
+      else { const f = c.from.matrixWorld.elements; for (let k = 0; k < 3; k++) cb[i * 7 + 3 + k] = a[12 + k] + (a[12 + k] - f[12 + k]) * c.ext; }
     });
     const subs = dt > 1 / 40 ? 2 : 1, h = dt / subs;
     for (let s = 0; s < subs; s++) {

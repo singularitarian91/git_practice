@@ -284,10 +284,11 @@ At load, each hero mesh replaces the look of the template with the same name. Na
 
 **The Figment: a mannequin in a suit of cloth.** The body and the suit are separate, so the skeleton is right and the suit can move.
 
-- **The body.** Higgsfield drew the bare wooden mannequin (bowler and shoes on) from the front, side and back; Tripo multiview built it (`art_src/figure/jobs.json`). `build_figure_v3.py` fits a sphere to every ball joint. The rig's pivots come from those centres (`build_figure.JOINTS`): the first rig had its shoulders 7 cm low and inside the upper arm, a short chest and short arms. The sculpt is then cut apart at its crevices and each piece is carried onto its bone and bound to it alone, so shoulders, elbows and knees turn where the wood does.
+- **The body.** Higgsfield drew the bare wooden mannequin (bowler and shoes on) from the front, side and back; Tripo multiview built it (`art_src/figure/jobs.json`). `build_figure_v3.py` fits a sphere to every ball joint. The rig's pivots come from those centres (`build_figure.JOINTS`): the first rig had its shoulders 7 cm low and inside the upper arm, a short chest and short arms. The sculpt is then cut apart at its crevices and each piece is carried onto its bone and bound to it alone, so shoulders, elbows and knees turn where the wood does. (The arms are claimed before the legs: the hands hang below the hips, and a leg rule applied first would have handed the fingers to the thighs.)
 - **The clips, retargeted.** The clips are rotations, so they carry over to the new joints. On the corrected chest, arms folded across the body (supporting the gun, guard, reload) would pass into the wood. So the clip bake swings such an elbow out around its shoulder-to-wrist line, just far enough to clear the torso and its clothing:
   - the hand stays where the clip put it, and keeps its orientation;
-  - one direction per arm per clip, eased in and out, so it never pops or sweeps across the chest.
+  - one direction per arm per clip, eased in and out, so it never pops or sweeps across the chest;
+  - and wherever a forearm or hand would hang inside the coat's skirt (idle, run, landings), the arm is raised out sideways just enough that it and its sleeve hang outside the coat, as a haori is worn.
 - **The suit** is cut, not sculpted: thin sheets with free edges, the way the garments are made.
   - A haori with open armholes and sleeve bags built around the arm, from the shoulder to past the wrist.
   - A split hakama: one wide leg per leg.
