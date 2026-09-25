@@ -1,6 +1,7 @@
 // Dream layers: terrain, looks, procedural set-piece layouts from the
 // Blender kit, grind rails, the exit door, enemy waves, and the waking bedroom.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RAPIER } from './physics.js';
 import { G, ALL, TUNE, LAYERS, PROPS } from './config.js';
 import { spawnEntity } from './entities.js';
@@ -299,6 +300,7 @@ export class Rail {
     game.level.group.add(tube);
     // Dali crutches hold the rail up
     const step = 5.5;
+    const posts = new THREE.Group();
     for (let s = 0.5; s < this.length; s += step) {
       const p = this.point(s);
       const hit = game.physics.ray({ x: p.x, y: p.y - 0.3, z: p.z }, { x: 0, y: -1, z: 0 }, 40, G.WORLD | G.WALL);
@@ -310,8 +312,21 @@ export class Rail {
       post.scale.set(1, h / 1.6, 1);
       const t = this.tangent(s);
       post.rotation.y = Math.atan2(t.x, t.z) + Math.PI / 2;
-      post.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      game.level.group.add(post);
+      posts.add(post);
+    }
+    // one draw per material for the whole rail's posts, not one per post
+    posts.updateMatrixWorld(true);
+    const byMat = new Map();
+    posts.traverse((o) => {
+      if (!o.isMesh) return;
+      const g = o.geometry.clone().applyMatrix4(o.matrixWorld);
+      const k = o.material.uuid + Object.keys(g.attributes).sort().join() + (g.index ? 'i' : '');
+      if (!byMat.has(k)) byMat.set(k, { mat: o.material, geos: [] });
+      byMat.get(k).geos.push(g);
+    });
+    for (const { mat, geos } of byMat.values()) {
+      const merged = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
+      for (const g of merged ? [merged] : geos) { const m = new THREE.Mesh(g, mat); m.castShadow = true; m.receiveShadow = true; game.level.group.add(m); }
     }
   }
   point(s) { return this.curve.getPointAt(Math.max(0, Math.min(1, s / this.length))); }
@@ -1478,6 +1493,14 @@ export class Level {
     this._cullT = 0.25;
     const cam = this.game.render.camera.position;
     for (const e of this.game.entities) {
+      if (e.kind === 'enemy' && !e.dead && e.obj) {
+        // anxieties: gone past 95 m (a few pixels in the haze), and only the near ones cast sun shadows
+        const d2 = e.obj.position.distanceToSquared(cam);
+        const vis = d2 < 95 * 95, cast = d2 < 38 * 38;
+        if (e.obj.visible !== vis && !e.hollowHidden) e.obj.visible = vis;
+        if (e._cast !== cast) { e._cast = cast; e.obj.traverse((m) => { if (m.isMesh) m.castShadow = cast; }); }
+        continue;
+      }
       if (e.kind === 'enemy' || e.kind === 'boss' || e.dead || !e.obj) continue;
       const r = e._cullR ?? (e._cullR = e.radius ? e.radius() : 1);
       const far = (42 + r * 18) * (this.game.opts?.drawDistance ?? 1);

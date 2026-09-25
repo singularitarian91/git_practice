@@ -140,20 +140,26 @@ class Game {
       this.warmKeep = [];
       const seen = new Set();
       const variants = (o) => {
-        if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh) return;
+        if (!o.isMesh || o.isInstancedMesh || (o.isSkinnedMesh && !o.name.startsWith('Sleepwalker_'))) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
           if (!m || !m.isMeshStandardMaterial || m.userData.dream) continue;
           const a = o.geometry.attributes;
-          const sig = [m.type, m.vertexColors, !!m.map, !!m.normalMap, !!m.roughnessMap, !!m.emissiveMap, !!m.aoMap, m.side, m.transparent, JSON.stringify(m.defines || {}), !!a.color, !!a.uv, !!a.tangent, o.receiveShadow].join('|');
+          const sig = [o.isSkinnedMesh, m.type, m.vertexColors, !!m.map, !!m.normalMap, !!m.roughnessMap, !!m.emissiveMap, !!m.aoMap, m.side, m.transparent, JSON.stringify(m.defines || {}), !!a.color, !!a.uv, !!a.tangent, o.receiveShadow].join('|');
           if (seen.has(sig)) continue;
           seen.add(sig);
           const see = m.clone(); see.transparent = true; see.depthWrite = false;
           const melt = m.clone(); makeDreamMaterial(melt, 1, 0);
-          for (const v of [see, melt]) { const w = new THREE.Mesh(o.geometry, v); w.receiveShadow = o.receiveShadow; warm.add(w); this.warmKeep.push(v); }
+          for (const v of [see, melt]) {
+            const w = o.isSkinnedMesh ? new THREE.SkinnedMesh(o.geometry, v) : new THREE.Mesh(o.geometry, v);
+            if (o.isSkinnedMesh) { w.bind(o.skeleton, o.bindMatrix); w.frustumCulled = false; }
+            w.receiveShadow = o.receiveShadow; warm.add(w); this.warmKeep.push(v);
+          }
         }
       };
       for (const e of this.entities) e.obj?.traverse(variants);
       this.assets.templates.get('Sleepwalker')?.traverse(variants);
+      // the anxieties as they are drawn in play: skinned, one mesh per material
+      const sw = this.assets.cloneRigid('Sleepwalker'); warm.add(sw); sw.updateMatrixWorld(true); sw.traverse(variants);
       const wire = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: 0x5effd0, transparent: true, opacity: 0.55 }));
       warm.add(wire); this.warmKeep.push(wire.material);
       // the Figment's decoys are see-through skinned copies of it

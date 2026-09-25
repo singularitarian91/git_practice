@@ -285,6 +285,8 @@ Hosts that won't serve binary `.glb` files can serve `<name>.glb.gz.b64.txt` ins
 
 **Sound as structure.** The score is synthesized live with Web Audio: stems for pad, bass, music-box arpeggio, percussion and glass shimmer. It follows the chord progression of each layer, adds stems as combat intensifies, and warbles, drags and reverses as Lucidity rises. Weapon sounds snap to the 16th-note grid and are pitched to the current scale, so a good fight plays like a melody.
 
+**Keeping it smooth.** A frame used to cost about 1,300 draw calls; now it is 600 to 900 (measured per layer at medium quality). Each Sleepwalker is one skinned mesh per material, using the same rigid-part trick as the Figment: its limb nodes stay as bones, so posing still works. That takes it from 26 meshes to 5, and its porcelain still shatters into the template's own pieces, painted with its colours. Anxieties past 95 m are not drawn, and only those within 38 m cast sun shadows. Each grind rail's crutch posts are merged into one mesh per material.
+
 **Keeping it smooth.**
 - **Draw calls:**
   - Each kit building's hundred-odd pieces are merged by material the first time it is placed, and only the big pieces cast sun shadows.

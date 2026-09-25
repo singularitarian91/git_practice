@@ -28,7 +28,7 @@ export function hushedAt(game, pos) {
 
 export class Sleepwalker extends Entity {
   constructor(game, pos, opts = {}) {
-    const obj = game.assets.clone('Sleepwalker');
+    const obj = game.assets.cloneRigid('Sleepwalker');
     obj.position.copy(pos);
     game.scene.add(obj);
     const K = KINDS[opts.variant];
@@ -211,21 +211,21 @@ export class Sleepwalker extends Entity {
     for (const n of ['SW_Torso', 'SW_Head', 'SW_ArmL', 'SW_ArmR', 'SW_ForearmL', 'SW_ForearmR', 'SW_LegL', 'SW_LegR', 'SW_ShinL', 'SW_ShinR', 'SW_Hips']) {
       const part = this.p[n]?.o;
       if (!part) continue;
-      const meshes = [];
-      part.traverse((m) => { if (m.isMesh && (m === part || m.parent === part)) meshes.push(m); });
+      // the body is one skinned mesh per material; its limbs break off as the template's own pieces,
+      // painted with this one's materials (a hush's lavender, a mirror's chrome)
+      const meshes = game.assets.partMeshes('Sleepwalker', n);
       if (!meshes.length) continue;
       const holder = new THREE.Group();
       part.updateMatrixWorld(true);
       part.matrixWorld.decompose(holder.position, holder.quaternion, holder.scale);
       const box = new THREE.Box3();
       for (const m of meshes) {
-        const c = m.clone(false);
-        const rel = new THREE.Matrix4().copy(part.matrixWorld).invert().multiply(m.matrixWorld);
-        rel.decompose(c.position, c.quaternion, c.scale);
+        const c = new THREE.Mesh(m.geometry, this.instMat(m.material));
+        m.matrix.decompose(c.position, c.quaternion, c.scale);
         c.castShadow = true;
         holder.add(c);
         m.geometry.computeBoundingBox();
-        box.union(m.geometry.boundingBox.clone().applyMatrix4(rel));
+        box.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrix));
       }
       game.scene.add(holder);
       const size = box.getSize(new THREE.Vector3()).multiplyScalar(0.5).max(new THREE.Vector3(0.04, 0.04, 0.04));
@@ -239,6 +239,12 @@ export class Sleepwalker extends Entity {
       game.destruction.debris.push({ body, mesh: holder, t: 0, life: rnd(4, 7), fade: 0, burning: this.props.has('burning') ? 3 : 0, pv: null, hurt: 9 });
     }
     game.vfx.dust(this.center(), 0.8, '#f5efe6');
+  }
+
+  // this instance's copy of a template material (by name), for pieces broken off it
+  instMat(tpl) {
+    if (!this._mats) { this._mats = new Map(); this.obj.traverse((o) => { if (o.isMesh) for (const mm of Array.isArray(o.material) ? o.material : [o.material]) if (!this._mats.has(mm.name)) this._mats.set(mm.name, mm); }); }
+    return this._mats.get(tpl.name) || tpl;
   }
 
   pose(n, x = 0, y = 0, z = 0, px = 0, py = 0, pz = 0) {

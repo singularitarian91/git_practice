@@ -173,6 +173,31 @@ export class Assets {
     return o;
   }
 
+  // A jointed template (the Sleepwalker) as one skinned mesh per material: its part
+  // nodes stay, as bones, so posing them still works, but it draws in 4 calls, not 26.
+  cloneRigid(name) {
+    const t = this.templates.get(name);
+    if (!t) return this.placeholder(name);
+    this.rigid = this.rigid || {};
+    if (!(name in this.rigid)) this.rigid[name] = rigidPlan(t);
+    const o = SkeletonUtils.clone(t);
+    if (!applyRigidPlan(o, this.rigid[name], name + '_')) o.traverse((m) => { if (m.isMesh) m.material = m.material.clone(); });
+    return o;
+  }
+  // the template's own meshes for one part (what a porcelain limb breaks off as)
+  partMeshes(name, part) {
+    this.parts = this.parts || {};
+    const key = name + '/' + part;
+    if (this.parts[key]) return this.parts[key];
+    const t = this.templates.get(name), p = t?.getObjectByName(part), out = [];
+    if (p) {
+      p.updateMatrixWorld(true);
+      const inv = new THREE.Matrix4().copy(p.matrixWorld).invert();
+      p.traverse((m) => { if (m.isMesh && (m === p || m.parent === p)) out.push({ geometry: m.geometry, material: m.material, matrix: new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld) }); });
+    }
+    return (this.parts[key] = out);
+  }
+
   placeholder(name) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xff00ff }));
     m.geometry.translate(0, 0.5, 0);
@@ -271,7 +296,7 @@ function rigidPlan(template) {
   return { count: parts.length, groups: out };
 }
 
-function applyRigidPlan(root, plan) {
+function applyRigidPlan(root, plan, prefix = 'Figment_') {
   if (!plan) return false;
   const parts = [];
   root.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh) parts.push(o); });
@@ -287,10 +312,13 @@ function applyRigidPlan(root, plan) {
   for (const g of plan.groups) {
     const bones = g.parts.map((i) => nodes[i]);
     const sm = new THREE.SkinnedMesh(g.geo, g.mat.clone());
-    sm.name = 'Figment_' + (g.mat.name || 'part');
+    sm.name = prefix + (g.mat.name || 'part');
     sm.bind(new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4())), new THREE.Matrix4());
     sm.castShadow = true; sm.receiveShadow = true;
-    sm.frustumCulled = false; // it follows the parts, not its own transform
+    // it follows the parts, not its own transform: a figure's limbs can reach anywhere, but a
+    // Sleepwalker stays within a couple of metres of its feet, so it can still be culled
+    if (prefix === 'Figment_') sm.frustumCulled = false;
+    else sm.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1, 0), 2.2); // three culls a skinned mesh by its own sphere
     root.add(sm);
   }
   return true;
