@@ -332,6 +332,7 @@
     });
     this.revisit = !!o.revisit;
     this.finish = { vignette: 0.75, grain: 0.7, frame: 'torn' };
+    this.paperLight = { tint: '#d6d1c3', tintA: 0.16 };
     this.tears = TEARS.map((t, i) => ({ x: t[0], y: t[1], w: t[2], h: t[3], p: this.revisit ? 1 : 0, done: this.revisit, i }));
     this.seeds = SEEDS.map((sx, i) => ({ x: sx, planted: this.revisit, grow: this.revisit ? 1.6 : 0, i }));
     this.chair = { x: this.revisit ? SPOT_X : 540, facing: 1, carried: false, placed: this.revisit };
@@ -729,13 +730,36 @@
     // hanging edge in the wind (the painted shelter has its own cloth on the left post)
     if (!this.painted) P.gauze(x, 350, 168, 60, 170, { t, alpha: 0.5, seed: 4, wind: 0.2, color: '#cbbfa6' });
     P.gauze(x, 838, 172, 56, 140, { t: t + 2, alpha: 0.45, seed: 8, wind: 0.2, color: '#b8918a' });
+    // sewn into that hanging: the bedroom window, in thread (after Do Ho Suh: the first room
+    // stays visible, as a trace, inside the last place)
+    x.save();
+    x.translate(866, 176);
+    x.transform(1, 0, Math.sin(t * 1.2 + 2) * 0.05, 1, 0, 0);
+    x.strokeStyle = 'rgba(250,244,232,0.5)';
+    x.lineWidth = 1;
+    x.setLineDash([3, 3]);
+    x.strokeRect(-17, 18, 34, 46);
+    x.beginPath();
+    x.moveTo(0, 18); x.lineTo(0, 64);
+    x.moveTo(-17, 40); x.lineTo(17, 40);
+    x.stroke();
+    x.setLineDash([]);
+    x.restore();
     // tears and their patches
     for (const tr of this.tears) {
       if (!tr.done) {
         x.fillStyle = '#9fa0a3';
         x.beginPath();
         P.roughPolyPath(x, [[tr.x - tr.w / 2, tr.y - tr.h / 2], [tr.x + tr.w / 2, tr.y - tr.h / 2 + 4], [tr.x + tr.w / 2 - 6, tr.y + tr.h / 2], [tr.x - tr.w / 2 + 4, tr.y + tr.h / 2 - 3]], true, 6, M.rng(tr.i + 3), 7);
-        x.fill();
+        const sky = this.painted && this.stageTf && G.art.get(ART.back);
+        if (sky) {
+          // a real hole: the sky behind shows through it
+          x.save();
+          x.clip();
+          x.setTransform(this.stageTf);
+          x.drawImage(sky, -(this.backSX || 0), 0, 1780, G.H);
+          x.restore();
+        } else x.fill();
         x.strokeStyle = 'rgba(58,46,40,0.55)';
         x.lineWidth = 2.2;
         x.stroke();
@@ -776,11 +800,11 @@
 
   Acceptance.prototype.drawNPC = function (x, n) {
     const sway = n.state === 'work' ? Math.sin(n.t * 2.2) * 0.02 : 0;
-    G.person.draw(x, {
+    G.person.drawPaper(x, {
       x: n.x, y: ground(n.x), s: HERO * 0.98, dir: n.dir, t: this.t + n.home,
       look: n.look, kneel: n.kneel, work: n.work || 0, lean: sway, loose: 0.6, wind: 0.2,
       bow: n.state === 'work' ? 0.1 : -0.05, walk: n.walk, phase: n.phase, reach: n.reach, out: n.out
-    });
+    }, this.paperLight);
     if (n.holding && n.state === 'offer' && n.out.hand) this.drawSprout(x, n.out.hand.x, n.out.hand.y + 7, 1);
   };
 
@@ -802,6 +826,7 @@
   Acceptance.prototype.drawBackdrop = function (x) {
     const cam = this.cam, t = this.t;
     const sx = M.clamp((cam.x - 1414) * 0.25, 0, 1780 - G.W);
+    this.backSX = sx;
     x.drawImage(G.art.get(ART.back), -sx, 0, 1780, G.H);
     x.save();
     x.beginPath();
@@ -884,6 +909,7 @@
     }
 
     x.save();
+    this.stageTf = x.getTransform ? x.getTransform() : null;
     cam.apply(x);
     const gl = this.groundL;
     const turf = this.painted && P.pattern(x, ART.ground, 3, 0, 978);

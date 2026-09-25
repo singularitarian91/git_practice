@@ -647,6 +647,8 @@
     this.cam.x = G.W / 2;
     this.cam.y = G.H / 2;
     this.finish = { vignette: 0.9, grain: 0.55 };
+    // the light the cut-paper figure stands in: cool window daylight (warm afternoon on a return)
+    this.paperLight = this.revisit ? { tint: '#f0d6a8', tintA: 0.2 } : { tint: '#e3e1db', tintA: 0.16 };
     this.copy = 0;
     this.noticed = 0;
     this.loops = 0;
@@ -982,6 +984,28 @@
     x.drawImage(A(ART.room), 0, 0, G.W, G.H);
     if (st.g > 0 && A(ART.gauze)) { x.globalAlpha = st.g; x.drawImage(A(ART.gauze), 0, 0, G.W, G.H); x.globalAlpha = 1; }
     this.drawPatches(x, st, 1);
+    if (st.cups >= 2) this.drawSteam(x, 1);
+  };
+  // A thread of steam from the second cup, the one still warm (after Tove Jansson: a little
+  // domestic warmth inside an uneasy room). It goes when the cup goes.
+  Denial.prototype.drawSteam = function (x, alpha) {
+    const t = this.t, cx = 929, cy = 429;
+    x.save();
+    x.lineCap = 'round';
+    for (let k = 0; k < 3; k++) {
+      const ph = (t * 0.28 + k / 3) % 1;
+      const a = Math.sin(ph * Math.PI) * 0.34 * alpha;
+      x.strokeStyle = 'rgba(244,242,236,' + a.toFixed(3) + ')';
+      x.lineWidth = 2.6 - ph * 1.2;
+      x.beginPath();
+      for (let i = 0; i <= 10; i++) {
+        const u = i / 10, y = cy - 3 - ph * 22 - u * 30;
+        const xx = cx + (k - 1) * 3 + Math.sin(u * 4.5 + t * 1.4 + k * 2.1) * (2 + u * 6);
+        if (i) x.lineTo(xx, y); else x.moveTo(xx, y);
+      }
+      x.stroke();
+    }
+    x.restore();
   };
   Denial.prototype.drawPatches = function (x, st, alpha) {
     x.save();
@@ -1007,6 +1031,7 @@
     if (this.painted) {
       x.drawImage(G.art.get(ART.room), 0, 0, G.W, G.H);
       this.drawPatches(x, first, 1);
+      this.drawSteam(x, 1);
     } else x.drawImage(this.layer.c, 0, 0, G.W, G.H);
     P.chair(x, 640, 612, { s: 165, facing: 1, throwColor: C.ochre });
     x.globalAlpha = a;

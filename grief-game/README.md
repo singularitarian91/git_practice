@@ -68,16 +68,32 @@ After the end, each chapter can be revisited. The loss is the same, but each ret
 - **Scale**: the hero is largest in the bedroom and smallest on the open plain at the end (ROOM → OPEN WORLD).
 - **Light**: overcast daylight throughout. Clear warm light is saved for earned moments (the flower, the chair's place).
 
-### The painted look
+### Art direction
 
-The scenery is painted, following the guide's studies:
-- Denial's room and its gauze walls
-- the Anger grove with its gate
-- the dusk town and lamp-lit rooms of Bargaining
-- the Depression lake, porch and reeds
-- the Acceptance river plain and shelter
+The guide's form is *cut paper / charcoal / frayed linen / stained wood / gouache / photographic light*. The game holds to one rule built on that: **the places are painted, and the people are cut paper laid on the page.**
+- **The pages.** Every place is a painting made from the guide's study for that chapter.
+- **The people.** Each figure is a cut-out dressed in painted cloth: ochre wool, plum, sage, linen and tweed. A charcoal line is redrawn around it a few times a second, like a hand-drawn line, and it casts a faint shadow where the paper lifts off the painting. Each chapter's light tints it: window daylight, the grove's shade, rain, the open plain.
+- **The torn edge.** From Depression on, the page itself has a torn edge, as in the guide's later studies ("keep the scar in the image").
+- **Depression.** It follows the study the guide chose over the earlier cinematic lake: an almost empty far shore, one light a long way off, more negative space and a rougher, marked surface.
 
-The figures are drawn in code but dressed in painted cloth (ochre wool, plum, sage, linen), cut-paper style. The empty chair is a painting in every chapter. The chapter plates move: gauze stirs, ribbons whip in the wind, rain rings the lake, the canopy billows. The end card is a small painting of the chair by the fence. [`assets/art/README.md`](assets/art/README.md) describes how each picture was made, with the prompts, so the look can be redone in another style.
+The guide names twelve artists and gives each one a use. They're used for principles; none of their work is copied.
+
+| Reference | The guide's use | Where it shows |
+| --- | --- | --- |
+| Shaun Tan | Grief alters architecture, weather and scale | The bedroom wall gives way into the grove; rooms fold; the person gets smaller as the world grows |
+| Tove Jansson | A little domestic warmth inside uneasy spaces | Steam rising from the one cup still warm in the first room; a single lit window far across the lake |
+| Katsumi Komagata | Doors, windows and paths as successive reveals | Each door opens onto the next room; Bargaining's rooms lift off the page like card as they turn; the people are cut paper |
+| Do Ho Suh | Earlier rooms stay visible inside later levels | Gauze walls with fainter copies of the room behind; translucent sewn walls between the folded rooms; the bedroom window stitched into the shelter's hanging cloth |
+| Eyvind Earle | A strong, almost oppressive pattern for the anger grove | Damask-printed trunks in a hard vertical rhythm |
+| Matt Nava | A readable route across a large horizon | The last walk along the river as the camera pulls back |
+| Claire Mathon | An intimate opening with room for unspoken history | Soft window light in the first room |
+| Franz Lustig | Light and small details change on a return | Each return visit's light, and its one new thing |
+| Rinko Kawauchi | A flower, reflection or scuff carries a scene | The small lives on the boardwalk; the flower in its light |
+| Siân Davey | Hope made visible through shared, ordinary labour | The gardeners hold the cloth, hand over seedlings, walk down to the fence |
+| Bode | Visible patches on clothes and shelter | The patched coat and chair throw; the patchwork canopy, its tears open to the sky until they're mended |
+| Issey Miyake | The coat gains movement and looseness | Pleats in the coat open a little wider each chapter and with every step |
+
+The chapter plates are short painted loops made from the guide's studies, and the end card is a small painting of the chair by the fence. [`assets/art/README.md`](assets/art/README.md) records how each picture was made, with the prompts, so the look can be redone in another style.
 
 ## Files
 

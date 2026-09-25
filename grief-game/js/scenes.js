@@ -384,7 +384,7 @@
     if (this.ready && !this.warmList) this.warmList = this.art.concat(G.art.shared, ['cloth']);
     if (this.warmList && this.warmList.length && this.t > 0.4) {
       const w = this.warmList.shift();
-      if (w === 'cloth') G.person.warm();
+      if (w === 'cloth') G.person.warm(this.next && this.next.paperLight);
       else G.art.warm(w);
     }
     G.setCursor(this.t > 1 && this.ready ? 'pointer' : 'default');

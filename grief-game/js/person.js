@@ -26,19 +26,29 @@
   }
 
   // A sleeve or trouser leg. `dark` lays a shadow over it (for the far side of the body).
-  function limb(x, pts, w, col, dark) {
-    x.strokeStyle = col;
-    x.lineWidth = w;
+  // `ink` (paper mode) outlines it in charcoal first; only that first stroke casts a shadow.
+  function limb(x, pts, w, col, dark, ink) {
     x.lineCap = 'round';
     x.lineJoin = 'round';
     x.beginPath();
     x.moveTo(pts[0], pts[1]);
     for (let i = 2; i < pts.length; i += 2) x.lineTo(pts[i], pts[i + 1]);
+    x.save();
+    if (ink) {
+      x.strokeStyle = ink.col;
+      x.lineWidth = w + ink.w * 2;
+      x.stroke();
+      x.shadowColor = 'rgba(0,0,0,0)';
+    }
+    x.strokeStyle = col;
+    x.lineWidth = w;
     x.stroke();
+    x.shadowColor = 'rgba(0,0,0,0)';
     if (dark) {
       x.strokeStyle = 'rgba(0,0,0,' + dark + ')';
       x.stroke();
     }
+    x.restore();
   }
 
   // Size of one texture pixel of a coat's cloth, in the figure's unit frame.
@@ -61,12 +71,13 @@
   };
 
   // Make the figures' recoloured cloth ahead of time (it's built on first use otherwise).
-  person.warm = function () {
+  person.warm = function (env) {
     if (!G.paint.cloth) return;
     const c = document.createElement('canvas');
     c.width = c.height = 1;
     const x = c.getContext('2d');
-    for (const look of [person.HERO, person.ELDER, person.GARDENER]) {
+    for (const base of [person.HERO, person.ELDER, person.GARDENER]) {
+      const look = litLook(base, env);
       if (!look.cloth) continue;
       G.paint.cloth(x, look.cloth.coat, look.coat, 1);
       G.paint.cloth(x, look.cloth.trousers, look.trousers, 1);
@@ -84,9 +95,58 @@
    * }
    * Writes world-space hand positions to p.out.
    */
+  // The chapter's light, multiplied into a figure's colours (cached per light).
+  function litLook(look, pp) {
+    if (!pp || !pp.tint) return look;
+    const cache = look.__lit || (look.__lit = {});
+    const key = pp.tint + '|' + (pp.tintA || 0);
+    if (cache[key]) return cache[key];
+    const L = M.parseColor(pp.tint), A = pp.tintA == null ? 0.3 : pp.tintA;
+    const f = [0, 1, 2].map(i => 1 - A + A * L[i] / 255);
+    const m = c => { const q = M.parseColor(c); return 'rgb(' + q.map((v, i) => Math.round(v * f[i])).join(',') + ')'; };
+    const out = Object.assign({}, look, { coat: m(look.coat), trousers: m(look.trousers), boots: m(look.boots), skin: m(look.skin), hair: m(look.hair) });
+    if (look.patches) out.patches = look.patches.map(pa => [m(pa[0])].concat(pa.slice(1)));
+    delete out.__lit;
+    return (cache[key] = out);
+  }
+
   person.draw = function (x, p) {
-    const look = p.look || person.HERO;
+    const pp = p.paper;
+    const look = litLook(p.look || person.HERO, pp);
     const s = p.s, dir = p.dir || 1, t = p.t || G.time;
+    // paper mode: every piece is cut out and outlined in charcoal, and casts a faint shadow on
+    // whatever lies under it (the page, or the piece beneath)
+    let ink = null, shOn = () => {}, shOff = () => {};
+    if (pp) {
+      const tf = x.getTransform && x.getTransform();
+      const a = tf ? Math.hypot(tf.a, tf.b) : 1; // device pixels per world unit
+      const unit = s * a; // device pixels per figure height
+      const key = p.out || p;
+      const seed = key.__ink || (key.__ink = 1 + Math.random() * 97);
+      const r = M.rng(Math.floor(seed * 131) + Math.floor((G.time || 0) * 8));
+      const px = Math.max(1.15, unit * 0.0032) * r.range(0.85, 1.15);
+      ink = { w: px / unit, col: 'rgba(28,23,20,0.88)' };
+      const lift = Math.max(1, unit * (pp.lift == null ? 0.012 : pp.lift));
+      shOn = () => { x.shadowColor = 'rgba(24,17,12,0.2)'; x.shadowOffsetX = lift; x.shadowOffsetY = lift * 0.75; x.shadowBlur = 0; };
+      shOff = () => { x.shadowColor = 'rgba(0,0,0,0)'; x.shadowOffsetX = 0; x.shadowOffsetY = 0; };
+    }
+    // fill the current path as one cut piece: outline (which casts the shadow), then the cloth
+    const piece = fill => {
+      if (ink) {
+        x.lineJoin = 'round';
+        x.lineWidth = ink.w * 2;
+        x.strokeStyle = ink.col;
+        x.stroke();
+        x.save();
+        x.shadowColor = 'rgba(0,0,0,0)';
+        x.fillStyle = fill;
+        x.fill();
+        x.restore();
+      } else {
+        x.fillStyle = fill;
+        x.fill();
+      }
+    };
     const walk = M.clamp(p.walk || 0, 0, 1), ph = p.phase || 0;
     const k = M.clamp(p.kneel || 0, 0, 1);
     const wind = p.wind || 0, loose = p.loose == null ? 0.5 : p.loose;
@@ -107,6 +167,7 @@
     x.beginPath();
     x.ellipse(0, 0, 0.16 + k * 0.1, 0.025, 0, 0, TAU);
     x.fill();
+    shOn();
 
     // ----- legs: walk gait blended toward a kneel
     const sw = 0.46 * walk;
@@ -131,22 +192,21 @@
       return { kx, ky, ax, ay, th, kb };
     });
     const drawLeg = (lp, far) => {
-      if (trouF !== trou) limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, trouF, far ? 0.3 : 0);
-      else limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, far ? trouD : trou);
+      if (trouF !== trou) limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, trouF, far ? 0.3 : 0, ink);
+      else limb(x, [hipX, hipY, lp.kx, lp.ky, lp.ax, lp.ay], 0.056, far ? trouD : trou, 0, ink);
       // boot
       const bootCol = far ? shade(look.boots, -0.3) : look.boots;
       x.save();
       x.translate(lp.ax, lp.ay);
       // walking: toe follows the shin; kneeling: foot turned back, sole up
       x.rotate(M.lerp(M.clamp((lp.th - lp.kb) * 0.35, -0.3, 0.5), Math.PI * 0.94, k));
-      x.fillStyle = bootCol;
       x.beginPath();
       x.moveTo(-0.03, -0.035);
       x.lineTo(0.035, -0.03);
       x.quadraticCurveTo(0.085, -0.02, 0.085, 0.004);
       x.lineTo(-0.035, 0.008);
       x.closePath();
-      x.fill();
+      piece(bootCol);
       x.restore();
     };
     drawLeg(legPts[1], true);
@@ -174,12 +234,11 @@
       const fa = aa - 0.35 - walk * 0.2;
       farHand = { ex, ey, hx: ex + Math.cos(fa) * L_FORE, hy: ey + Math.sin(fa) * L_FORE };
     }
-    if (coatF !== coat) limb(x, [shoulder.x, shoulder.y, farHand.ex, farHand.ey, farHand.hx, farHand.hy], 0.05, coatF, 0.3);
-    else limb(x, [shoulder.x, shoulder.y, farHand.ex, farHand.ey, farHand.hx, farHand.hy], 0.05, coatD);
-    x.fillStyle = shade(look.skin, -0.2);
+    if (coatF !== coat) limb(x, [shoulder.x, shoulder.y, farHand.ex, farHand.ey, farHand.hx, farHand.hy], 0.05, coatF, 0.3, ink);
+    else limb(x, [shoulder.x, shoulder.y, farHand.ex, farHand.ey, farHand.hx, farHand.hy], 0.05, coatD, 0, ink);
     x.beginPath();
     x.arc(farHand.hx, farHand.hy, 0.022, 0, TAU);
-    x.fill();
+    piece(shade(look.skin, -0.2));
     x.restore();
 
     drawLeg(legPts[0], false);
@@ -212,7 +271,6 @@
       const wy = groundLocal(h[0], h[1]);
       if (wy > -0.008) h[1] -= (wy + 0.008) / Math.cos(lean);
     }
-    x.fillStyle = coatF;
     x.beginPath();
     x.moveTo(0.045, -0.33);
     x.quadraticCurveTo(0.085, -0.28, 0.078, -0.2);
@@ -222,9 +280,10 @@
     x.quadraticCurveTo(-0.1 - flare * 0.3, 0.02, -0.088, -0.12);
     x.quadraticCurveTo(-0.085, -0.28, -0.05, -0.325);
     x.closePath();
-    x.fill();
-    // shading down the back and a lighter front panel
+    piece(coatF);
+    // shading down the back and a lighter front panel (printed on the piece: no shadows)
     x.save();
+    shOff();
     x.clip();
     x.fillStyle = M.rgba(coatD, 0.55);
     x.beginPath();
@@ -236,6 +295,25 @@
     x.fill();
     x.fillStyle = M.rgba(coatL, 0.35);
     x.fillRect(0.03, -0.3, 0.06, 0.45);
+    // pleats (after Issey Miyake): pressed flat at first, opening out chapter by chapter and with every step
+    const fan = 0.25 + loose * 0.8 + walk * 0.35 + wind * 0.4;
+    const hemAt = u => {
+      const f = u * hemN, i0 = Math.min(hemN - 1, Math.floor(f)), k2 = f - i0;
+      return [M.lerp(hem[i0][0], hem[i0 + 1][0], k2), M.lerp(hem[i0][1], hem[i0 + 1][1], k2)];
+    };
+    const waistAt = u => [M.lerp(0.07, -0.075, u), -0.03 + u * 0.01];
+    for (let i = 0; i < 7; i++) {
+      const u0 = i / 7, u1 = (i + 1) / 7;
+      const a0 = waistAt(u0), a1 = waistAt(u1), b0 = hemAt(u0), b1 = hemAt(u1);
+      x.fillStyle = i % 2 ? 'rgba(255,250,240,' + (0.05 * fan).toFixed(3) + ')' : 'rgba(0,0,0,' + (0.08 * fan).toFixed(3) + ')';
+      x.beginPath();
+      x.moveTo(a0[0], a0[1]);
+      x.lineTo(a1[0], a1[1]);
+      x.lineTo(b1[0], b1[1] + 0.02);
+      x.lineTo(b0[0], b0[1] + 0.02);
+      x.closePath();
+      x.fill();
+    }
     // pleats that loosen chapter by chapter
     x.strokeStyle = M.rgba(coatD, 0.45 + loose * 0.2);
     x.lineWidth = 0.006;
@@ -267,12 +345,15 @@
     }
     x.restore();
     // hem edge
+    x.save();
+    shOff();
     x.strokeStyle = M.rgba(coatD, 0.9);
     x.lineWidth = 0.007;
     x.beginPath();
     x.moveTo(hem[0][0], hem[0][1]);
     for (let i = 1; i <= hemN; i++) x.lineTo(hem[i][0], hem[i][1]);
     x.stroke();
+    x.restore();
 
     // ----- head
     const bow = (p.bow || 0) + k * 0.25;
@@ -280,15 +361,16 @@
     x.translate(0.012, -0.335);
     x.rotate(bow);
     // neck
-    x.fillStyle = shade(look.skin, -0.12);
-    x.fillRect(-0.018, -0.05, 0.036, 0.05);
+    x.beginPath();
+    x.rect(-0.018, -0.05, 0.036, 0.05);
+    piece(shade(look.skin, -0.12));
     const hx = 0.012, hy = -0.1, hr = 0.074;
-    x.fillStyle = look.skin;
     x.beginPath();
     x.ellipse(hx, hy, hr * 0.92, hr, 0, 0, TAU);
-    x.fill();
+    piece(look.skin);
     // a little modelling: the back of the head in shade, a warm cheek
     x.save();
+    shOff();
     x.clip();
     x.fillStyle = M.rgba(shade(look.skin, -0.4), 0.32);
     x.beginPath();
@@ -299,6 +381,8 @@
     x.arc(hx + hr * 0.42, hy + hr * 0.38, hr * 0.24, 0, TAU);
     x.fill();
     x.restore();
+    x.save();
+    shOff();
     x.fillStyle = look.skin;
     // nose hint
     x.beginPath();
@@ -306,38 +390,38 @@
     x.lineTo(hx + hr * 1.05, hy + 0.012);
     x.lineTo(hx + hr * 0.84, hy + 0.02);
     x.fill();
-    drawHair(x, look, hx, hy, hr, t, wind, walk);
+    x.restore();
+    drawHair(x, look, hx, hy, hr, t, wind, walk, piece);
     x.restore();
 
     // collar
-    x.fillStyle = coatD;
     x.beginPath();
     x.moveTo(-0.055, -0.33);
     x.quadraticCurveTo(0.0, -0.37, 0.05, -0.335);
     x.lineTo(0.04, -0.3);
     x.quadraticCurveTo(0, -0.325, -0.05, -0.3);
     x.closePath();
-    x.fill();
+    piece(coatD);
 
     // their scarf, once it's been freed from the thorns: wound at the neck, one end loose
     if (p.scarf) {
       const fl = wind * 0.09 + walk * 0.025;
       const knit = G.paint.cloth && G.paint.cloth(x, 'rust', '#8e4a2a', WEAVE * 0.8);
-      x.fillStyle = knit || '#8e4a2a';
-      x.beginPath();
-      x.moveTo(-0.07, -0.345);
-      x.quadraticCurveTo(0.0, -0.385, 0.068, -0.35);
-      x.lineTo(0.06, -0.305);
-      x.quadraticCurveTo(0.0, -0.335, -0.062, -0.3);
-      x.closePath();
-      x.fill();
+      const wool = knit || '#8e4a2a';
       x.beginPath();
       x.moveTo(-0.04, -0.33);
       x.quadraticCurveTo(-0.09 - fl, -0.3 + Math.sin(t * 5) * 0.01, -0.12 - fl * 1.6, -0.2 + Math.sin(t * 7 + 1) * 0.015 * (0.3 + wind));
       x.lineTo(-0.085 - fl * 1.3, -0.19);
       x.quadraticCurveTo(-0.06, -0.27, -0.01, -0.31);
       x.closePath();
-      x.fill();
+      piece(wool);
+      x.beginPath();
+      x.moveTo(-0.07, -0.345);
+      x.quadraticCurveTo(0.0, -0.385, 0.068, -0.35);
+      x.lineTo(0.06, -0.305);
+      x.quadraticCurveTo(0.0, -0.335, -0.062, -0.3);
+      x.closePath();
+      piece(wool);
       x.strokeStyle = 'rgba(214,170,70,0.8)';
       x.lineWidth = 0.006;
       x.beginPath();
@@ -361,13 +445,15 @@
       const fa = aa - 0.3 - walk * 0.25;
       nearHand = { ex, ey, hx: ex + Math.cos(fa) * L_FORE, hy: ey + Math.sin(fa) * L_FORE };
     }
-    limb(x, [shoulder.x, shoulder.y, nearHand.ex, nearHand.ey, nearHand.hx, nearHand.hy], 0.056, coatF);
+    limb(x, [shoulder.x, shoulder.y, nearHand.ex, nearHand.ey, nearHand.hx, nearHand.hy], 0.056, coatF, 0, ink);
+    x.save();
+    shOff();
     limb(x, [shoulder.x, shoulder.y, nearHand.ex, nearHand.ey], 0.02, M.rgba(coatL, 0.4));
+    x.restore();
     // cuff and hand
-    x.fillStyle = look.skin;
     x.beginPath();
     x.arc(nearHand.hx, nearHand.hy, 0.025, 0, TAU);
-    x.fill();
+    piece(look.skin);
     x.restore();
 
     // hand position in world space for props
@@ -391,17 +477,19 @@
     return { x: wx * c - wy * sn, y: wx * sn + wy * c };
   }
 
-  function drawHair(x, look, hx, hy, hr, t, wind, walk) {
+  function drawHair(x, look, hx, hy, hr, t, wind, walk, piece) {
+    const paper = !!piece;
+    piece = piece || (f => { x.fillStyle = f; x.fill(); });
     x.fillStyle = look.hair;
     const flow = wind * 0.06 + walk * 0.01;
     if (look.hairStyle === 'bun') {
       x.beginPath();
+      x.arc(hx - hr * 0.95, hy - hr * 0.45, hr * 0.42, 0, TAU);
+      piece(look.hair);
+      x.beginPath();
       x.ellipse(hx - 0.01, hy - 0.02, hr * 1.02, hr * 0.95, 0, Math.PI * 0.95, Math.PI * 2.2);
       x.lineTo(hx - hr * 0.9, hy + 0.02);
-      x.fill();
-      x.beginPath();
-      x.arc(hx - hr * 0.95, hy - hr * 0.45, hr * 0.42, 0, TAU);
-      x.fill();
+      piece(look.hair);
       return;
     }
     x.beginPath();
@@ -412,17 +500,17 @@
     x.quadraticCurveTo(hx - hr * 0.1, hy + hr * 0.1, hx + hr * 0.1, hy - hr * 0.1);
     x.quadraticCurveTo(hx + hr * 0.55, hy - hr * 0.35, hx + hr * 0.95, hy - hr * 0.2);
     x.closePath();
-    x.fill();
+    piece(look.hair);
     if (look.beard) {
       x.beginPath();
       x.moveTo(hx + hr * 0.1, hy + hr * 0.35);
       x.quadraticCurveTo(hx + hr * 0.9, hy + hr * 1.05, hx + hr * 0.95, hy + hr * 0.25);
       x.lineTo(hx + hr * 0.6, hy + hr * 0.4);
       x.closePath();
-      x.fill();
+      piece(look.hair);
     }
-    // loose strands in the wind
-    if (wind > 0.05 || walk > 0.2) {
+    // loose strands in the wind (cut paper keeps them for a real wind)
+    if (paper ? wind > 0.3 : (wind > 0.05 || walk > 0.2)) {
       x.strokeStyle = M.rgba(look.hair, 0.7);
       x.lineWidth = 0.005;
       x.lineCap = 'round';
@@ -436,6 +524,18 @@
       x.stroke();
     }
   }
+
+  // ------------------------------------------------------------ cut paper
+  // The people are cut paper laid over painted pages (the guide's FORM: cut paper, charcoal,
+  // frayed linen). In paper mode each piece of a figure is outlined in charcoal (the line
+  // thickens and thins a little, eight times a second, like a hand-drawn line), casts a faint
+  // shadow on whatever lies under it, and takes on the chapter's light.
+  // env: { tint: colour of the light, tintA: how strongly, lift: shadow distance (in figure heights) }
+  person.drawPaper = function (x, p, env) {
+    p.paper = env || {};
+    person.draw(x, p);
+    p.paper = null;
+  };
 
   // Top-down figure for the folded rooms of bargaining. p: {x, y, s, ang, phase, walk}
   person.drawTop = function (x, p) {

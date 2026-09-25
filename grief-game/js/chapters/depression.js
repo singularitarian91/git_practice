@@ -23,8 +23,9 @@
   // The porch painting, placed so its posts stand where the old porch's did (world x 140 and 470).
   const PORCH = { x: -21, y: DECK + 20 - 611, w: 617, h: 611 };
   const BOOTS = { x: 420, w: 68, h: 51 };
-  // The far windows in the painting, for their flicker and reflections (stage coordinates).
-  const WINDOWS = [[295, 416], [758, 416], [820, 416], [1007, 416], [1088, 416], [1177, 416]];
+  // The one far light in the painting (after the guide's marked-paper study: the shore is almost
+  // empty; a single window stays lit, a little domestic warmth a long way off), in stage coordinates.
+  const WINDOWS = [[1176, 419]];
   const WEARING = Object.assign({}, G.person.HERO, { boots: '#6b4a32' });
   const LIVES = {
     moth: 'A moth, waiting out the rain.',
@@ -218,6 +219,7 @@
     });
     this.revisit = !!o.revisit;
     this.finish = { vignette: 0.85, grain: 0.75, frame: 'torn' };
+    this.paperLight = this.revisit ? { tint: '#d8d0c2', tintA: 0.2, lift: 0.009 } : { tint: '#aeb3b9', tintA: 0.3, lift: 0.008 };
     this.lives = [];
     this.noticed = 0;
     this.still = 0;

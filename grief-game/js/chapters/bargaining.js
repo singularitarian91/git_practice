@@ -11,7 +11,7 @@
   const N = 1, E = 2, S = 4, Wd = 8;
   const DIRS = [[N, 0, -1, S], [E, 1, 0, Wd], [S, 0, 1, N], [Wd, -1, 0, E]];
   const ENTRY = { c: 0, r: 1 }, EXIT = { c: 4, r: 0 };
-  const FABRICS = ['#9d8aa6', '#8aa39c', '#d9c7a4', '#b8918a', '#a8a7c4'];
+  const FABRICS = ['#b7a4c8', '#d4a6a0', '#a8bba0', '#a6c4bc', '#c9b98f', '#9fb0c9'];
   const VERSIONS = ['table', 'bed', 'chair', 'stairs', 'plant', 'empty'];
   // "If only", matched to the version of the room that has just turned into view.
   const IFS = {
@@ -59,6 +59,9 @@
         });
       }
     }
+    // more of the walls in the study's pale dyed cloth (a separate sequence, so the rooms stay as they were)
+    const rf = M.rng(911);
+    for (const t of this.tiles) t.fabric = t.fabric.map(f => f || (rf() < 0.45 ? rf.pick(FABRICS) : null));
     // the lamp-lit rooms sit on the loop; turning one away puts its lamp out
     for (const t of this.tiles) { t.lamp = 0; t.lampTo = 0; }
     for (const [c, row] of [[1, 0], [2, 0], [2, 1], [1, 1]]) {
@@ -454,8 +457,12 @@
     x.save();
     x.translate(cx, cy);
     if (lifted > 0) {
-      x.fillStyle = 'rgba(0,0,0,0.4)';
-      x.fillRect(-TS / 2 + 8, -TS / 2 + 12, TS, TS);
+      // the room lifts off the page like a card while it turns (a soft, spreading shadow)
+      for (let k = 0; k < 3; k++) {
+        x.fillStyle = 'rgba(8,6,10,' + (0.16 * lifted).toFixed(3) + ')';
+        const o = 5 + k * 5 * lifted, gr = k * 3;
+        x.fillRect(-TS / 2 + o - gr, -TS / 2 + o * 1.3 - gr, TS + gr * 2, TS + gr * 2);
+      }
       x.scale(1 + lifted * 0.07, 1 + lifted * 0.07);
     }
     x.rotate(t.ang);
@@ -480,7 +487,8 @@
       x.fillStyle = 'rgba(20,18,24,0.28)';
       x.fillRect(-TS / 2, -TS / 2, TS, TS);
     }
-    // walls, with door gaps; some walls are patchwork cloth
+    // walls, with door gaps: translucent sewn cloth (after Do Ho Suh), so each room shows
+    // through its neighbour's wall; some are patchwork in other colours
     const WT = 11, GAP0 = 44, GAP1 = 106;
     DIRS.forEach(([d], i) => {
       x.save();
@@ -490,20 +498,28 @@
       const segs = has(t.mask, d) ? [[0, GAP0], [GAP1, TS]] : [[0, TS]];
       for (const [a, b] of segs) {
         const x0 = -TS / 2 + a, w = b - a;
-        if (fabric) {
-          x.fillStyle = M.rgba(fabric, 0.75);
-          x.fillRect(x0, -TS / 2, w, WT);
-          x.strokeStyle = 'rgba(245,238,225,0.7)';
-          x.lineWidth = 1;
-          x.setLineDash([3, 3]);
-          x.strokeRect(x0 + 1.5, -TS / 2 + 1.5, w - 3, WT - 3);
-          x.setLineDash([]);
-        } else {
-          x.fillStyle = '#d6cbbd';
-          x.fillRect(x0, -TS / 2, w, WT);
-          x.fillStyle = 'rgba(60,48,40,0.45)';
-          x.fillRect(x0, -TS / 2 + WT, w, 5);
-        }
+        const col = fabric || '#e8e0d0';
+        // the cloth, with light coming through it
+        x.fillStyle = M.rgba(col, fabric ? 0.52 : 0.4);
+        x.fillRect(x0, -TS / 2, w, WT);
+        x.fillStyle = 'rgba(255,248,236,0.16)';
+        x.fillRect(x0, -TS / 2, w, 3);
+        // the hem on the room side, and its running stitch
+        x.fillStyle = M.rgba(M.mixColor(col, '#000000', 0.5), 0.55);
+        x.fillRect(x0, -TS / 2 + WT - 1.6, w, 1.6);
+        x.strokeStyle = 'rgba(250,244,232,0.7)';
+        x.lineWidth = 1;
+        x.setLineDash([3, 4]);
+        x.beginPath();
+        x.moveTo(x0 + 2, -TS / 2 + WT * 0.45);
+        x.lineTo(x0 + w - 2, -TS / 2 + WT * 0.45);
+        x.stroke();
+        x.setLineDash([]);
+        // where it hangs, a soft band of shade on the floor
+        x.fillStyle = 'rgba(28,20,16,0.2)';
+        x.fillRect(x0, -TS / 2 + WT, w, 4);
+        x.fillStyle = 'rgba(28,20,16,0.1)';
+        x.fillRect(x0, -TS / 2 + WT + 4, w, 5);
       }
       if (has(t.mask, d)) {
         // a doorway that answers stands open; one that leads nowhere swings shut

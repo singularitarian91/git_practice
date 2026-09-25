@@ -474,6 +474,7 @@
     });
     this.revisit = !!o.revisit;
     this.finish = { vignette: 1, grain: 0.6 };
+    this.paperLight = { tint: '#9d9a97', tintA: this.revisit ? 0.18 : 0.3, lift: 0.01 };
     this.gust = 0;
     this.gustPhase = 'calm';
     this.gustT = 0;

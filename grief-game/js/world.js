@@ -278,7 +278,7 @@
       scarf: pl.scarf || (!!G.save.data.scarf && (G.flow.revisit || G.flow.current > 1))
     };
     if (extra) Object.assign(p, extra);
-    G.person.draw(x, p);
+    G.person.drawPaper(x, p, this.paperLight);
   };
 
   // Where a world point lands on the stage (used by tests and by some UI).
