@@ -8,7 +8,7 @@
   const TAU = M.TAU;
 
   // ------------------------------------------------------------ finishing layers
-  let grainTile = null, grainPattern = null, vignette = null, tornFrame = null;
+  let grainTile = null, vignette = null, tornFrame = null;
 
   function makeGrain() {
     const n = 256;
@@ -104,7 +104,6 @@
 
   P.init = function () {
     grainTile = makeGrain();
-    grainPattern = G.ctx.createPattern(grainTile, 'repeat');
     vignette = makeVignette();
     tornFrame = makeTornFrame();
     P.damaskPale = P.damask('#8f9aa0', '#cfc6b4', 58, 84, 0.45);
@@ -112,25 +111,30 @@
     P.damaskDusk = P.damask('#3a4452', '#8d7f6c', 46, 66, 0.8);
   };
 
-  // Scene-controlled finishing: torn frame, vignette, grain.
+  // Scene-controlled finishing: vignette, torn frame and paper grain, pre-composited into
+  // one overlay at stage resolution so each frame pays for a single full-screen draw.
+  let overlay = null, overlayKey = '';
   P.finish = function (ctx, scene) {
     const o = (scene && scene.finish) || {};
-    ctx.save();
-    if (o.vignette !== 0) {
-      ctx.globalAlpha = o.vignette == null ? 1 : o.vignette;
-      ctx.drawImage(vignette.c, 0, 0, G.W, G.H);
-    }
-    if (o.frame === 'torn') {
-      ctx.globalAlpha = 1;
-      ctx.drawImage(tornFrame.c, 0, 0, G.W, G.H);
-    }
+    const va = o.vignette == null ? 1 : o.vignette;
     const ga = o.grain == null ? 0.7 : o.grain;
-    if (ga > 0 && grainPattern) {
-      ctx.globalAlpha = ga;
-      ctx.fillStyle = grainPattern;
-      ctx.fillRect(0, 0, G.W, G.H);
+    const torn = o.frame === 'torn';
+    const k = G.view.k;
+    const key = va + '|' + ga + '|' + torn + '|' + G.stage.width + 'x' + G.stage.height;
+    if (key !== overlayKey) {
+      if (overlay) { overlay.c.width = 0; overlay.c.height = 0; }
+      overlay = G.layer(G.W, G.H, k);
+      overlayKey = key;
+      const x = overlay.x;
+      if (va > 0) { x.globalAlpha = va; x.drawImage(vignette.c, 0, 0, G.W, G.H); }
+      if (torn) { x.globalAlpha = 1; x.drawImage(tornFrame.c, 0, 0, G.W, G.H); }
+      if (ga > 0 && grainTile) {
+        x.globalAlpha = ga;
+        x.fillStyle = x.createPattern(grainTile, 'repeat');
+        x.fillRect(0, 0, G.W, G.H);
+      }
     }
-    ctx.restore();
+    ctx.drawImage(overlay.c, 0, 0, G.W, G.H);
   };
 
   // Bake grain into a painted layer.

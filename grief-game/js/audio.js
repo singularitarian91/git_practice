@@ -16,6 +16,7 @@
   });
 
   const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+  const MASTER = 1.5; // overall level (measured against recordings of each chapter)
 
   function noiseBuffer(ac, seconds, brown) {
     const len = Math.floor(ac.sampleRate * seconds);
@@ -55,12 +56,13 @@
     if (!AC) return;
     const ac = (A.ctx = new AC());
     A.master = ac.createGain();
-    A.master.gain.value = A.muted ? 0 : 0.9;
+    A.master.gain.value = A.muted ? 0 : MASTER;
     const comp = ac.createDynamicsCompressor();
     comp.threshold.value = -18;
     comp.ratio.value = 3;
     A.master.connect(comp);
     comp.connect(ac.destination);
+    A.out = comp;
 
     A.verb = ac.createConvolver();
     A.verb.buffer = impulse(ac, 3.2, 2.6);
@@ -94,10 +96,10 @@
     // rain
     const rhp = ac.createBiquadFilter();
     rhp.type = 'highpass';
-    rhp.frequency.value = 2400;
+    rhp.frequency.value = 1400;
     const rlp = ac.createBiquadFilter();
     rlp.type = 'lowpass';
-    rlp.frequency.value = 8000;
+    rlp.frequency.value = 4500;
     A.rainGain = ac.createGain();
     A.rainGain.gain.value = 0;
     loop(ac, white).connect(rhp);
@@ -125,19 +127,23 @@
     // room tone
     const rlo = ac.createBiquadFilter();
     rlo.type = 'lowpass';
-    rlo.frequency.value = 160;
+    rlo.frequency.value = 420;
+    const rhi = ac.createBiquadFilter();
+    rhi.type = 'highpass';
+    rhi.frequency.value = 120;
     A.roomGain = ac.createGain();
     A.roomGain.gain.value = 0;
-    loop(ac, brown).connect(rlo);
+    loop(ac, brown).connect(rhi);
+    rhi.connect(rlo);
     rlo.connect(A.roomGain);
     A.roomGain.connect(A.master);
 
-    // drone: three slow voices through a soft filter
+    // drone: three slow voices plus the root an octave up (so small speakers can play it)
     A.droneGain = ac.createGain();
     A.droneGain.gain.value = 0;
     const dlp = ac.createBiquadFilter();
     dlp.type = 'lowpass';
-    dlp.frequency.value = 900;
+    dlp.frequency.value = 1400;
     A.droneGain.connect(dlp);
     dlp.connect(A.master);
     const dsend = ac.createGain();
@@ -145,12 +151,12 @@
     dlp.connect(dsend);
     dsend.connect(A.verbIn);
     A.voices = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       const o = ac.createOscillator();
-      o.type = i === 0 ? 'sine' : 'triangle';
-      o.frequency.value = mtof(50 + i * 7);
+      o.type = i === 0 || i === 3 ? 'sine' : 'triangle';
+      o.frequency.value = mtof(i === 3 ? 62 : 50 + i * 7);
       const g = ac.createGain();
-      g.gain.value = i === 0 ? 0.5 : 0.18;
+      g.gain.value = [0.24, 0.18, 0.18, 0.22][i];
       const vib = ac.createOscillator();
       vib.frequency.value = 0.1 + i * 0.07;
       const vg = ac.createGain();
@@ -167,16 +173,26 @@
     if (A.pending) { A.scene(A.pending); A.pending = null; }
   }
 
+  // Quiet when the tab or app is in the background; the next tap wakes it if needed.
+  document.addEventListener('visibilitychange', () => {
+    if (!A.ctx) return;
+    const p = document.hidden ? A.ctx.suspend() : A.ctx.resume();
+    if (p && p.catch) p.catch(() => { /* the next tap resumes it */ });
+  });
+
   A.unlock = function () {
     if (!A.ctx) {
       try { build(); } catch (e) { A.ctx = null; return; }
     }
-    if (A.ctx && A.ctx.state === 'suspended') A.ctx.resume();
+    if (A.ctx && A.ctx.state === 'suspended') {
+      const p = A.ctx.resume();
+      if (p && p.catch) p.catch(() => { /* blocked until a gesture */ });
+    }
   };
 
   A.setMuted = function (m) {
     A.muted = m;
-    if (A.master) A.master.gain.setTargetAtTime(m ? 0 : 0.9, A.ctx.currentTime, 0.1);
+    if (A.master) A.master.gain.setTargetAtTime(m ? 0 : MASTER, A.ctx.currentTime, 0.1);
   };
 
   // Ambience per scene: {wind, rain, water, room, drone: [midi...], droneLevel}
@@ -190,7 +206,7 @@
   A.chord = function (notes, glide) {
     if (!A.ready) return;
     const t = A.ctx.currentTime;
-    A.voices.forEach((v, i) => v.frequency.setTargetAtTime(mtof(notes[i % notes.length]), t, glide || 2));
+    A.voices.forEach((v, i) => v.frequency.setTargetAtTime(mtof(i === 3 ? notes[0] + 12 : notes[i % notes.length]), t, glide || 2));
   };
 
   A.update = function (dt) {
@@ -199,10 +215,10 @@
     for (const key in A.levels) A.levels[key] = M.damp(A.levels[key], A.targets[key], 1.2, dt);
     const L = A.levels;
     const g = A.gust;
-    A.windGain.gain.setTargetAtTime(L.wind * (0.05 + g * 0.22), t, 0.08);
-    A.windLowGain.gain.setTargetAtTime(L.wind * (0.12 + g * 0.35), t, 0.1);
+    A.windGain.gain.setTargetAtTime(L.wind * (0.06 + g * 0.26), t, 0.08);
+    A.windLowGain.gain.setTargetAtTime(L.wind * (0.08 + g * 0.24), t, 0.1);
     A.windBand.frequency.setTargetAtTime(380 + g * 900 + Math.sin(G.time * 0.7) * 80, t, 0.15);
-    A.rainGain.gain.setTargetAtTime(L.rain * 0.09, t, 0.2);
+    A.rainGain.gain.setTargetAtTime(L.rain * 0.06, t, 0.2);
     A.waterGain.gain.setTargetAtTime(L.water * 0.18, t, 0.2);
     A.waterLfo.gain.setTargetAtTime(L.water * 0.1, t, 0.2);
     A.roomGain.gain.setTargetAtTime(L.room * 0.16, t, 0.2);

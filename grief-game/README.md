@@ -23,6 +23,8 @@ python3 -m http.server 8000
 | Pause | Pause icon, top right | Esc |
 | Sound | Speaker icon, top right | M |
 
+On a phone held upright, the game turns sideways to fill the screen, so turn the phone to play (this works with rotation lock on). On iPhone, sound follows the silent switch.
+
 Progress is saved in the browser. After you finish, **Return to a chapter** lets you revisit any chapter. Each one comes back with different light and details, but the loss is still there.
 
 ## The five chapters
@@ -57,9 +59,36 @@ js/world.js           shared side-view walking and interaction
 js/scenes.js          title, chapter plates, return menu, end card, chapter flow
 js/chapters/*.js      the five chapters
 assets/plates/*.jpg   chapter title plates
+tests/                automated playthroughs (see Tests)
 ```
 
 Jump straight to a chapter while testing with `#ch1` … `#ch5` (for example `index.html#ch3`). Add `r` for its Return version (`#ch3r`).
+
+## Tests
+
+The tests play every chapter from start to finish in a real browser (Chromium, through Playwright), using the same mouse, keyboard and touch input a player would. A test fails if a chapter can't be finished or the page reports an error.
+
+```sh
+cd grief-game
+npm install
+npx playwright install chromium
+npm test              # everything, about 6 minutes
+npm test -- anger     # only tests whose name contains "anger"
+```
+
+| File | What it checks |
+| --- | --- |
+| `01`–`05` | Each chapter, played through to the next chapter's plate or the end card |
+| `06-flow` | The title, continuing from saved progress, the pause menu, pause holding text and timers, Return |
+| `07-phone` | An upright phone: the turned stage, taps, holding to walk and to untie |
+| `08-return` | Each chapter's Return version |
+
+Screenshots from a run go to `tests/output/`, which isn't committed. The tests block all network access, so the game runs with its fallback fonts.
+
+Two tools repeat the checks behind the current performance and sound mix. They're useful after changing the look or the audio:
+
+- `npm run perf`: frame times per chapter on an emulated phone with a slowed CPU. Headless Chrome has no GPU, so treat the numbers as a worst case and compare before and after.
+- `npm run audio-levels`: loudness, peaks, and how much sound sits in bands phone speakers play badly, per chapter, plus a WAV of each for listening. The current mix aims for about −24 dBFS per chapter, within about 3 dB of each other, with peaks below −3 dBFS.
 
 ## Credits
 

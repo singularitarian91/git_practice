@@ -315,21 +315,30 @@
   Acceptance.prototype.surface = function (x) { return x < 200 ? 'wood' : 'grass'; };
   Acceptance.prototype.speedMul = function () { return this.chair.carried ? 0.75 : 1; };
 
+  // Scenery, painted ahead of time (during the chapter plate) when possible.
+  Acceptance.prototype.prepareSteps = function () {
+    return [
+      () => {
+        this.sky = P.paintSky(G.W + 200, 330, {
+          top: '#5b5d64', bottom: '#aaa59c', light: '#d6d0c6', shadow: '#54565d', seed: 71, clouds: 26, scale: 1.3, maxY: 0.9,
+          bright: { x: 980, y: 290, r: 420, color: '#e0d8cb', alpha: 0.35 }, strokes: 240
+        });
+        this.hills = paintHills();
+      },
+      () => { this.valley = paintValley(); },
+      () => { this.midTrees = paintMidTrees(); },
+      () => { this.groundL = paintGround(); },
+      () => { this.shelter = paintShelter(); }
+    ];
+  };
+
   Acceptance.prototype.enter = function () {
-    this.sky = P.paintSky(G.W + 200, 330, {
-      top: '#5b5d64', bottom: '#aaa59c', light: '#d6d0c6', shadow: '#54565d', seed: 71, clouds: 26, scale: 1.3, maxY: 0.9,
-      bright: { x: 980, y: 290, r: 420, color: '#e0d8cb', alpha: 0.35 }, strokes: 240
-    });
-    this.hills = paintHills();
-    this.valley = paintValley();
-    this.midTrees = paintMidTrees();
-    this.groundL = paintGround();
-    this.shelter = paintShelter();
+    G.prepareScene(this);
     this.camMinX = G.W / 2 / ZOOM - 40;
     this.camMaxX = this.groundL.W - G.W / 2 / ZOOM;
     this.buildItems();
     this.snapCamera();
-    G.audio.scene({ wind: 0.35, water: 0.25, drone: [48, 55, 64], droneLevel: 0.2 });
+    G.audio.scene({ wind: 0.55, water: 0.5, drone: [48, 55, 64], droneLevel: 0.34 });
     if (this.revisit) {
       this.maxX = END_X + 200;
       G.ui.say('The garden came up.', { delay: 0.8 });
@@ -347,7 +356,7 @@
   Acceptance.prototype.npcSay = function (i, text, delay) {
     const n = this.npcs[i];
     const go = () => { if (G.scene !== this) return; G.ui.speak(this.npcAnchor(n), text); n.look2 = 2.5; };
-    if (delay) setTimeout(go, delay * 1000); else go();
+    if (delay) G.after(delay, go); else go();
   };
 
   Acceptance.prototype.buildItems = function () {
@@ -410,7 +419,7 @@
       this.phase = 'chair';
       this.npcSay(0, 'Bring the chair out, if you like.', 2.2);
       this.npcSay(1, 'There’s a good spot by the fence.', 4.6);
-      setTimeout(() => { if (G.scene === this && !this.chair.carried && !this.chair.placed) G.ui.hint('Carry the chair to the fence', 6); }, 6000);
+      G.after(6, () => { if (!this.chair.carried && !this.chair.placed) G.ui.hint('Carry the chair to the fence', 6); });
     }
   };
 

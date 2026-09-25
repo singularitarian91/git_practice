@@ -1,0 +1,13 @@
+{
+  "name": "a-world-the-size-of-grief",
+  "private": true,
+  "description": "A short, quiet browser game in five chapters about loss.",
+  "scripts": {
+    "test": "node tests/run.js",
+    "perf": "node tests/tools/perf.js",
+    "audio-levels": "node tests/tools/audio-levels.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}

@@ -24,10 +24,12 @@
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
   }
   #game { display: block; width: 100%; height: 100%; outline: none; }
-  #game:focus-visible { outline: 2px solid #d6ba93; outline-offset: -2px; }
+  #game:focus { outline: none; }
+  body.keys #game:focus { outline: 2px solid #d6ba93; outline-offset: -2px; }
   .noscript {
     font: 18px Georgia, serif;
     padding-block: 40px;

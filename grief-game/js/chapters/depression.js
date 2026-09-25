@@ -191,16 +191,27 @@
     return DECK + p.dy * 0.5;
   };
 
+  // Scenery, painted ahead of time (during the chapter plate) when possible.
+  Depression.prototype.prepareSteps = function () {
+    return [
+      () => {
+        this.sky = P.paintSky(G.W + 400, HORIZON + 10, {
+          top: '#5e5f64', bottom: '#a6a09b', light: '#d8d0c6', shadow: '#55565c', seed: 44, clouds: 30, scale: 1.4, maxY: 0.85,
+          bright: { x: 820, y: 170, r: 380, color: '#e4dbcf', alpha: 0.45 }, strokes: 260
+        });
+      },
+      () => {
+        this.water = P.paintWater(G.W, G.H - HORIZON, { top: '#6f7076', bottom: '#3d3c3f', sky: '#b4aaa3', seed: 5, streaks: 700 });
+        this.shore = paintShore();
+      },
+      () => { this.reedsMid = paintReeds(3000, 21, { base: 520, h: [30, 90], cols: ['#3a3430', '#4a4038', '#2f2b28'], lw: [1, 2], gap: [80, 260] }); },
+      () => { this.reedsFg = paintReeds(4000, 33, { base: 740, h: [80, 190], cols: ['#1d1a18', '#26211d', '#151312'], lw: [2, 4], gap: [220, 520] }); },
+      () => { this.porch = paintPorch(); }
+    ];
+  };
+
   Depression.prototype.enter = function () {
-    this.sky = P.paintSky(G.W + 400, HORIZON + 10, {
-      top: '#5e5f64', bottom: '#a6a09b', light: '#d8d0c6', shadow: '#55565c', seed: 44, clouds: 30, scale: 1.4, maxY: 0.85,
-      bright: { x: 820, y: 170, r: 380, color: '#e4dbcf', alpha: 0.45 }, strokes: 260
-    });
-    this.water = P.paintWater(G.W, G.H - HORIZON, { top: '#6f7076', bottom: '#3d3c3f', sky: '#b4aaa3', seed: 5, streaks: 700 });
-    this.shore = paintShore();
-    this.reedsMid = paintReeds(3000, 21, { base: 520, h: [30, 90], cols: ['#3a3430', '#4a4038', '#2f2b28'], lw: [1, 2], gap: [80, 260] });
-    this.reedsFg = paintReeds(4000, 33, { base: 740, h: [80, 190], cols: ['#1d1a18', '#26211d', '#151312'], lw: [2, 4], gap: [220, 520] });
-    this.porch = paintPorch();
+    G.prepareScene(this);
     this.camMinX = G.W / 2 / ZOOM - 20;
     this.rain = new P.Rain(150, 12);
     this.item({ id: 'chair', x: 150, y: DECK - 170, w: 150, h: 170, at: 330, face: -1, say: ['Their chair, facing the water.', 'I don’t sit in it.'] });

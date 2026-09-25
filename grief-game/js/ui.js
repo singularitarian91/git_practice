@@ -140,13 +140,15 @@
     if (inRect(HUD.sound, inp.x, inp.y)) ui.hudHover = 'sound';
     else if (inRect(HUD.pause, inp.x, inp.y)) ui.hudHover = 'pause';
     if (inp.pressed && ui.hudHover) {
-      if (ui.hudHover === 'sound') ui.toggleSound(); else ui.openMenu();
+      if (ui.hudHover === 'sound') ui.toggleSound(); else if (!G.fx.active) ui.openMenu();
       inp.consume();
     }
-    if (inp.hit.pause && G.scene && G.scene.pausable !== false) { ui.openMenu(); inp.hit = {}; }
+    if (inp.hit.pause && G.scene && G.scene.pausable !== false && !G.fx.active) { ui.openMenu(); inp.hit = {}; }
   };
 
   ui.update = function (dt) {
+    // paused: every line, hint and speech bubble waits where it is
+    if (G.paused) return;
     if (ui.line) {
       ui.line.t += dt;
       if (ui.line.t > ui.line.dur) {
@@ -199,6 +201,37 @@
     }
     x.restore();
   }
+
+  // Upright phones: the stage is turned sideways; this note sits upright in the space below it.
+  ui.drawTurnNote = function (x, v) {
+    const band = v.ch - (v.ox + G.W * v.s);
+    if (band < 34) return;
+    const cy = v.ch - band / 2;
+    const text = 'TURN YOUR PHONE SIDEWAYS', track = 1.6, r = 7, gap = 12;
+    x.save();
+    x.globalAlpha = 0.8;
+    x.fillStyle = C.tan;
+    x.font = '700 12px ' + G.FONT_SANS;
+    x.textBaseline = 'middle';
+    // measure first, so the arrow sits just before the words and the two are centred together
+    let tw = -track;
+    for (const ch of text) tw += x.measureText(ch).width + track;
+    const left = v.cw / 2 - (2 * r + gap + tw) / 2;
+    T.tracked(x, text, left + 2 * r + gap, cy, track, 'left');
+    // a small turning arrow
+    x.strokeStyle = C.tan;
+    x.lineWidth = 1.5;
+    x.beginPath();
+    const ax = left + r;
+    x.arc(ax, cy, r, -Math.PI * 0.9, Math.PI * 0.55);
+    x.stroke();
+    x.beginPath();
+    x.moveTo(ax + r * Math.cos(Math.PI * 0.55) - 4, cy + r * Math.sin(Math.PI * 0.55) - 1);
+    x.lineTo(ax + r * Math.cos(Math.PI * 0.55), cy + r * Math.sin(Math.PI * 0.55));
+    x.lineTo(ax + r * Math.cos(Math.PI * 0.55) + 1, cy + r * Math.sin(Math.PI * 0.55) - 5);
+    x.stroke();
+    x.restore();
+  };
 
   ui.draw = function (x) {
     // NPC speech
@@ -293,6 +326,8 @@
   // Tear the current page away and reveal the next scene beneath it.
   fx.tear = function (swap, o) {
     o = o || {};
+    // a fade still on its way to switching: the newer destination wins
+    if (fx.active && fx.active.kind === 'dip' && !fx.active.swapped) { fx.active.swap = swap; return; }
     if (fx.active) { swap(); return; }
     const snap = G.snapshot();
     const r = M.rng((Math.random() * 1e9) | 0);
@@ -306,6 +341,8 @@
   // Fade through a colour; swap happens at the midpoint.
   fx.fade = function (swap, o) {
     o = o || {};
+    // already fading and not yet switched: the newer destination wins
+    if (fx.active && fx.active.kind === 'dip' && !fx.active.swapped) { fx.active.swap = swap; return; }
     if (fx.active) { swap(); return; }
     fx.active = { kind: 'dip', t: 0, dur: o.dur || 1.6, color: o.color || '#0e100f', swap, swapped: false };
   };

@@ -117,15 +117,20 @@
     }
   };
 
+  // Scenery, painted ahead of time (during the chapter plate) when possible.
+  Bargaining.prototype.prepareSteps = function () {
+    return [() => { this.backdrop = this.paintBackdrop(); }];
+  };
+
   Bargaining.prototype.enter = function () {
-    G.audio.scene({ room: 0.5, drone: [49, 56, 61], droneLevel: 0.22 });
-    this.backdrop = this.paintBackdrop();
+    G.prepareScene(this);
+    G.audio.scene({ room: 0.7, drone: [49, 56, 61], droneLevel: 0.3 });
     if (this.revisit) {
       G.ui.say('The rooms are still here. The way through stays open.', { delay: 0.8 });
       this.solveAt = 2.5;
     } else {
       G.ui.say('The rooms fold into one another.', { delay: 0.8 });
-      G.ui.hint('Click a room to turn it · lead the red thread out to the right', 10);
+      G.ui.hint((G.touch ? 'Tap' : 'Click') + ' a room to turn it · lead the red thread out to the right', 10);
     }
   };
 

@@ -481,24 +481,37 @@
     return 1;
   };
 
-  Anger.prototype.enter = function () {
+  // Scenery, painted ahead of time (during the chapter plate) when possible.
+  Anger.prototype.prepareSteps = function () {
     this.camMinX = G.W / 2 / ZOOM;
     this.camMaxX = WORLD_W - G.W / 2 / ZOOM;
     const span = (this.camMaxX - this.camMinX) * ZOOM;
-    this.sky = paintSkyScreen();
-    this.far = paintTrunkBand(G.W + span * 0.25 + 40, {
-      seed: 5, base: 660, width: [16, 38], gap: [50, 110], cols: ['#737980', '#82888f', '#6a7077'],
-      leaves: 40, leafCols: ['#5f666d', '#6c737a', '#565c63'], leafSize: 20, mist: '#d8d3c9', mistA: 0.35
-    });
-    this.mid = paintTrunkBand(G.W + span * 0.55 + 40, {
-      seed: 9, base: 670, width: [34, 70], gap: [130, 240], cols: ['#34373a', '#3d4043', '#2c2f31'],
-      pattern: P.damaskDusk, patternAlpha: 0.35, patternScale: 0.9,
-      leaves: 70, leafCols: ['#23272a', '#2d3235', '#1c1f21'], leafSize: 26, mist: '#cfcac0', mistA: 0.18
-    });
-    this.main = paintMain();
-    // foreground band is drawn at -(off * ZOOM * 1.35) - 300; keep its trunks out of the first and last screens
-    const fgW = G.W + span * 1.35 + 340;
-    this.fg = paintForeground(fgW, 300 + G.W + 200, fgW - G.W - 200);
+    return [
+      () => {
+        this.sky = paintSkyScreen();
+        this.far = paintTrunkBand(G.W + span * 0.25 + 40, {
+          seed: 5, base: 660, width: [16, 38], gap: [50, 110], cols: ['#737980', '#82888f', '#6a7077'],
+          leaves: 40, leafCols: ['#5f666d', '#6c737a', '#565c63'], leafSize: 20, mist: '#d8d3c9', mistA: 0.35
+        });
+      },
+      () => {
+        this.mid = paintTrunkBand(G.W + span * 0.55 + 40, {
+          seed: 9, base: 670, width: [34, 70], gap: [130, 240], cols: ['#34373a', '#3d4043', '#2c2f31'],
+          pattern: P.damaskDusk, patternAlpha: 0.35, patternScale: 0.9,
+          leaves: 70, leafCols: ['#23272a', '#2d3235', '#1c1f21'], leafSize: 26, mist: '#cfcac0', mistA: 0.18
+        });
+      },
+      () => { this.main = paintMain(); },
+      () => {
+        // foreground band is drawn at -(off * ZOOM * 1.35) - 300; keep its trunks out of the first and last screens
+        const fgW = G.W + span * 1.35 + 340;
+        this.fg = paintForeground(fgW, 300 + G.W + 200, fgW - G.W - 200);
+      }
+    ];
+  };
+
+  Anger.prototype.enter = function () {
+    G.prepareScene(this);
     this.ribbons = [];
     const anchors = [[700, 330], [960, 250], [1230, 420], [1510, 300], [1720, 460], [2140, 280], [2400, 380], [2690, 250], [2950, 420], [3250, 300], [3520, 360]];
     anchors.forEach(([ax, ay], i) => this.ribbons.push(this.makeRibbon(ax, ay, 9 + (i % 3) * 2, 22, i)));
@@ -519,7 +532,7 @@
     for (let i = 0; i < 70; i++) this.leaves.push({ x: Math.random() * G.W, y: Math.random() * G.H, s: 0.6 + Math.random() * 0.8, p: Math.random() * TAU, paper: Math.random() < 0.18 });
     this.buildItems();
     this.snapCamera();
-    G.audio.scene({ wind: 0.9, room: 0.1, drone: [45, 52, 55], droneLevel: 0.24 });
+    G.audio.scene({ wind: 0.7, room: 0.1, drone: [45, 52, 55], droneLevel: 0.26 });
     if (this.revisit) {
       this.gustNext = 1e9;
       G.ui.say('Quiet now. The gate stands open.', { delay: 0.8 });

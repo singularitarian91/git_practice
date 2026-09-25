@@ -652,13 +652,20 @@
     };
   };
 
+  // Scenery, painted ahead of time (during the chapter plate) when possible.
+  Denial.prototype.prepareSteps = function () {
+    return [() => {
+      this.layer = paintRoom(this.state());
+      this.motes = new P.Motes(40, { x: 430, y: 230, w: 470, h: 420 }, 9);
+    }];
+  };
+
   Denial.prototype.enter = function () {
-    this.layer = paintRoom(this.state());
-    this.motes = new P.Motes(40, { x: 430, y: 230, w: 470, h: 420 }, 9);
+    G.prepareScene(this);
     this.buildItems();
-    G.audio.scene({ room: 0.8, drone: [50, 57, 62], droneLevel: 0.22 });
+    G.audio.scene({ room: 1.0, drone: [50, 57, 62], droneLevel: 0.3 });
     G.ui.say(this.revisit ? 'The light has changed.' : ENTER[0], { delay: 0.9 });
-    if (!this.revisit) G.ui.hint('Click or tap to walk · click things to look closer', 8);
+    if (!this.revisit) G.ui.hint(G.touch ? 'Tap to walk · tap things to look closer' : 'Click to walk · click things to look closer', 8);
   };
 
   Denial.prototype.lineFor = function (id) {
@@ -733,9 +740,10 @@
     else if (this.noticed >= c) n = Math.min(4, c + 1);
     this.loops = n === c ? this.loops + 1 : 0;
     this.copy = n;
+    if (this.layer) { this.layer.c.width = 0; this.layer.c.height = 0; }
     this.layer = paintRoom(this.state());
     this.buildItems();
-    if (n === 4) G.audio.scene({ room: 0.6, wind: 0.25, drone: [50, 56, 62], droneLevel: 0.24 });
+    if (n === 4) G.audio.scene({ room: 0.8, wind: 0.3, drone: [50, 56, 62], droneLevel: 0.3 });
   };
 
   Denial.prototype.onEnterCopy = function () {

@@ -24,7 +24,8 @@
   flow.plate = function (i, o) {
     G.fx.tear(() => { G.ui.clear(); G.setScene(new PlateScene(i, o || {})); });
   };
-  flow.start = function (i, o) {
+  // `pre` is a chapter already built (and painted) while its plate was showing.
+  flow.start = function (i, o, pre) {
     o = o || {};
     flow.current = i;
     flow.revisit = !!o.revisit;
@@ -32,7 +33,7 @@
     G.ui.label = num(i) + ' · ' + CH[i].name;
     G.ui.hud = true;
     if (!G.chapters[CH[i].ctor]) { G.ui.hud = false; G.setScene(new ComingScene(i)); return; }
-    const scene = new G.chapters[CH[i].ctor](o);
+    const scene = pre || new G.chapters[CH[i].ctor](o);
     scene.restart = () => G.fx.fade(() => flow.start(i, o), { dur: 1.2 });
     G.setScene(scene);
     if (!o.revisit) {
@@ -166,7 +167,7 @@
     this.motes = new P.Motes(46, { x: 520, y: 120, w: 520, h: 560 }, 3);
     this.sel = 0;
     this.buildMenu();
-    G.audio.scene({ room: 0.6, drone: [50, 57, 64], droneLevel: 0.22 });
+    G.audio.scene({ room: 1.0, drone: [50, 57, 64], droneLevel: 0.4 });
   };
   TitleScene.prototype.buildMenu = function () {
     const d = G.save.data;
@@ -259,8 +260,10 @@
     x.font = '15px ' + G.FONT_SANS;
     x.fillStyle = 'rgba(237,233,226,0.55)';
     x.fillText('A short, quiet game about loss, about twenty minutes. These chapters are fiction, not a map for real grief.', 72, 660);
-    x.fillText('Click or tap to walk and to look closer. Hold to pull, untie and sew. Keys: A D or arrows, E or Space. Esc pauses.', 72, 684);
-    if (G.portrait) {
+    x.fillText(G.touch
+      ? 'Tap to walk and to look closer. Hold to pull, untie and sew. Sound follows your phone\u2019s silent switch.'
+      : 'Click or tap to walk and to look closer. Hold to pull, untie and sew. Keys: A D or arrows, E or Space. Esc pauses.', 72, 684);
+    if (G.portrait && !G.rotated) {
       T.label(x, 'Turn your phone sideways for a bigger view', G.W / 2, 40, { size: 13, align: 'center' });
     }
     x.restore();
@@ -318,15 +321,24 @@
     this.edge = [];
     const r = M.rng(this.i * 97 + 5);
     for (let xx = 0; xx <= G.W; xx += 14) this.edge.push([xx, 488 + r.range(-6, 6)]);
-    G.audio.scene({ room: 0.3, drone: [[50, 57, 64], [48, 55, 63], [49, 56, 61], [45, 52, 60], [48, 55, 64]][this.i], droneLevel: 0.2 });
+    G.audio.scene({ room: 0.5, drone: [[50, 57, 64], [48, 55, 63], [49, 56, 61], [45, 52, 60], [48, 55, 64]][this.i], droneLevel: 0.32 });
   };
   PlateScene.prototype.update = function (dt) {
     this.t += dt;
     const inp = G.input;
+    // build the chapter while the plate is up, one piece of scenery per frame
+    const Ctor = G.chapters[CH[this.i].ctor];
+    if (Ctor && this.t > 0.3 && !this.done) {
+      if (!this.next) this.next = new Ctor(this.o);
+      else G.prepareStep(this.next);
+    }
     G.setCursor(this.t > 1 ? 'pointer' : 'default');
     if (!this.done && this.t > 1.0 && (inp.pressed || inp.hit.act)) {
       this.done = true;
-      G.fx.tear(() => flow.start(this.i, this.o));
+      if (this.next) G.prepareScene(this.next);
+      const next = this.next;
+      this.next = null;
+      G.fx.tear(() => flow.start(this.i, this.o, next));
     }
   };
   PlateScene.prototype.draw = function (x) {
@@ -378,7 +390,7 @@
     this.sel = 0;
   }
   EndScene.prototype.enter = function () {
-    G.audio.scene({ wind: 0.1, water: 0.1, drone: [48, 55, 64], droneLevel: 0.2 });
+    G.audio.scene({ wind: 0.15, water: 0.25, drone: [48, 55, 64], droneLevel: 0.32 });
     G.audio.arp([60, 64, 67, 72], 0.4, 0.1);
   };
   EndScene.prototype.rects = function () {
