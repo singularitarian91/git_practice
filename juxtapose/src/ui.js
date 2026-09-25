@@ -9,7 +9,7 @@ import { RANKS, rankOf, rankProgress, TREE, treePoints, canBuy, buy } from './kn
 import { REGIONS } from './level.js';
 
 const $ = (s) => document.querySelector(s);
-const ROMAN = ['I', 'II', 'III', 'IV'];
+const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const lockSVG = (s = 12) => `<svg viewBox="0 0 16 16" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="7" width="9" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>`;
 const catSVG = (cat, s = 16) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${(WHIM_CATS[cat] || WHIM_CATS.blade).icon}</svg>`;
 const notches = (n, on = true) => `<span class="notches">${Array.from({ length: n }, () => `<i class="notch${on ? ' on' : ''}"></i>`).join('')}</span>`;

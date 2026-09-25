@@ -29,7 +29,7 @@ import { Cutscene, orbit } from './cutscene.js';
 
 const $ = (s) => document.querySelector(s);
 // With "Night-Light tips and asides" off, only these lines still play
-const STORY_LINES = new Set(['wake0', 'wakeN', 'layer1', 'layer2', 'layer3', 'bossPhase', 'bossDown', 'death', 'lucidWake', 'scrap', 'laststand']);
+const STORY_LINES = new Set(['wake0', 'wakeN', 'layer1', 'layer2', 'layer3', 'layerRoom', 'bossPhase', 'bossDown', 'death', 'lucidWake', 'scrap', 'laststand']);
 const TIP_GAP = 16; // seconds between the Night-Light's tips
 
 class Game {
@@ -356,6 +356,11 @@ class Game {
       { dur: 4.2, pos: [V(-70, 34, 95), V(-20, 26, 78)], look: [V(0, 4, 10), V(0, 3, -6)], fov: 50, caption: 'A fishing village, sunk in soft sand. The dream keeps its memories here.' },
       first && { dur: 3.2, pos: [first.pos.clone().add(V(-12, 9, 14)), first.pos.clone().add(V(-7, 5, 9))], look: first.pos.clone().add(V(0, 2, 0)), fov: 48, caption: `First, ${first.def.name}.` },
       { dur: 3, pos: [V(0, 14, -12), eye.clone().add(V(0, 2.2, -5))], look: [V(0, 1, -27), eye], fov: [50, 60] },
+    ] : lvl.key === 'room' ? [
+      { dur: 5, pos: [V(40, 38, 50), V(20, 30, 40)], look: [V(-10, 8, -20), V(0, 6, -10)], fov: 55, caption: 'The back bedroom. She has not come in here since he left. In the dream it has grown to the size of everything it holds.' },
+      { dur: 4, pos: [V(-4, 14, -20), V(6, 11, -28)], look: [V(10, 12, -58), V(10, 14, -58)], fov: 50, caption: 'A window, and in front of it a painting of the window.' },
+      first && { dur: 3.2, pos: [first.pos.clone().add(V(-16, 8, 10)), first.pos.clone().add(V(-11, 5, 6))], look: first.pos.clone().add(V(0, 3, 0)), fov: 48, caption: `First, ${first.def.name}.` },
+      { dur: 2.6, pos: [V(0, 14, 30), eye.clone().add(V(0, 2.2, 5))], look: eye, fov: [50, 60] },
     ] : [
       { dur: 4, pos: orbit(V(0, 0, 0), 60, 30, 0.6, 1.8), look: V(0, 4, 0), fov: 50, caption: 'The city he left for, where every crowd is the same man.' },
       first && { dur: 3, pos: [first.pos.clone().add(V(10, 8, 10)), first.pos.clone().add(V(6, 4, 6))], look: first.pos.clone().add(V(0, 2, 0)), fov: 48, caption: `First, ${first.def.name}.` },
@@ -478,7 +483,7 @@ class Game {
       const city = lvl.key === 'piazza';
       shots.push(city
         ? { dur: 5, pos: [d.clone().add(V(-30, 8, -26)), d.clone().add(V(-8, 4, -16))], look: [d.clone().add(V(-30, 0, 0)), d], fov: 48, caption: 'The 6:40 comes round the hill, and this time it stops for you.', at: () => lvl.openDoor() }
-        : { dur: 3.4, pos: [d.clone().add(V(-6, 4, -14)), d.clone().add(V(-2, 2.5, -8))], look: d, fov: 48, caption: 'A door has opened in the shallows.', at: () => lvl.openDoor() });
+        : { dur: 3.4, pos: [d.clone().add(V(-6, 4, lvl.key === 'room' ? -14 : -14)), d.clone().add(V(-2, 2.5, -8))], look: d, fov: 48, caption: lvl.key === 'room' ? 'In the south wall, a door at your own size. She is waiting on the other side of it.' : 'A door has opened in the shallows.', at: () => lvl.openDoor() });
     }
     // the Night-Light has the last word on it, close up
     const nl = this.narrator.obj;
@@ -711,11 +716,12 @@ class Game {
     this.makePlayer(drop, lvl.spawnYaw, carry);
     this.state = 'playing';
     this.narrator.spawn();
-    this.narrator.say('layer' + (index + 1));
+    this.narrator.say({ desert: 'layer1', piazza: 'layer2', room: 'layerRoom', boss: 'layer3' }[key] || 'layer1');
     this.layerT = 0;
     const found = this.meta.scraps;
     lvl.scrapSpots.forEach((pos, k) => {
-      const sc = SCRAPS.find((s) => s.layer === index && s.id === index * 3 + k + 1);
+      const si = { desert: 0, piazza: 1, boss: 2 }[key]; // the scraps belong to the layers they were written for
+      const sc = si === undefined ? null : SCRAPS.find((s) => s.layer === si && s.id === si * 3 + k + 1);
       if (sc && sc.id !== 9 && !found.has(sc.id)) this.pickups.push(new ScrapPickup(this, pos, sc));
     });
     if (key === 'boss') {
@@ -735,7 +741,7 @@ class Game {
     this.saveCheckpoint(index, carry);
     const roman = ['I', 'II', 'III', 'IV'][index];
     this.ui.card(`LAYER ${roman}`, LAYERS[index].name, LAYERS[index].subtitle);
-    this.audio.setLayer(Math.min(2, index));
+    this.audio.setLayer({ desert: 0, piazza: 1, boss: 2, room: 3 }[key] ?? 0);
     this.enterPlay();
   }
 

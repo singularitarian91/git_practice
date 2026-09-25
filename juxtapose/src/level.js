@@ -64,6 +64,14 @@ export const LOOKS = {
     exposure: 1.0, envIntensity: 0.8, tint: '#ffffff', saturation: 1.02,
     sand: ['#dcb482', '#caa06d', '#ecc998'],
   },
+  // the back bedroom: walls papered with sky (Magritte's Personal Values), one high window, afternoon sun
+  room: {
+    zenith: '#3f79c2', mid: '#9cc3e6', horizon: '#f3e2c2', ground: '#8a6a4a', cloud: '#ffffff', clouds: 0.9, haze: 0.3,
+    sunDir: [0.25, 0.55, -0.8], sunColor: '#fff0d4', sunIntensity: 3.8,
+    hemiSky: '#b8d4f0', hemiGround: '#9a7a5a', hemiIntensity: 0.95,
+    fog: '#e9e2d4', fogDensity: 0.0032, fogFalloff: 0, fogSun: '#fff1d6', fogSunAmt: 0.25,
+    exposure: 1.05, envIntensity: 0.8, tint: '#fffaf0', saturation: 1.04,
+  },
   bedroom: {
     zenith: '#9cc6ea', mid: '#cfe2f0', horizon: '#fff1d8', ground: '#c9b294', cloud: '#ffffff', clouds: 0.8,
     sunDir: [-0.6, 0.35, 0.4], sunColor: '#fff0cf', sunIntensity: 4.5,
@@ -124,8 +132,81 @@ export const REGIONS = {
     { name: 'Clock Street', sub: 'an hour ahead of home', tier: 4, open: 2, at: [0, 34], test: (x, z) => Math.atan2(z, x) > Math.PI / 4 && Math.atan2(z, x) <= 3 * Math.PI / 4 },
     { name: 'The Gallery', sub: 'the worst of it is kept under glass', tier: 5, open: 3, at: [-34, 2], test: () => true },
   ],
+  room: [
+    { name: 'Time Transfixed', sub: 'a train has stopped in the fireplace', tier: 3, open: 0, at: [44, 10], test: (x, z) => x > 20 && z >= -30 },
+    { name: 'The Second Drawer', sub: 'she never opened it again', tier: 4, open: 1, at: [-38, -36], test: (x, z) => z < -30 && x <= -15 },
+    { name: 'The Bed', sub: 'nobody has slept here since', tier: 4, open: 2, at: [-40, 36], test: (x, z) => x < -20 && z >= -30 },
+    { name: 'The Human Condition', sub: 'the view, and a painting of the view', tier: 5, open: 3, at: [10, -40], test: (x, z) => z < -30 },
+    { name: 'The Floorboards', sub: 'the room she will not go into, grown to the size of what it holds', tier: 3, open: 0, at: [0, 30], test: () => true },
+  ],
   boss: [{ name: 'The Last Room', sub: 'look away', tier: 5, open: 0, at: [0, 0], test: () => true }],
 };
+
+// the Back Bedroom's plan: a 120 m room, the window in the north wall (x0, x1, y0, y1),
+// the hearth opening in the east wall (z0, z1, height), the chest, the bed, the memories
+export const ROOM = {
+  half: 60, height: 44,
+  window: [-8, 28, 7, 36],
+  hearth: [0, 18, 12],
+  chest: [-38, -48],
+  bed: [-44, 22], bedTop: 6.2,
+};
+ROOM.knots = {
+  hearth: new THREE.Vector3(55.5, 0, 9),
+  drawer: new THREE.Vector3(-38, 1, -50),
+  bed: new THREE.Vector3(-50, 6.2, 22),
+  window: new THREE.Vector3(10, 7, -70),
+};
+// where each memory's guards keep watch, when not around the memory itself
+ROOM.guards = {
+  drawer: new THREE.Vector3(-36, 0, -30),
+  window: new THREE.Vector3(10, 0, -36),
+};
+
+// UVs in world units / scale for a box placed at `c`: each face projected along its own axis,
+// so library textures keep their size however big the box
+function worldBoxUV(geo, c, scale) {
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i) + c.x, y = p.getY(i) + c.y, z = p.getZ(i) + c.z;
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i));
+    if (ax > 0.5) uv.setXY(i, z / scale, y / scale); else if (ay > 0.5) uv.setXY(i, x / scale, z / scale); else uv.setXY(i, x / scale, y / scale);
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
+// wallpaper printed with sky: soft cumulus on a clear blue, repeating
+function skyPaper() {
+  const S = 512, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, '#4f8cd0'); gr.addColorStop(1, '#a9cbea');
+  g.fillStyle = gr; g.fillRect(0, 0, S, S);
+  const R = mulberry(1952);
+  for (let i = 0; i < 14; i++) {
+    const cx = R() * S, cy = R() * S * 0.9, s = 30 + R() * 50;
+    for (let k = 0; k < 9; k++) for (const dx of [-S, 0, S]) {
+      const x = cx + dx + (R() - 0.5) * s * 2.2, y = cy + (R() - 0.5) * s * 0.5, r = s * (0.5 + R() * 0.5);
+      const cg = g.createRadialGradient(x, y, 0, x, y, r); cg.addColorStop(0, 'rgba(255,255,255,0.95)'); cg.addColorStop(0.6, 'rgba(255,255,255,0.6)'); cg.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = cg; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+  return t;
+}
+
+// the painting on the easel: the view through the window it stands in front of
+function paintTheView(cv) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height, R = mulberry(1933);
+  const sky = g.createLinearGradient(0, 0, 0, H * 0.7); sky.addColorStop(0, '#5f93cf'); sky.addColorStop(1, '#cfe0ef');
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 7; i++) { const x = R() * W, y = H * (0.08 + R() * 0.35), s = 30 + R() * 40; for (let k = 0; k < 6; k++) { const cg = g.createRadialGradient(x + (R() - 0.5) * s * 2, y, 0, x, y, s); cg.addColorStop(0, 'rgba(255,255,255,0.9)'); cg.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = cg; g.beginPath(); g.arc(x + (R() - 0.5) * s * 2, y + (R() - 0.5) * s * 0.4, s, 0, 7); g.fill(); } }
+  g.fillStyle = '#d9c7a3'; g.fillRect(0, H * 0.72, W, H * 0.28); // the terrace
+  g.fillStyle = '#c4b08a'; g.fillRect(0, H * 0.7, W, H * 0.04);  // the parapet
+  for (const x of [0.12, 0.86]) { g.fillStyle = '#2f4a2c'; g.beginPath(); g.ellipse(W * x, H * 0.52, W * 0.04, H * 0.2, 0, 0, 7); g.fill(); }
+  // the painted window frame at the canvas edge, where the painting meets the real one
+  g.strokeStyle = 'rgba(120,90,60,0.35)'; g.lineWidth = 8; g.strokeRect(4, 4, W - 8, H - 8);
+}
 
 // Golconda Piazza's palazzi: the same kit in de Chirico's ochre, around the square
 export const PIAZZA = {
@@ -350,6 +431,7 @@ export class Level {
         }
         return h;
       }
+      case 'room': return 0; // floorboards; the terrace outside the window is its own platform
       case 'boss': {
         let h = r < 36 ? 0 : ss(36, 44, r) * 3.2 + (fbm(x * 0.05, z * 0.05) - 0.5) * 1.2 * ss(40, 50, r);
         h -= ss(56, 70, r) * 60;
@@ -632,6 +714,7 @@ export class Level {
     if (this.key === 'desert') this.buildDesert(R);
     else if (this.key === 'piazza') this.buildPiazza(R);
     else if (this.key === 'boss') this.buildBoss(R);
+    else if (this.key === 'room') this.buildRoom(R);
     else if (this.key === 'sandbox') this.buildSandbox(R);
   }
 
@@ -875,6 +958,183 @@ export class Level {
     this.objectiveName = 'Look away';
   }
 
+  // ------------------------------------------------------------ the Back Bedroom
+  // Odile's back bedroom, grown to the size of what it holds (Magritte's Personal
+  // Values): walls papered with sky, floorboards like jetties, a chest of drawers
+  // the size of a house, a bed like a hill, a train stopped in the fireplace (Time
+  // Transfixed), and, in front of the one real window, a painting of the view (The
+  // Human Condition). In the middle of it, the room at its real size.
+  buildRoom(R) {
+    const game = this.game, A = game.assets, W = ROOM.half, H = ROOM.height;
+    this.spawn = new THREE.Vector3(0, 0.5, 46);
+    this.spawnYaw = Math.PI;
+    this.bound = W - 2;
+    // the floor: oak boards, each as wide as a road
+    for (const m of this.group.children) if (m.isMesh && m.geometry?.parameters?.width === this.terrainSize) m.visible = false;
+    const floorGeo = new THREE.PlaneGeometry(W * 2, W * 2).rotateX(-Math.PI / 2);
+    { const p = floorGeo.attributes.position, uv = floorGeo.attributes.uv; for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) / 7, p.getZ(i) / 7); }
+    const floor = new THREE.Mesh(floorGeo, A.libMaterial('oak', { color: new THREE.Color(1.5, 1.35, 1.2) }));
+    floor.receiveShadow = true; floor.position.y = 0.01; this.group.add(floor);
+    // the sky paper, and the walls it is pasted on
+    const sky = new THREE.MeshStandardMaterial({ map: skyPaper(), roughness: 0.95, emissive: new THREE.Color('#9fc3ea'), emissiveIntensity: 0.28 });
+    const trim = A.libMaterial('oak', { color: new THREE.Color(0.9, 0.75, 0.6) });
+    const box = (mat, sx, sy, sz, x, y, z, { collide = true, group = G.WORLD, cast = true, uvScale = 0 } = {}) => {
+      const g = worldBoxUV(new THREE.BoxGeometry(sx, sy, sz), { x, y, z }, uvScale || (mat.name?.startsWith('TX_') ? 3 : 1e9));
+      const m = new THREE.Mesh(g, mat); m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = true; this.group.add(m);
+      if (collide) { const b = game.physics.fixed({ x, y, z }); game.physics.collider(RAPIER.ColliderDesc.cuboid(sx / 2, sy / 2, sz / 2), b, group, ALL, { friction: 0.8 }); this.bodies.push(b); }
+      return m;
+    };
+    const T = 2; // wall thickness
+    const skyWall = (sx, sy, sz, x, y, z) => { const m = box(sky, sx, sy, sz, x, y, z, { uvScale: 60 }); m.material = sky; return m; };
+    skyWall(W * 2, H, T, 0, H / 2, W + T / 2);        // south
+    skyWall(T, H, W * 2, W + T / 2, H / 2, 0);        // east
+    skyWall(T, H, W * 2, -W - T / 2, H / 2, 0);       // west
+    // north: a wall with the one real window in it
+    const wx0 = ROOM.window[0], wx1 = ROOM.window[1], wy0 = ROOM.window[2], wy1 = ROOM.window[3], nz = -W - T / 2;
+    skyWall(wx0 + W, H, T, (-W + wx0) / 2, H / 2, nz);
+    skyWall(W - wx1, H, T, (wx1 + W) / 2, H / 2, nz);
+    skyWall(wx1 - wx0, wy0, T, (wx0 + wx1) / 2, wy0 / 2, nz);
+    skyWall(wx1 - wx0, H - wy1, T, (wx0 + wx1) / 2, (wy1 + H) / 2, nz);
+    // the ceiling is sky too
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W * 2, W * 2).rotateX(Math.PI / 2), sky); ceil.position.y = H; this.group.add(ceil);
+    // skirting and the window's frame, in painted oak
+    for (const [sx, sz, x, z] of [[W * 2, 0.6, 0, W - 0.3], [0.6, W * 2, W - 0.3, 0], [0.6, W * 2, -W + 0.3, 0], [W * 2, 0.6, 0, -W + 0.3]]) box(trim, sx, 2.2, sz, x, 1.1, z, { collide: false, cast: false });
+    for (const [sx, sy, x, y] of [[wx1 - wx0 + 2, 1.2, (wx0 + wx1) / 2, wy0 - 0.2], [wx1 - wx0 + 2, 1.2, (wx0 + wx1) / 2, wy1 + 0.6], [1.2, wy1 - wy0, wx0 - 0.4, (wy0 + wy1) / 2], [1.2, wy1 - wy0, wx1 + 0.4, (wy0 + wy1) / 2], [0.8, wy1 - wy0, (wx0 + wx1) / 2, (wy0 + wy1) / 2]]) box(trim, sx, sy, 1.6, x, y, -W - 0.2, { collide: false });
+    // the glass: it stops you, not your aim
+    const glassMat = new THREE.MeshPhysicalMaterial({ color: '#e8f4ff', roughness: 0.04, transparent: true, opacity: 0.12, depthWrite: false, envMapIntensity: 1.3 });
+    this.windowGlass = box(glassMat, wx1 - wx0, wy1 - wy0, 0.3, (wx0 + wx1) / 2, (wy0 + wy1) / 2, -W - 0.4, { group: G.GLASS, cast: false });
+    this.windowGlass.userData.noAO = true;
+    this.glassBody = this.bodies[this.bodies.length - 1];
+    // outside: a terrace at the sill, cypresses, and the dream going on without her
+    const stone = A.libMaterial('sandstone', { color: '#e6d6ba' });
+    box(stone, wx1 - wx0 + 8, wy0, 22, (wx0 + wx1) / 2, wy0 / 2, -W - 12);
+    box(stone, wx1 - wx0 + 8, 1.4, 1, (wx0 + wx1) / 2, wy0 + 0.7, -W - 22.5); // parapet
+    for (const [x, z] of [[wx0 + 2, -W - 18], [wx1 - 2, -W - 19]]) if (A.has('T_Cypress')) this.decoration('T_Cypress', new THREE.Vector3(x, wy0, z), R() * 6, 1.3);
+    // before the window, the painting of the view it hides
+    this.humanCondition(new THREE.Vector3((wx0 + wx1) / 2, 0, -W + 16));
+    // east: the fireplace, with the 6:40 stopped halfway out of it
+    const brick = A.libMaterial('sandstone', { color: '#c9a78a' });
+    const [hz0, hz1, hh] = ROOM.hearth;
+    box(brick, 8, H, hz0 + W, W - 4, H / 2, (-W + hz0) / 2);           // chimney breast, left of the opening
+    box(brick, 8, H, W - hz1, W - 4, H / 2, (hz1 + W) / 2);            // right of it
+    box(brick, 8, H - hh, hz1 - hz0, W - 4, hh + (H - hh) / 2, (hz0 + hz1) / 2); // above it
+    box(stone, 11, 1.4, hz1 - hz0 + 8, W - 5.5, hh + 0.7, (hz0 + hz1) / 2); // the mantel
+    box(brick, 2, hh, hz1 - hz0, W - 1, hh / 2, (hz0 + hz1) / 2, { collide: false }); // soot-dark back
+    if (A.has('Clock')) { const c = this.decoration('Clock', new THREE.Vector3(W - 6, hh + 1.4, (hz0 + hz1) / 2), -Math.PI / 2, 5); c.traverse((m) => { if (m.isMesh) m.castShadow = true; }); }
+    this.put('Candle', W - 12, hz1 + 4, {});
+    // north-west: the chest of drawers, the size of a house
+    this.chestOfDrawers();
+    // west: the bed like a hill, with a fallen book to climb it by
+    this.giantBed();
+    // south: the only thing in here at your own size, a door
+    this.door = this.makeDoor(new THREE.Vector3(0, 0, W - 1.4), Math.PI);
+    // in the middle, the room itself at its real size
+    const small = buildBedroom(game, game.meta.memories, { found: game.meta.scraps });
+    small.group.position.set(0, 0, 10); small.group.rotation.y = Math.PI;
+    this.group.add(small.group);
+    this.solidify(small.group);
+    // and things left lying about, at her scale
+    this.staticPiece('BowlerHat', new THREE.Vector3(30, 0, 34), 0.6, 14);
+    this.staticPiece('Apple', new THREE.Vector3(-12, 0, 38), 0, 9);
+    this.put('Cloud', -18, -22, { y: 5 }); this.put('Cloud', 12, 24, { y: 6 });
+    this.put('Frame', ROOM.window[0] - 3, -W + 22, { rotY: 0.4 });
+    // the memories: where each one is caught
+    this.knotSpots = KNOTS.room.map((def) => ({ def, pos: ROOM.knots[def.at].clone(), hp: 70, guardAt: ROOM.guards[def.at]?.clone() }));
+    this.waves = [];
+    this.objectiveName = 'Free the memories in the back bedroom';
+  }
+
+  // turn a decorative group into walls you can't walk through (a trimesh of all of it)
+  solidify(group) {
+    group.updateMatrixWorld(true);
+    const verts = [], idx = [], v = new THREE.Vector3();
+    group.traverse((m) => {
+      if (!m.isMesh || m.userData.noCollide) return;
+      const g = m.geometry, p = g.attributes.position, base = verts.length / 3;
+      for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld); verts.push(v.x, v.y, v.z); }
+      if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(base + g.index.getX(i)); else for (let i = 0; i < p.count; i++) idx.push(base + i);
+    });
+    const b = this.game.physics.fixed({ x: 0, y: 0, z: 0 });
+    this.game.physics.collider(RAPIER.ColliderDesc.trimesh(new Float32Array(verts), new Uint32Array(idx)), b, G.WORLD, ALL, { friction: 0.8 });
+    this.bodies.push(b);
+  }
+
+  // the chest of drawers: a carcass of painted boards, the upper drawer shut for good,
+  // the lower one (the second drawer) a puzzle; behind it, the memory
+  chestOfDrawers() {
+    const A = this.game.assets, [cx, cz] = ROOM.chest, w = 30, d = 20, h = 24, front = cz + d / 2;
+    const paint = A.libMaterial('plaster', { color: '#f1eadb' }); // old cream paint over pine, like the one in her room
+    const brass = new THREE.MeshStandardMaterial({ color: '#c9a04a', metalness: 0.9, roughness: 0.3 });
+    const add = (sx, sy, sz, x, y, z, mat = paint, collide = true) => {
+      const m = new THREE.Mesh(worldBoxUV(new THREE.BoxGeometry(sx, sy, sz), { x, y, z }, 5), mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; this.group.add(m);
+      if (collide) { const b = this.game.physics.fixed({ x, y, z }); this.game.physics.collider(RAPIER.ColliderDesc.cuboid(sx / 2, sy / 2, sz / 2), b, G.WORLD, ALL, { friction: 0.8 }); this.bodies.push(b); }
+    };
+    add(w, h, 1, cx, h / 2, cz - d / 2 + 0.5);              // back
+    add(1, h, d, cx - w / 2 + 0.5, h / 2, cz);              // sides
+    add(1, h, d, cx + w / 2 - 0.5, h / 2, cz);
+    add(w + 1.5, 1, d + 1.5, cx, h - 0.5, cz);              // top
+    add(w - 2, 1, d - 1, cx, 0.5, cz);                      // the floor of the drawer's slot (a step up)
+    add(w - 2, 0.6, d - 1, cx, 10.3, cz);                   // the rail between the drawers
+    add(w - 2, h - 11.6, 1.2, cx, 10.6 + (h - 11.6) / 2, front); // the upper drawer's front, shut
+    for (const x of [-7, 7]) add(1.2, 1.2, 1.2, cx + x, 17, front + 1, brass, false);
+    for (const x of [-w / 2 + 0.6, w / 2 - 0.6]) for (const z of [cz - d / 2 + 1, front - 1]) add(1.6, 2, 1.6, x + cx, -0.5, z, paint, false); // feet, sunk
+    this.chest = { cx, cz, front, w, d };
+  }
+
+  // the bed, eleven times its size, a book leaning on it for a ramp
+  giantBed() {
+    const [bx, bz] = ROOM.bed, S = 11, g = this.game;
+    if (g.assets.has('Bed')) { const o = this.decoration('Bed', new THREE.Vector3(bx, 0, bz), Math.PI / 2, S); o.traverse((m) => { if (m.isMesh) m.castShadow = true; }); }
+    const top = ROOM.bedTop;
+    const col = (hx, hy, hz, x, y, z, rot) => {
+      const b = g.physics.fixed({ x, y, z }, rot ? new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, rot)) : null);
+      g.physics.collider(RAPIER.ColliderDesc.cuboid(hx, hy, hz), b, G.WORLD, ALL, { friction: 0.9 }); this.bodies.push(b);
+    };
+    col(12, top / 2, 8.6, bx, top / 2, bz);            // the mattress
+    col(0.8, top + 5, 8.6, bx - 12.5, (top + 5) / 2, bz); // the headboard
+    // a book, fallen against the footboard
+    const x0 = bx + 30, x1 = bx + 12.6, len = Math.hypot(x0 - x1, top), ang = -Math.atan2(top, x0 - x1);
+    const mid = new THREE.Vector3((x0 + x1) / 2, top / 2 + 0.2, bz + 3);
+    const book = new THREE.Group();
+    const cover = new THREE.Mesh(new THREE.BoxGeometry(len, 1.1, 8), new THREE.MeshStandardMaterial({ color: '#6b1f24', roughness: 0.7 }));
+    const pages = new THREE.Mesh(new THREE.BoxGeometry(len - 0.6, 0.9, 7.4), new THREE.MeshStandardMaterial({ color: '#efe4c8', roughness: 0.9 }));
+    pages.position.set(0, 0, 0.1); book.add(cover, pages);
+    book.position.copy(mid); book.rotation.z = ang;
+    book.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    this.group.add(book);
+    col(len / 2, 0.55, 4, mid.x, mid.y, mid.z, ang);
+  }
+
+  // The Human Condition: an easel before the window, its canvas painted with exactly
+  // the view it hides. Hang a frame on the painting and one outside, and walk through.
+  humanCondition(at) {
+    const g = this.game, A = g.assets;
+    if (!A.has('Easel')) return;
+    const S = 9;
+    const easel = A.clone('Easel');
+    easel.position.copy(at); easel.rotation.y = 0; easel.scale.setScalar(S);
+    easel.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    const sheet = easel.getObjectByName('Easel_Sheet'); if (sheet) sheet.visible = false;
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 640;
+    paintTheView(cv);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false;
+    easel.traverse((m) => {
+      if (!m.isMesh) return;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      mats.forEach((mm, i) => { if (mm.name === 'Painting') { const c = mm.clone(); c.map = tex; c.color.set('#ffffff'); c.emissive = new THREE.Color('#ffffff'); c.emissiveMap = tex; c.emissiveIntensity = 0.25; if (Array.isArray(m.material)) m.material[i] = c; else m.material = c; } });
+    });
+    this.group.add(easel);
+    // a flat, solid canvas to hang a frame on, and the legs to walk around
+    easel.updateMatrixWorld(true);
+    const canvas = easel.getObjectByName('Easel_Canvas');
+    const bb = canvas ? new THREE.Box3().setFromObject(canvas) : new THREE.Box3(at.clone().add(new THREE.Vector3(-3.6, 6.6, -0.3)), at.clone().add(new THREE.Vector3(3.6, 15.6, 0.3)));
+    const c = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
+    const b = g.physics.fixed({ x: c.x, y: c.y, z: c.z });
+    g.physics.collider(RAPIER.ColliderDesc.cuboid(sz.x / 2, sz.y / 2, Math.max(0.15, sz.z / 2)), b, G.WORLD, ALL, { friction: 0.8 });
+    this.bodies.push(b);
+    this.easel = { obj: easel, canvas: bb };
+  }
+
   buildSandbox(R) {
     this.spawn = new THREE.Vector3(0, 0.5, -14);
     this.spawnYaw = 0;
@@ -962,6 +1222,23 @@ export class Level {
         { zone: 2, route: [V(0, 16), V(-6, 26), (B.guardAt || B.pos).clone().add(V(4, 0, -3))] },
         { zone: 3, route: [S.pos.clone().add(V(-4, 0, 0)), V(30, 14), V(16, 26)] },
       ];
+    } else if (this.key === 'room' && this.chain.length >= 4) {
+      // the room in four parts, opened one memory at a time: hearth, drawer, bed, window
+      const W = ROOM.half;
+      const VEILS = [
+        [-20, -30, -15, -30, 1], // the floor into the drawer's corner
+        [-W, -30, -20, -30, 2],  // the drawer's corner into the bed's
+        [-20, -30, -20, W, 2],   // the floor into the bed's side
+        [-15, -W, -15, -30, 3],  // the drawer's corner into the window's
+        [-15, -30, W, -30, 3],   // the floor into the window's
+      ];
+      this.veils = VEILS.map(([x0, z0, x1, z1, after]) => Object.assign(new Veil(this, V(x0, z0), V(x1, z1), 12), { after }));
+      routes = [
+        { zone: 0, route: [V(12, 30), V(30, 14), V(38, -8), V(22, -20)] },
+        { zone: 1, route: [V(-24, -38), V(-40, -34), V(-50, -40)] },
+        { zone: 2, route: [V(-30, -10), V(-34, 30), V(-26, 48)] },
+        { zone: 3, route: [V(-6, -40), V(14, -36), V(34, -44)] },
+      ];
     } else if (this.key === 'piazza' && this.chain.length >= 4) {
       // four quarters, one memory each: the ink between them parts one line at a time
       this.veils = PIAZZA.veils.map(([a, after]) => Object.assign(new Veil(this, V(Math.cos(a) * 3.2, Math.sin(a) * 3.2), V(Math.cos(a) * 104, Math.sin(a) * 104), 10), { after }));
@@ -1002,6 +1279,12 @@ export class Level {
         const side = V(Math.cos(r.rotY), Math.sin(-r.rotY)).multiplyScalar(6);
         add(() => PZ.bell(this, C, { at: C.pos.clone().add(side), rotY: r.rotY }));
       }
+    } else if (this.key === 'room') {
+      const W = ROOM.half, [hz0, hz1] = ROOM.hearth;
+      const H = at('hearth'), D = at('drawer'), N = at('window');
+      if (H) add(() => PZ.hearthTrain(this, H, { W, hz0, hz1 }));
+      if (D && this.chest) add(() => PZ.floatDrawer(this, D, this.chest));
+      if (N) add(() => PZ.windowView(this, N));
     } else if (this.key === 'piazza') {
       const by = (prop) => this.knots.find((k) => k.def.prop === prop);
       const M = by('Mirror'), D = by('Drawers'), C = by('Clock'), F = by('Frame');
@@ -1030,7 +1313,7 @@ export class Level {
     this.wisp = { curve: new THREE.CatmullRomCurve3(pts), t: 0, len: from.distanceTo(to), to: to.clone() };
   }
   spawnPatrol(pt, at) {
-    const tier = (this.key === 'piazza' ? 2 : 0) + pt.zone;
+    const tier = ({ piazza: 2, room: 3 }[this.key] || 0) + pt.zone;
     const hp = (55 + this.game.depth * 5) * (1 + 0.15 * tier), variant = this.key === 'piazza' ? 'golconda' : undefined;
     for (let i = 0; i < 2; i++) {
       const p = pt.route[at].clone().add(new THREE.Vector3(i * 1.4, 0.1, i * 0.8));
@@ -1276,7 +1559,7 @@ export class Level {
       const held = cur && cur.lock && !cur.lock.solved ? cur.lock.hint : 'is caught';
       this.objective = this.tutorial && !this.tutorial.done && this.tutorial.objective ? this.tutorial.objective
         : !this.doorOpen ? `${cur ? cur.def.name[0].toUpperCase() + cur.def.name.slice(1) + (held === 'is caught' ? ' is caught' : ': ' + held) : this.objectiveName} · ${f}/${this.knotsNeeded} memories`
-        : f < this.knots.length ? `The door in the ${this.key === 'desert' ? 'shallows' : 'square'} is open · ${this.knots.length - f} ${this.knots.length - f === 1 ? 'memory' : 'memories'} still caught`
+        : f < this.knots.length ? `The door in the ${{ desert: 'shallows', room: 'south wall' }[this.key] || 'square'} is open · ${this.knots.length - f} ${this.knots.length - f === 1 ? 'memory' : 'memories'} still caught`
           : this.key === 'piazza' ? 'Every memory is free · the 6:40 is waiting on the hill' : 'Every memory is free · step through the door';
     } else if (!this.doorOpen) this.objective = `${this.objectiveName} · wave ${Math.max(1, Math.min(total, this.waveIdx + 1))}/${total} · ${this.enemiesAlive()} remain`;
     else this.objective = 'Find the open door and step through';

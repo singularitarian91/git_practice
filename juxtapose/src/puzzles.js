@@ -551,3 +551,121 @@ export function vitrine(level, knot) {
   lock.restore = () => { broke = true; if (!t.dead) t.die({ type: 'shatter', silent: true }); if (!anvil.dead) anvil.removeProp('floating', { quiet: true }); };
   return lock;
 }
+
+// ================================================================ the Back Bedroom
+// Time Transfixed: the 6:40 has stopped halfway out of the fireplace, cold. Light the
+// fire under it and it gets up steam and rolls out into the room; behind it, the memory.
+export function hearthTrain(level, knot, { W, hz0, hz1 }) {
+  const game = level.game, A = game.assets, zc = (hz0 + hz1) / 2;
+  const obj = A.has('Train') ? A.clone('Train') : new THREE.Mesh(new THREE.BoxGeometry(3, 4, 12), new THREE.MeshStandardMaterial({ color: '#2a2a2a' }));
+  obj.scale.setScalar(1.6);
+  obj.rotation.y = -Math.PI / 2;
+  obj.position.set(W - 6, 0, zc);
+  obj.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  obj.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(obj), size = bb.getSize(new THREE.Vector3()), mid = bb.getCenter(new THREE.Vector3()).sub(obj.position);
+  const shape = RAPIER.ColliderDesc.cuboid(size.z / 2 / 1.0, size.y / 2, size.x / 2).setTranslation(0, mid.y, 0);
+  // the train's own frame: its length runs along its local z; the body turns with it
+  const t = new Thing(game, { name: 'Train', displayName: 'The 6:40', obj, kinematic: true, shape, refuse: ['multiplying', 'framed', 'melting', 'hollow', 'bursting', 'floating', 'heavy', 'sleeping', 'burning', 'reflecting'] });
+  t.dustColor = '#6d665e';
+  // the logs under it: the thing to light
+  const logs = new THREE.Group();
+  const bark = new THREE.MeshStandardMaterial({ color: '#4a3322', roughness: 0.95 });
+  for (let i = 0; i < 3; i++) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 5, 10).rotateX(Math.PI / 2).rotateY(0.3 * (i - 1)), bark); l.position.set(0, 0.45 + (i === 2 ? 0.7 : 0), (i - 1) * 0.9); l.castShadow = true; logs.add(l); }
+  logs.position.set(W - 11, 0, hz1 + 2.5);
+  const L = new Thing(game, { name: 'Logs', displayName: 'The kindling', obj: logs, hp: 1e9, flammable: true, refuse: ['multiplying', 'framed'] });
+  L.dustColor = '#4a3322';
+  const lock = new Lock(level, knot, {
+    hint: 'a train has stopped in the fireplace · light the fire', line: 'puzzleHearth', hides: true, focus: new THREE.Vector3(W - 14, 3, zc),
+    caption: 'The fire catches. The 6:40 remembers it was going somewhere, and steams out into the room.',
+  });
+  let lit = 0, k = 0;
+  const from = obj.position.clone(), to = obj.position.clone().setX(W - 30);
+  lock.tick = (dt, time) => {
+    if (L.has('burning')) lit += dt;
+    if (!lock.solved && lit > 1.2) lock.solve();
+    if (lock.solved && k < 1) {
+      k = Math.min(1, k + dt / 6);
+      obj.position.copy(from).lerp(to, k * k * (3 - 2 * k));
+      if (Math.random() < dt * 14) { const p = obj.position.clone().add(new THREE.Vector3(-4, 5.5, 0)); game.vfx.smoke?.spawn?.({ x: p.x, y: p.y, z: p.z, vx: 0.6, vy: 2 + Math.random(), vz: (Math.random() - 0.5), color: new THREE.Color('#e8e4de'), alpha: 0.5, alpha1: 0, size: 0.8, size1: 3.5, life: 3 }); }
+      if (Math.random() < dt * 4) game.audio.sfx('heavy', { position: obj.position, gain: 0.3, pitch: -5 });
+      t.sync();
+    }
+  };
+  lock.restore = () => { lit = 2; k = 1; obj.position.copy(to); t.sync(); };
+  return lock;
+}
+
+// The second drawer: stuck shut for sixty years. Give it floating and it lifts out of
+// the chest and hangs in the air; the memory is in the dark where it was.
+export function floatDrawer(level, knot, chest) {
+  const game = level.game, A = game.assets, { cx, cz, front, w, d } = chest;
+  const dw = w - 2.4, dh = 9, dd = d - 1.6;
+  const g = new THREE.Group();
+  const paint = A.libMaterial('plaster', { color: '#f1eadb' });
+  const inner = A.libMaterial('oak', { color: new THREE.Color(1.2, 1.05, 0.9) });
+  const brass = new THREE.MeshStandardMaterial({ color: '#c9a04a', metalness: 0.9, roughness: 0.3 });
+  const part = (mat, sx, sy, sz, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; g.add(m); };
+  part(paint, dw, dh, 1.2, 0, 0, dd / 2 - 0.6);           // the front
+  part(inner, dw, 0.6, dd, 0, -dh / 2 + 0.3, 0);          // bottom
+  part(inner, 0.6, dh - 1.5, dd, -dw / 2 + 0.3, -0.75, 0); // sides
+  part(inner, 0.6, dh - 1.5, dd, dw / 2 - 0.3, -0.75, 0);
+  part(inner, dw, dh - 1.5, 0.6, 0, -0.75, -dd / 2 + 0.3); // back
+  for (const x of [-dw / 4, dw / 4]) part(brass, 1.4, 1.4, 1.4, x, 0.8, dd / 2 + 0.4);
+  // letters inside, a great drift of them
+  const paper = new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.9 });
+  for (let i = 0; i < 18; i++) { const m = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.08, 2.4), paper); m.position.set(rnd(-dw / 2 + 3, dw / 2 - 3), -dh / 2 + 0.7 + i * 0.09, rnd(-dd / 2 + 2, dd / 2 - 2)); m.rotation.y = rnd(-0.5, 0.5); g.add(m); }
+  g.position.set(cx, 1 + dh / 2, front - dd / 2 + 0.6);
+  const t = new Thing(game, { name: 'Drawer', displayName: 'The second drawer', obj: g, kinematic: true, shape: RAPIER.ColliderDesc.cuboid(dw / 2, dh / 2, dd / 2), refuse: ['multiplying', 'framed'] });
+  t.dustColor = '#efe6d2';
+  const lock = new Lock(level, knot, {
+    hint: 'the second drawer is stuck shut · it would float, if it could', line: 'puzzleDrawer', blocks: false, focus: new THREE.Vector3(cx, 6, front + 4),
+    caption: 'The drawer she never opened lifts out of the chest, light as a letter.',
+  });
+  const from = g.position.clone(), to = new THREE.Vector3(cx + 4, 13, front + 16);
+  let state = 'shut', k = 0;
+  t.on((prop, on) => {
+    if (on && prop === 'floating' && state === 'shut') { state = 'rising'; k = 0; game.audio.sfx('float', { position: g.position }); lock.solve(); }
+    if (on && prop === 'heavy' && state === 'shut') game.ui.toast('It sticks even tighter.');
+  });
+  lock.tick = (dt, time) => {
+    if (state === 'rising') {
+      k = Math.min(1, k + dt / 5);
+      const e = k * k * (3 - 2 * k);
+      g.position.set(from.x + (to.x - from.x) * e, from.y + (to.y - from.y) * Math.min(1, e * 1.6), from.z + (to.z - from.z) * e);
+      if (Math.random() < dt * 10) game.vfx.dust(g.position.clone().setY(g.position.y - dh / 2), 0.6, '#efe6d2');
+      if (k >= 1) state = 'hover';
+    } else if (state === 'hover') {
+      g.position.set(to.x, to.y + Math.sin(time * 0.9) * 0.3, to.z);
+      g.rotation.z = Math.sin(time * 0.6) * 0.03;
+    }
+    t.sync();
+  };
+  lock.restore = () => { state = 'hover'; k = 1; };
+  return lock;
+}
+
+// The Human Condition: the view outside is only reachable through the painting of it.
+// A frame on the canvas, one on the terrace (you can aim through glass), and walk in.
+export function windowView(level, knot) {
+  const game = level.game;
+  const lock = new Lock(level, knot, {
+    hint: 'the view is only a painting of the view · frame it', line: 'puzzleWindow', blocks: false, focus: knot.pos.clone().setY(knot.pos.y + 1.5),
+    caption: 'You stepped into the painting, and came out in the view.',
+  });
+  const outZ = -level.bound - 3;
+  lock.tick = () => {
+    const p = game.player;
+    if (!lock.solved && p && !p.dead && p.pos.z < outZ) lock.solve();
+    // once the memory is taken the glass lets you back in
+    if (knot.state === 'taken' && level.glassBody && game.physics.live(level.glassBody)) {
+      game.physics.remove(level.glassBody);
+      level.windowGlass.visible = false;
+      game.audio.sfx('shatter', { position: knot.pos });
+      const c = level.windowGlass.position;
+      for (let i = 0; i < 120; i++) game.vfx.sparks.spawn({ x: c.x + rnd(-16, 16), y: c.y + rnd(-12, 12), z: c.z, vx: rnd(-3, 3), vy: rnd(0, 4), vz: rnd(2, 8), color: new THREE.Color('#e8f4ff').multiplyScalar(3), alpha: 1, alpha1: 0, size: 0.12, life: rnd(0.6, 1.4), grav: 12, stretch: 0.03 });
+    }
+  };
+  lock.restore = () => {};
+  return lock;
+}

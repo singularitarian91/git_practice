@@ -104,6 +104,13 @@ export const KNOTS = {
     { a: 1.85, tier: 4, elite: ['hush', 'mirror'], prop: 'Clock', name: 'Paris time', nl: "Nine years of winding a clock for a city she never saw. That isn't grief. That's devotion. They're cousins.", guards: 5, text: 'Paris ran an hour ahead of the village. She kept a second clock in the shop set to his time, and wound it every night for nine years.', src: 'the workshop wall' },
     { a: 3.4, tier: 5, elite: ['wardrobe', 'hush', 'mirror'], prop: 'Frame', name: 'the unfinished portrait', nl: "The apple isn't covering his face. It's covering that she couldn't remember it.", guards: 5, text: 'She began a portrait of him from memory. She could never get the face right. In the end she painted an apple over it and called it finished.', src: 'the easel' },
   ],
+  // the back bedroom, grown to the size of what it holds
+  room: [
+    { at: 'hearth', tier: 3, elite: ['wardrobe'], prop: 'Train', name: 'the tin train', guards: 4, nl: "She gave him that train for his ninth birthday. He ran it round the kitchen until the key snapped. He kept the key.", text: 'A clockwork engine, red and gold, with the key snapped off in its side. He said it was the only train that ever brought anyone back.', src: 'the mantelpiece' },
+    { at: 'drawer', tier: 4, elite: ['hush', 'mirror'], prop: 'Pomegranate', name: 'the note', guards: 4, nl: "She read it once, standing up, in her coat. Then she put the pomegranate on top of it so it couldn't blow away.", text: 'Under the split pomegranate, in pencil: When you wake up, I will already be gone. Finish it for me? T.', src: 'the second drawer' },
+    { at: 'bed', tier: 4, elite: ['wardrobe', 'mirror'], prop: 'NightLight', name: 'the lamp on the landing', guards: 5, nl: "That's me. Before I was a lantern I was a lamp on the landing, and before that I was just the dark, and she was nine, and afraid of it.", text: 'She left the landing light on for him when he was small, because he was afraid of the dark. She has left it on every night since.', src: 'the landing' },
+    { at: 'window', tier: 5, elite: ['wardrobe', 'hush', 'mirror'], prop: 'Apple', name: 'the face', guards: 5, nl: "There. She remembers now. It was never his face she couldn't paint. It was her own.", text: 'A girl of nine in her father\'s bowler hat, an apple held at her collar, laughing at her little brother. He painted her from memory, and ran out of memory at the face.', src: 'the easel, the window' },
+  ],
 };
 export const KNOTS_NEEDED = 3;
 

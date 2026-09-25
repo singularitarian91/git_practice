@@ -128,6 +128,7 @@ const BY_PROP = {
 const BY_DEPTH = [
   'The dream is already fading, like a word on the tip of the tongue.',
   'Something about a square full of long shadows stays with them all day.',
+  'She stands at the door of the back bedroom for a long time, with her hand on the handle.',
   'All morning they have the feeling of being watched from behind, by something very large and very patient.',
   'For the first time in months, they slept all the way through.',
 ];
@@ -216,7 +217,7 @@ export class Meta {
     const who = this.knowsName ? 'Odile' : 'The dreamer';
     const lines = [STARTS[this.data.runs % STARTS.length].replace('{time}', time).replace('The dreamer', who)];
     if (stats.topProp && BY_PROP[stats.topProp]) lines.push(BY_PROP[stats.topProp]);
-    lines.push(BY_DEPTH[Math.min(BY_DEPTH.length - 1, stats.victory ? 3 : stats.depth)]);
+    lines.push(BY_DEPTH[Math.min(BY_DEPTH.length - 1, stats.victory ? BY_DEPTH.length - 1 : stats.depth)]);
     if (stats.cause === 'lucid') lines.push(BY_LUCID);
     return lines;
   }

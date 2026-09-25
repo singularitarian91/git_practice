@@ -59,6 +59,10 @@ export const LINES = {
   tut_take: ["First things first. That clock is soft in the middle. Aim at it and press Q: take its melting. Clocks don't need it, whatever they tell you."],
   tut_blade: ["Oh. One of her worries has come up the dune to see you. Just the one. F cuts it. And when it winds up to lunge, right mouse, just as it comes: turn it back."],
   tut_give: ["Now the gate. Someone has walled it up. You have melting. Aim at the wall, press E, and give it something to think about."],
+  puzzleHearth: ["The 6:40, stopped in her fireplace. It's been cold in here for sixty years. Somebody ought to light a fire."],
+  puzzleDrawer: ["The second drawer. She hasn't opened it since. It isn't locked. It's just too heavy to think about. Things that float don't have that problem."],
+  puzzleWindow: ["The window, and a painting of the window. She could never tell which one was real. You don't have to. A frame on each, and walk through."],
+  layerRoom: ["Oh. We're in the back bedroom. She hasn't come in here since 1958. It looks bigger than I remember. Everything looks bigger than she remembers."],
   puzzleSolved: ["There. The dream has its own logic. You just speak it better than she does.", "See? Wrong in exactly the right way.", "She'd have laughed at that. She used to laugh."],
 };
 

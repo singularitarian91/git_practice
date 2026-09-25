@@ -84,6 +84,7 @@ export const G = {
   PLAYER: 0x0020,
   GHOST: 0x0040,   // hollow things
   CEIL: 0x0080,    // the dream ceiling
+  GLASS: 0x0100,   // window glass: stops bodies, not the gun's aim
 };
 export function groups(member, filter) { return ((member & 0xffff) << 16) | (filter & 0xffff); }
 export const ALL = 0xffff;
@@ -132,5 +133,6 @@ export const TUNE = {
 export const LAYERS = [
   { name: 'The Soft Desert', subtitle: 'where the clocks come to rest', key: 'desert' },
   { name: 'Golconda Piazza', subtitle: 'it has been raining men all afternoon', key: 'piazza' },
+  { name: 'The Back Bedroom', subtitle: 'the room she will not go into', key: 'room' },
   { name: 'The Unwatched', subtitle: 'it only moves when you look away', key: 'boss' },
 ];

@@ -196,7 +196,13 @@ The full story bible is in [`docs/STORY.md`](docs/STORY.md) and the character sh
    - **The sand is real.** It deforms, craters and avalanches under you, and fills back in over time.
    - **The rest of the dream:** melting clocks hang on dead trees on the beach, stairs float up toward the tower, grind rails run between the rooftops, and the way out is a door standing in the shallows.
 2. **Golconda Piazza** (de Chirico and Magritte): long shadows, arcades with rails along their tops, a train on the horizon, and men in bowler hats raining from the sky. It is the city he left for, where every crowd was the same man.
-3. **The Unwatched**, the boss: a giant eye on four impossible legs, animated with procedural two-bone IK stepping. You can only hurt it while you are *not* looking at it, and it only moves when you look away. Stare too long and it looks back. It attacks with orbs carrying your last three combos. Break its posture and it kneels for a deathblow.
+3. **The Back Bedroom** (Magritte): the room she has not gone into since 1958, grown to the size of what it holds (*Personal Values*). Its walls and ceiling are papered with sky, the floorboards are as wide as roads, and in the middle stands the room at its real size.
+   - **Time Transfixed:** the 6:40 has stopped halfway out of the fireplace. Light the logs with *burning* and it steams out into the room, uncovering the tin train he was given at nine.
+   - **The Second Drawer:** the chest of drawers is the size of a house. Give its stuck lower drawer *floating* and it lifts out and hangs in the air. His note is in the dark behind it.
+   - **The Bed:** eleven times its size, climbed by a fallen book. The lamp on the landing waits on the pillow.
+   - **The Human Condition:** a painting of the view stands in front of the one real window, and the last memory is on the terrace outside. The glass stops you, but you can aim through it. Hang one frame on the painting and one on the terrace, and walk through. When the memory is back, the glass gives.
+   - A door at your own size in the south wall leads down to the last room.
+4. **The Unwatched**, the boss: a giant eye on four impossible legs, animated with procedural two-bone IK stepping. You can only hurt it while you are *not* looking at it, and it only moves when you look away. Stare too long and it looks back. It attacks with orbs carrying your last three combos. Break its posture and it kneels for a deathblow.
 
 When you die, the dreamer wakes. A short, quiet vignette of her morning follows, and its details depend on how deep you got and which property you leaned on. Runs that go deep enough or strange enough leave behind a **memory**. A memory unlocks a property, becomes a **keepsake**, and adds a new object to the dreamer's bedroom, so the room fills in as the mystery does. Nine **canvas scraps** reassemble the painting in the **Journal**. Beating the boss finishes it.
 

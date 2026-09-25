@@ -1400,7 +1400,7 @@ export class Player {
     const f = raw ? new THREE.Vector3(0, 0, -1).applyQuaternion(raw.quat) : cam.getWorldDirection(new THREE.Vector3());
     // start the ray at the pivot plane so nothing behind the player is hit
     const start = eye.clone().addScaledVector(f, eye.distanceTo(this.camPivot) * 0.9);
-    const mask = ALL & ~G.PLAYER & ~G.DEBRIS;
+    const mask = ALL & ~G.PLAYER & ~G.DEBRIS & ~G.GLASS; // you can aim through a window
     let hit = game.physics.ray(start, f, 300, mask);
     this.aimEntity = null;
     this.aimHit = hit ? { point: hit.point.clone(), normal: hit.normal.clone(), entity: hit.entity, collider: hit.collider } : null;

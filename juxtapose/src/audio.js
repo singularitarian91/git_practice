@@ -130,6 +130,23 @@ const LAYERS = [
     shimmer: { p: 0.35, oct: 1 },
     drone: true,
   },
+  {
+    // the Back Bedroom: a music box in an empty room, slow, close, and very tired
+    name: 'The Back Bedroom',
+    root: 48, // C3, Dorian
+    mode: MODES.dorian,
+    tempo: 0.86,
+    prog: [0, 5, 3, 4], // Cm9 – Ab – F – G
+    pad: { types: ['triangle', 'sine'], cutoff: 900, q: 0.6, detune: 5, gain: 0.05, attack: 2.6, oct: 0 },
+    arp: { every: 2, pattern: [0, 4, 2, 6, 4, 2, 7, 4], density: 0.8, oct: 12, pizz: false, gain: 0.05 },
+    bass: [[0, 8, 0, 0.8], [8, 8, 2, 0.6]],
+    perc: {
+      lo: 0.5, hatAt: 0.8, woodAt: 1.2, snareKind: 'brush', metal: false,
+      kick: '6.......4.......', snare: '........5.......', hat: '....2.......2...', wood: '..3.......3.....',
+    },
+    shimmer: { p: 0.55, oct: 2 },
+    drone: false,
+  },
 ];
 
 // Pre-parse pattern strings / bass lists into per-step lookup tables.
