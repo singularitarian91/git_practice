@@ -91,18 +91,18 @@ export function applyRanks(mods, xp, meta) {
 export const KNOTS = {
   desert: [
     // in the order the village gives them up; the chapel's is off the path, for the curious
-    { at: 'B_Loggia', prop: 'Pomegranate', name: 'the Saturday pomegranate', nl: 'She always saved the last seed for him. He never once noticed. She never once stopped.', guards: 3, text: 'Every Saturday he bought one pomegranate at the market and ate it seed by seed on the walk home, to make it last.', src: 'the market loggia' },
-    { at: 'B_Workshop', elite: ['hush'], prop: 'Clock', name: 'the unfinished clock', nl: 'Twenty to seven. The time the train left. Of course that is where it stopped.', guards: 4, text: 'The regulator in the shop window stopped at twenty to seven. She took it apart three times and never put it back together.', src: 'the workshop, 1962' },
-    { at: 'B_Boathouse', side: -1, elite: ['mirror'], prop: 'Birdcage', name: 'the canary', nl: 'She told everyone Pip flew south. Pip was a canary. Pip did not fly south.', guards: 4, text: 'Pip flew out of the door Théo left open. She kept the cage, and for a month she left its little door open too, every evening, just in case.', src: 'the boathouse' },
-    { at: 'B_Station', elite: ['wardrobe'], prop: 'BowlerHat', name: 'the hat on the rack', nl: 'She did open the parcel, you know. Years later. She put the hat on and stood in the hall for an hour.', guards: 4, text: 'He left his hat on the rack of the 6:40. The conductor posted it back to the shop. She never opened the parcel.', src: 'the station' },
-    { at: 'B_Chapel', optional: true, elite: ['hush', 'mirror'], prop: 'Candle', name: 'the Sunday candle', nl: "I'm that candle, in case you were wondering. Well. I'm what's left of it.", guards: 5, text: 'She lit a candle for Théo every Sunday for a year. Then every other Sunday. Then once, at Christmas, and she felt guilty all night.', src: 'the chapel' },
+    { at: 'B_Loggia', tier: 0, prop: 'Pomegranate', name: 'the Saturday pomegranate', nl: 'She always saved the last seed for him. He never once noticed. She never once stopped.', guards: 2, text: 'Every Saturday he bought one pomegranate at the market and ate it seed by seed on the walk home, to make it last.', src: 'the market loggia' },
+    { at: 'B_Workshop', tier: 1, elite: ['hush'], prop: 'Clock', name: 'the unfinished clock', nl: 'Twenty to seven. The time the train left. Of course that is where it stopped.', guards: 3, text: 'The regulator in the shop window stopped at twenty to seven. She took it apart three times and never put it back together.', src: 'the workshop, 1962' },
+    { at: 'B_Boathouse', side: -1, tier: 2, elite: ['mirror'], prop: 'Birdcage', name: 'the canary', nl: 'She told everyone Pip flew south. Pip was a canary. Pip did not fly south.', guards: 3, text: 'Pip flew out of the door Théo left open. She kept the cage, and for a month she left its little door open too, every evening, just in case.', src: 'the boathouse' },
+    { at: 'B_Station', tier: 3, elite: ['wardrobe'], prop: 'BowlerHat', name: 'the hat on the rack', nl: 'She did open the parcel, you know. Years later. She put the hat on and stood in the hall for an hour.', guards: 4, text: 'He left his hat on the rack of the 6:40. The conductor posted it back to the shop. She never opened the parcel.', src: 'the station' },
+    { at: 'B_Chapel', optional: true, tier: 3, elite: ['hush', 'mirror'], prop: 'Candle', name: 'the Sunday candle', nl: "I'm that candle, in case you were wondering. Well. I'm what's left of it.", guards: 5, text: 'She lit a candle for Théo every Sunday for a year. Then every other Sunday. Then once, at Christmas, and she felt guilty all night.', src: 'the chapel' },
   ],
   piazza: [
     // one to a quarter of the square, in the order the ink gives them up
-    { a: -1.38, elite: ['mirror', 'mirror'], prop: 'Mirror', name: 'the window crowd', nl: "By the end she wasn't looking for him in the windows. She was looking for anyone who'd look back.", guards: 4, text: 'In the city every window held the same man in the same hat. She looked for Théo in all of them, and in all of them he looked back.', src: 'a letter, unsent' },
-    { a: 0.25, elite: ['wardrobe'], prop: 'Drawers', name: 'the second drawer', nl: 'Eleven letters. She answered every one. She just never posted them.', guards: 4, text: 'His letters, second drawer: eleven of them. The last one only says, The rain here is made of people. Come anyway.', src: 'the chest of drawers' },
-    { a: 1.85, elite: ['hush', 'mirror'], prop: 'Clock', name: 'Paris time', nl: "Nine years of winding a clock for a city she never saw. That isn't grief. That's devotion. They're cousins.", guards: 5, text: 'Paris ran an hour ahead of the village. She kept a second clock in the shop set to his time, and wound it every night for nine years.', src: 'the workshop wall' },
-    { a: 3.4, elite: ['wardrobe', 'hush'], prop: 'Frame', name: 'the unfinished portrait', nl: "The apple isn't covering his face. It's covering that she couldn't remember it.", guards: 5, text: 'She began a portrait of him from memory. She could never get the face right. In the end she painted an apple over it and called it finished.', src: 'the easel' },
+    { a: -1.38, tier: 2, elite: ['mirror'], prop: 'Mirror', name: 'the window crowd', nl: "By the end she wasn't looking for him in the windows. She was looking for anyone who'd look back.", guards: 3, text: 'In the city every window held the same man in the same hat. She looked for Théo in all of them, and in all of them he looked back.', src: 'a letter, unsent' },
+    { a: 0.25, tier: 3, elite: ['wardrobe'], prop: 'Drawers', name: 'the second drawer', nl: 'Eleven letters. She answered every one. She just never posted them.', guards: 4, text: 'His letters, second drawer: eleven of them. The last one only says, The rain here is made of people. Come anyway.', src: 'the chest of drawers' },
+    { a: 1.85, tier: 4, elite: ['hush', 'mirror'], prop: 'Clock', name: 'Paris time', nl: "Nine years of winding a clock for a city she never saw. That isn't grief. That's devotion. They're cousins.", guards: 5, text: 'Paris ran an hour ahead of the village. She kept a second clock in the shop set to his time, and wound it every night for nine years.', src: 'the workshop wall' },
+    { a: 3.4, tier: 5, elite: ['wardrobe', 'hush', 'mirror'], prop: 'Frame', name: 'the unfinished portrait', nl: "The apple isn't covering his face. It's covering that she couldn't remember it.", guards: 5, text: 'She began a portrait of him from memory. She could never get the face right. In the end she painted an apple over it and called it finished.', src: 'the easel' },
   ],
 };
 export const KNOTS_NEEDED = 3;
@@ -163,13 +163,16 @@ export class Knot {
     level.group.add(g);
   }
 
+  // the dream's resistance grows region by region: more of them, tougher, quicker to fight
+  get tier() { return this.def.tier ?? 2; }
   spawnGuards(hp, variant) {
     const n = this.def.guards || 4, c = this.guardAt || this.pos;
     const elite = this.def.elite || [];
+    hp *= 1 + 0.18 * this.tier;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rnd(-0.3, 0.3), d = rnd(3, 6);
       const x = c.x + Math.cos(a) * d, z = c.z + Math.sin(a) * d;
-      const e = this.game.spawnEnemy(new THREE.Vector3(x, this.level.groundY(x, z) + 0.1, z), { hp, variant: elite[i] || variant, guard: this });
+      const e = this.game.spawnEnemy(new THREE.Vector3(x, this.level.groundY(x, z) + 0.1, z), { hp, variant: elite[i] || variant, guard: this, tier: this.tier });
       if (e) this.guards.push(e);
     }
   }
@@ -184,13 +187,15 @@ export class Knot {
   wake() {
     if (this.state !== 'dormant') return;
     this.state = 'awake';
-    for (const e of this.guards) e.dormant = false;
     const game = this.game;
-    // the more lucid the dream, the more come to defend it
-    const extra = Math.floor((game.lucidity?.k || 0) * 3);
+    // early on they come one at a time, so a first fight is a lesson, not a mob
+    const gap = this.tier <= 0 ? 5 : this.tier === 1 ? 2.5 : 0;
+    this.guards.forEach((e, i) => { if (gap && i) e.wakeAt = game.time + i * gap; else e.dormant = false; });
+    // the more lucid the dream, the more come to defend it (not in the first regions)
+    const extra = this.tier >= 2 ? Math.floor((game.lucidity?.k || 0) * 3) : 0;
     for (let i = 0; i < extra; i++) {
       const c = this.guardAt || this.pos, a = Math.random() * Math.PI * 2, x = c.x + Math.cos(a) * 7, z = c.z + Math.sin(a) * 7;
-      const e = game.spawnEnemy(new THREE.Vector3(x, this.level.groundY(x, z) + 0.1, z), { hp: this.guards[0]?.maxHp || 60, variant: this.guards[0]?.variant });
+      const e = game.spawnEnemy(new THREE.Vector3(x, this.level.groundY(x, z) + 0.1, z), { hp: this.guards[0]?.maxHp || 60, variant: this.guards[0]?.variant, tier: this.tier });
       if (e) { this.guards.push(e); game.vfx.dust(e.obj.position, 1.2); }
     }
     game.audio.sfx('perilous', { position: this.pos });
@@ -209,7 +214,9 @@ export class Knot {
     this.relic.rotation.y += dt * 0.6;
     this.relic.position.y = 1.35 + Math.sin(this.t * 1.3) * 0.08;
     for (const c of this.tangle.children) c.rotation.y += c.userData.spin * dt;
-    if (this.state === 'dormant' && pl && !pl.dead && pl.pos.distanceTo(this.guardAt || this.pos) < this.wakeR) this.wake();
+    // the memory you're after wakes its guards as you approach; the others only if you walk right up to them,
+    // so the next region's fight never spills into this one
+    if (this.state === 'dormant' && pl && !pl.dead && pl.pos.distanceTo(this.guardAt || this.pos) < (this.lit ? this.wakeR : 7)) this.wake();
     if ((this.state === 'dormant' || this.state === 'awake') && this.guards.length && this.guards.every((e) => e.dead)) {
       // the anxieties are gone, but a puzzle can still hold it
       const held = this.lock && !this.lock.solved && (this.lock.blocks || this.lock.hides);

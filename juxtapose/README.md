@@ -120,6 +120,21 @@ Properties interact through shared channels instead of hand-written pairs, so co
 - **A wisp** of light runs ahead to the next memory.
 - **Golconda Piazza** is cut into four quarters by ink running out from a sleeping statue, one memory to a quarter. Each memory you free parts the next line. The way out is the 6:40 itself: once every memory is free it comes round the hill and stops for you.
 
+**Regions, and a fight that grows with you.** Each layer is divided into named regions. Entering one shows its name, and the map (`M`) labels them all: dim until the ink lets you in, with stars for how hard each one fights.
+
+| The Soft Desert | | The city | |
+|---|---|---|---|
+| The Dunes | no fights: somewhere to learn the gun | The Square of Windows | ✦✦✦ |
+| The Market | ✦ two slow Sleepwalkers, waking one at a time | The Colonnade | ✦✦✦✦ |
+| Clockmakers' Row | ✦✦ a Hush joins them | Clock Street | ✦✦✦✦✦ |
+| The Shore | ✦✦✦ a Mirror, patrols on the lanes | The Gallery | ✦✦✦✦✦ |
+| The Station | ✦✦✦✦ a Wardrobe | | |
+| Chapel Hill | ✦✦✦✦ off the path, for later | | |
+
+The tier sets how many guards there are, their health, how often they shoot, and whether their lunges can be perilous. In the first region nothing is perilous. The first region's guards wake one at a time, and there are no patrols until the first memory is back. Surges are capped to fit the region you're in.
+
+**Learning as you go.** A first night shows only what you need. Lucidity, reverie and Clarity appear on the HUD the first time they mean something. Locked property slots stay hidden until you have a memory, and the self and rounds keys appear after a couple of gives. The Night-Light gives one tip at a time, at least 16 seconds apart; a tip whose moment has passed is dropped.
+
 **Puzzles.** Some memories are held by more than anxieties, and the gun is the way in. The objective line and the map say what is wrong. Each puzzle has the property it needs close by, so a first night can solve it.
 
 | Memory | What holds it | The answer |
@@ -133,7 +148,7 @@ Properties interact through shared channels instead of hand-written pairs, so co
 | Paris time | A stopped clock whose weight is only painted on | Make the weight *heavy* and the clock runs, and strikes |
 | The unfinished portrait | Under glass, with an anvil hovering above it (heavy and floating at once) | *Take* the anvil's floating |
 
-**Cutscenes.** They are letterboxed, captioned and skippable (Space, Escape or a click).
+**Cutscenes.** They are letterboxed and captioned. Every shot stays on screen long enough to read its caption at a comfortable pace. Space, Enter or a click moves on to the next shot, and Escape skips the rest.
 - **The prologue** plays on your first night and can be replayed from the title screen. It tells who is dreaming, who you are, what your gun does, and why the night ends when she wakes.
 - **On arrival in a layer,** the dream shows you where you are.
 - **Taking back a memory** shows it: the camera circles it while a translucent Figment acts it out. Then the next veils unravel, the next memory's column ignites, and at the end the door opens in the shallows. The Night-Light has the last word on each one, close up.

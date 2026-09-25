@@ -30,6 +30,7 @@ import { Cutscene, orbit } from './cutscene.js';
 const $ = (s) => document.querySelector(s);
 // With "Night-Light tips and asides" off, only these lines still play
 const STORY_LINES = new Set(['wake0', 'wakeN', 'layer1', 'layer2', 'layer3', 'bossPhase', 'bossDown', 'death', 'lucidWake', 'scrap', 'laststand']);
+const TIP_GAP = 16; // seconds between the Night-Light's tips
 
 class Game {
   constructor() {
@@ -82,9 +83,23 @@ class Game {
     this.portals = new Portals(this);
     this.photo = new PhotoMode(this);
     this.stats = this.freshStats();
-    // the Night-Light's tips and asides can be muted; its story lines can't
+    // the Night-Light's tips and asides can be muted; its story lines can't. Tips are
+    // spaced out, one idea at a time: a tip that comes too soon waits its turn, and
+    // one that waits too long is dropped (the moment for it has passed)
     const say = this.narrator.say.bind(this.narrator);
-    this.narrator.say = (key, o) => { if (this.opts.tips || STORY_LINES.has(key)) say(key, o); };
+    this.tipQueue = []; this.lastTip = -99;
+    this.narrator.say = (key, o) => {
+      if (STORY_LINES.has(key) || key.startsWith('puzzle') || key.startsWith('meet_')) { say(key, o); return; }
+      if (!this.opts.tips) return;
+      if (this.time - this.lastTip >= TIP_GAP && !this.narrator.cur && !this.narrator.queue.length) { this.lastTip = this.time; say(key, o); }
+      else if (!this.tipQueue.some((t) => t.key === key)) this.tipQueue.push({ key, o, at: this.time });
+    };
+    this.flushTips = () => {
+      this.tipQueue = this.tipQueue.filter((t) => this.time - t.at < 50);
+      if (!this.tipQueue.length || this.time - this.lastTip < TIP_GAP || this.narrator.cur || this.narrator.queue.length || this.state !== 'playing') return;
+      const t = this.tipQueue.shift();
+      this.lastTip = this.time; say(t.key, t.o);
+    };
     for (const k of Object.keys(this.opts)) if (k !== 'quality') this.applySetting(k, this.opts[k]);
     addEventListener('resize', () => this.applyHudScale());
     this.bindMenus();
@@ -994,6 +1009,7 @@ class Game {
       if (e.obj.position.distanceTo(pl.pos) < 22) near = true;
       if (e.staggered > 0 || (e.hp < e.maxHp * 0.2)) stag = true;
       if (e.lunge && e.lunge.perilous) n.event('perilous');
+      else if (e.lunge && e.lunge.phase === 'wind' && e.obj.position.distanceTo(pl.pos) < 8) n.event('lungeSeen');
     }
     if (near) n.event('enemiesNear');
     if (stag) n.event('staggerSeen');
@@ -1088,6 +1104,7 @@ class Game {
       this.lucidity.update(dt);
       this.combatHUD.update(rdt);
       this.narrator.update(rdt);
+      this.flushTips();
       this.storyTriggers(dt);
       if (this.lucidity.value >= 100 && !this.sandbox && this.state === 'playing') this.endRun('lucid');
       // audio

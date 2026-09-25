@@ -568,3 +568,17 @@ input[type=checkbox] { width: 16px; height: 16px; }
 .map-frame { padding: 14px; border: 1px solid rgba(255,210,122,0.4); border-radius: 10px; background: rgba(20,16,24,0.88); box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
 #map-canvas { display: block; width: min(76vmin, 560px); height: min(76vmin, 560px); border-radius: 6px; }
 #map-note { margin: 10px 2px 0; font-family: Georgia, serif; color: var(--bone); font-size: 15px; text-align: center; }
+
+/* entering a region: a quiet title under the objective */
+#region { position: absolute; top: 18%; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; opacity: 0; }
+#region.in { animation: regionIn 0.9s ease-out forwards; }
+#region.out { animation: regionOut 0.9s ease-in forwards; }
+#region .rg-name { font-size: 30px; color: #fff4d6; text-shadow: 0 2px 14px rgba(0,0,0,0.6); letter-spacing: 0.02em; }
+#region .rg-sub { margin-top: 4px; font-family: Georgia, serif; font-style: italic; font-size: 15px; color: rgba(245,236,216,0.85); text-shadow: 0 1px 8px rgba(0,0,0,0.6); }
+@keyframes regionIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes regionOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* the HUD teaches itself: pieces appear the first time they matter */
+#lucid, #reverie, .rv-row, .cl-row { transition: opacity 0.8s ease; }
+#hud.no-lucid #lucid, #hud.no-reverie #reverie, #hud.no-reverie .rv-row, #hud.no-clarity .cl-row { opacity: 0; pointer-events: none; }
+#hud.lean #ribbon .slot.locked { display: none; }

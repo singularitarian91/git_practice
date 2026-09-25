@@ -6,6 +6,7 @@ import { drawPainting } from './painting.js';
 import { takeCandidate } from './properties.js';
 import { LINES } from './narrator.js';
 import { RANKS, rankOf, rankProgress, TREE, treePoints, canBuy, buy } from './knots.js';
+import { REGIONS } from './level.js';
 
 const $ = (s) => document.querySelector(s);
 const ROMAN = ['I', 'II', 'III', 'IV'];
@@ -370,6 +371,7 @@ export class UI {
     const g = this.game;
     const pl = g.player;
     if (!pl || this.hud.hidden) return;
+    this.teach(pl);
     // lucidity
     const L = g.lucidity.display;
     this.el.lucidFill.style.width = L.toFixed(1) + '%';
@@ -421,9 +423,10 @@ export class UI {
       this.el.vName.textContent = PROP_INFO[sel].label;
       this.el.vName.style.color = PROP_INFO[sel].color;
       const c = pl.chargesOf(sel);
-      this.el.vCount.innerHTML = c === Infinity ? '∞ charges · <kbd>E</kbd> give <kbd>Z</kbd> self <kbd>G</kbd> rounds'
+      const more = this.game.meta.data.taught?.gives ? ' <kbd>Z</kbd> self <kbd>G</kbd> rounds' : '';
+      this.el.vCount.innerHTML = c === Infinity ? '∞ charges · <kbd>E</kbd> give' + more
         : c <= 0 ? `none left · <kbd>Q</kbd> take from a ${PROP_INFO[sel].source.toLowerCase()}`
-          : `${c} charge${c === 1 ? '' : 's'} · <kbd>E</kbd> give <kbd>Z</kbd> self <kbd>G</kbd> rounds`;
+          : `${c} charge${c === 1 ? '' : 's'} · <kbd>E</kbd> give${more}`;
     }
     // target readout
     const t = pl.aimEntity;
@@ -717,6 +720,16 @@ export class UI {
       ctx.beginPath(); ctx.moveTo(X(a.x), Z(a.z)); ctx.lineTo(X(bb.x), Z(bb.z)); ctx.stroke();
     }
     ctx.setLineDash([]);
+    // the regions: names where they lie; the ones the ink still closes are dim
+    const stage = L.stage || 0;
+    ctx.textAlign = 'center';
+    for (const r of REGIONS[L.key] || []) {
+      const open = stage >= r.open, here = L.region === r;
+      ctx.font = `${here ? 'italic ' : ''}${here ? 16 : 14}px Georgia, serif`;
+      ctx.fillStyle = here ? '#fff4d6' : open ? 'rgba(40,28,20,0.85)' : 'rgba(40,28,20,0.35)';
+      ctx.fillText(r.name, X(r.at[0]), Z(r.at[1]));
+      if (r.tier >= 0) { ctx.font = '10px Georgia, serif'; ctx.fillText('✦'.repeat(Math.min(5, r.tier + 1)), X(r.at[0]), Z(r.at[1]) + 13); }
+    }
     // the memories: taken ones ticked, the one you're after glowing
     for (const k of L.knots || []) {
       const x = X(k.pos.x), y = Z(k.pos.z), cur = L.current === k;
@@ -735,8 +748,42 @@ export class UI {
     ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = '#1b1620'; ctx.lineWidth = 2; ctx.stroke();
     ctx.restore();
     const cur = L.current;
-    $('#map-note').textContent = cur ? `${cur.def.name[0].toUpperCase() + cur.def.name.slice(1)}${cur.lock && !cur.lock.solved ? ': ' + cur.lock.hint : ''}` : L.objective || '';
+    $('#map-note').textContent = (L.region ? L.region.name + ' · ' : '') + (cur ? `${cur.def.name[0].toUpperCase() + cur.def.name.slice(1)}${cur.lock && !cur.lock.solved ? ': ' + cur.lock.hint : ''}` : L.objective || '');
   }
+  // The HUD teaches itself: a new dreamer sees the Figment's health, the gun and
+  // the properties they hold. Lucidity, reverie and Clarity appear the first time
+  // they mean something, and stay from then on. Locked slots wait for a memory.
+  teach(pl) {
+    const g = this.game, m = g.meta, T = m.data.taught || (m.data.taught = {});
+    let changed = false;
+    const learn = (k, cond) => { if (!T[k] && cond) { T[k] = true; changed = true; } };
+    learn('lucid', g.lucidity.value > 0.5 || g.sandbox);
+    learn('reverie', pl.reverie > 0 || g.sandbox);
+    learn('clarity', (m.data.clarity || 0) > 0 || g.sandbox);
+    learn('gives', (g.stats.gives || 0) >= 2 || g.sandbox);
+    if (changed) { m.save(); this._vsel = null; }
+    const key = ['lucid', 'reverie', 'clarity'].map((k) => (T[k] ? 1 : 0)).join('') + (m.memories.size || g.sandbox ? 'm' : '');
+    if (key === this._teachKey) return;
+    this._teachKey = key;
+    const h = this.hud.classList;
+    h.toggle('no-lucid', !T.lucid);
+    h.toggle('no-reverie', !T.reverie);
+    h.toggle('no-clarity', !T.clarity);
+    h.toggle('lean', !(m.memories.size || g.sandbox));
+  }
+
+  // crossing into a region: its name, small, under the objective, then gone
+  regionCard(name, sub) {
+    const el = $('#region');
+    if (!el) return;
+    el.querySelector('.rg-name').textContent = name;
+    el.querySelector('.rg-sub').textContent = sub || '';
+    el.hidden = false;
+    el.classList.remove('out'); void el.offsetWidth; el.classList.add('in');
+    clearTimeout(this._rgT);
+    this._rgT = setTimeout(() => { el.classList.add('out'); setTimeout(() => { el.hidden = true; el.classList.remove('in', 'out'); }, 900); }, 4200);
+  }
+
   // the title's Continue button: shown when a night was left mid-way
   refreshContinue() {
     const b = $('#btn-continue'), cp = this.game.meta.data.checkpoint;

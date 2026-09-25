@@ -32,7 +32,7 @@
   <!-- ============================ HUD ============================ -->
   <div id="letterbox" hidden aria-live="polite">
     <div class="lb-bar lb-top"></div>
-    <div class="lb-bar lb-bot"><p class="lb-cap"></p><span class="lb-skip"><kbd>Space</kbd> skip</span></div>
+    <div class="lb-bar lb-bot"><p class="lb-cap"></p><span class="lb-skip"><kbd>Space</kbd> next · <kbd>Esc</kbd> skip</span></div>
   </div>
   <div id="hud" hidden>
     <div id="hud-top-left">
@@ -61,6 +61,7 @@
       <div class="boss-echo"></div>
     </div>
 
+    <div id="region" hidden aria-live="polite"><div class="rg-name display"></div><div class="rg-sub"></div></div>
     <div id="waypoint" hidden><svg class="wp-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2.5l8 9.5-8 9.5-8-9.5z"/><path class="wp-core" d="M12 8l3.4 4-3.4 4-3.4-4z"/></svg><span class="wp-dist mono"></span><svg class="wp-arrow" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 5l5 5 5-5"/></svg></div>
     <div id="threats" aria-hidden="true"></div>
 

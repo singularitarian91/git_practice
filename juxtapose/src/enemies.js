@@ -94,11 +94,16 @@ export class Sleepwalker extends Entity {
     this.speedMul = (opts.speed || 1) * (K?.speed || 1);
     this.fireRate = (opts.fireRate || 1) * (K?.fire || 1);
     this.hushT = rnd(1, 3);
+    // how hard this one fights: tier 0 is the first lesson, 5 the city at its worst
+    this.tier = opts.tier ?? 2;
+    const T = Math.max(0, Math.min(5, this.tier));
+    this.fireRate *= [0.4, 0.6, 0.8, 1, 1.1, 1.2][T];
+    this.perilK = [0, 0.4, 0.8, 1, 1.1, 1.25][T];
     if (this.variant === 'mirror') this.addProp('reflecting', { innate: true });
     this.t = 0;
     this.maxVy = 0;
     initPosture(this, K?.posture || (this.variant === 'golconda' ? 80 : 70));
-    this.lungeCool = rnd(2.5, 5);
+    this.lungeCool = rnd(2.5, 5) * (this.tier <= 0 ? 2 : 1);
     this.lunge = null;
     this.recoilT = 0;
   }
@@ -183,7 +188,7 @@ export class Sleepwalker extends Entity {
       this.game.ui.hitmarker(amount >= 30);
     }
     this.lastDir = opts.dir || null;
-    if (this.dormant && this.guard) this.guard.wake();
+    if (this.dormant && this.guard) { this.guard.wake(); this.dormant = false; }
     super.damage(amount, opts);
   }
 
@@ -289,7 +294,8 @@ export class Sleepwalker extends Entity {
     }
     if (this.dormant) {
       this.canSee = false;
-      if (pl && !pl.dead && dist < 9) this.guard.wake();
+      if (pl && !pl.dead && dist < (this.guard.lit ? 9 : 5)) this.guard.wake();
+      if (this.wakeAt && game.time >= this.wakeAt) { this.dormant = false; game.vfx.dust(pos, 0.8); }
     }
     const target = this.decoy && !this.decoy.dead ? this.decoy.pos : (pl ? pl.pos : pos);
     const toT = target.clone().sub(pos); toT.y = 0;
@@ -356,7 +362,7 @@ export class Sleepwalker extends Entity {
     // ---- lunge (melee): a white glint can be deflected, a red 危 must be dodged
     this.lungeCool -= dt;
     if (controllable && this.canSee && pl && !pl.dead && !this.lunge && this.windup <= 0 && this.lungeCool <= 0 && dT < 5.5 && this.decoy == null) {
-      const perilous = Math.random() < (this.variant === 'wardrobe' ? 0.6 : this.variant === 'golconda' ? 0.35 : 0.25);
+      const perilous = Math.random() < (this.variant === 'wardrobe' ? 0.6 : this.variant === 'golconda' ? 0.35 : 0.25) * this.perilK;
       this.lunge = { phase: 'wind', t: 0, perilous, hit: false, dir: toT.clone().normalize() };
       if (perilous) game.audio.sfx('perilous', { position: pos });
       else game.vfx.add.spawn({ x: pos.x, y: pos.y + 1.4, z: pos.z, color: new THREE.Color('#ffffff').multiplyScalar(8), alpha: 1, alpha1: 0, size: 0.7, size1: 0.1, life: 0.3, rot: 0.78 });

@@ -104,6 +104,28 @@ export const DESERT = {
   ],
 };
 
+// The regions of each layer, in the order the dream opens them. `tier` is how hard
+// the anxieties there fight (see knots.js / enemies.js); `open` is how many
+// memories must be taken back before you can get in; `at` is where the map writes
+// its name. `test(x, z)` claims a point (the first region that claims it wins).
+export const REGIONS = {
+  desert: [
+    { name: 'The Dunes', sub: 'where the dream begins; nothing here wants to hurt you', tier: -1, open: 0, at: [0, -50], test: (x, z) => z < -27 && x > -20 },
+    { name: 'Chapel Hill', sub: 'off the path; its guards are old and stubborn', tier: 3, open: 0, at: [-32, -24], test: (x, z) => x < -17 && z < -10 },
+    { name: 'The Market', sub: 'the first memory is kept lightly', tier: 0, open: 0, at: [2, -4], test: (x, z) => z < 11 && x > -9 && x < 24 },
+    { name: "Clockmakers' Row", sub: 'something here keeps everything quiet', tier: 1, open: 0, at: [-26, 2], test: (x, z) => z < 11 && x <= -9 },
+    { name: 'The Shore', sub: 'the tide keeps what it is given', tier: 2, open: 2, at: [-18, 34], test: (x, z) => z >= 11 && x < 12 },
+    { name: 'The Station', sub: 'where the 6:40 never stops', tier: 3, open: 3, at: [40, 16], test: () => true },
+  ],
+  piazza: [
+    { name: 'The Square of Windows', sub: 'every window holds the same man', tier: 2, open: 0, at: [0, -30], test: (x, z) => Math.atan2(z, x) > -3 * Math.PI / 4 && Math.atan2(z, x) <= -Math.PI / 4 },
+    { name: 'The Colonnade', sub: 'his letters are kept here, unposted', tier: 3, open: 1, at: [34, 2], test: (x, z) => Math.abs(Math.atan2(z, x)) <= Math.PI / 4 },
+    { name: 'Clock Street', sub: 'an hour ahead of home', tier: 4, open: 2, at: [0, 34], test: (x, z) => Math.atan2(z, x) > Math.PI / 4 && Math.atan2(z, x) <= 3 * Math.PI / 4 },
+    { name: 'The Gallery', sub: 'the worst of it is kept under glass', tier: 5, open: 3, at: [-34, 2], test: () => true },
+  ],
+  boss: [{ name: 'The Last Room', sub: 'look away', tier: 5, open: 0, at: [0, 0], test: () => true }],
+};
+
 // Golconda Piazza's palazzi: the same kit in de Chirico's ochre, around the square
 export const PIAZZA = {
   buildings: [
@@ -955,7 +977,8 @@ export class Level {
       ];
     }
     for (const r of routes) for (const p of r.route) { street(p); p.y = this.groundY(p.x, p.z); }
-    this.patrols = routes.map((r) => ({ ...r, members: [], wait: 0, started: false }));
+    // the first patrols in the Soft Desert only walk once the first memory is back
+    this.patrols = routes.map((r) => ({ ...r, start: this.key === 'desert' ? Math.max(1, r.zone) : r.zone, members: [], wait: 0, started: false }));
     this.startPatrols();
     this.wisp = null;
   }
@@ -991,7 +1014,7 @@ export class Level {
   get current() { return this.chain?.find((k) => k.state !== 'taken') || null; }
   relight() { const c = this.current; for (const k of this.knots) k.lit = k === c || !!k.def.optional; }
   startPatrols() {
-    for (const pt of this.patrols) if (!pt.started && pt.zone <= this.stage) { pt.started = true; this.spawnPatrol(pt, 0); }
+    for (const pt of this.patrols) if (!pt.started && pt.start <= this.stage) { pt.started = true; this.spawnPatrol(pt, 0); }
   }
   // the next stretch of the path: veils that part at this stage
   veilsFor(stage) { return (this.veils || []).filter((v) => v.after === stage); }
@@ -1004,16 +1027,21 @@ export class Level {
     this.wisp = { curve: new THREE.CatmullRomCurve3(pts), t: 0, len: from.distanceTo(to), to: to.clone() };
   }
   spawnPatrol(pt, at) {
-    const hp = 55 + this.game.depth * 5, variant = this.key === 'piazza' ? 'golconda' : undefined;
+    const tier = (this.key === 'piazza' ? 2 : 0) + pt.zone;
+    const hp = (55 + this.game.depth * 5) * (1 + 0.15 * tier), variant = this.key === 'piazza' ? 'golconda' : undefined;
     for (let i = 0; i < 2; i++) {
       const p = pt.route[at].clone().add(new THREE.Vector3(i * 1.4, 0.1, i * 0.8));
-      const e = this.game.spawnEnemy(p.setY(this.groundY(p.x, p.z) + 0.1), { hp, variant, patrol: { route: pt.route, i: Math.min(at + 1, pt.route.length - 1), dir: at + 1 < pt.route.length ? 1 : -1 } });
+      const e = this.game.spawnEnemy(p.setY(this.groundY(p.x, p.z) + 0.1), { hp, variant, tier, patrol: { route: pt.route, i: Math.min(at + 1, pt.route.length - 1), dir: at + 1 < pt.route.length ? 1 : -1 } });
       if (e) pt.members.push(e);
     }
   }
   // a wave only when something calls it: a memory taken, a scrap found, a lucid threshold crossed
   surge(n, msg) {
     if (this.pendingWave || this.key === 'boss' || this.key === 'sandbox') return;
+    // the dream escalates with you: early on a surge is a couple of them, never a crowd
+    const r = this.region, tier = Math.max(0, r ? r.tier : 2);
+    n = Math.min(n, 1 + tier + (this.key === 'piazza' ? 1 : 0));
+    this.surgeTier = tier;
     this.game.ui.toast(msg, 'warn');
     this.pendingWave = { n, hp: 55 + this.game.depth * 5, rain: this.key === 'piazza', msg: this.key === 'piazza' ? 'It begins to rain men.' : 'They surface from the sand.' };
     this.waveDelay = 2.5;
@@ -1028,7 +1056,7 @@ export class Level {
 
   spawnWave(w) {
     const game = this.game;
-    const extra = Math.floor(game.lucidity.k * 2.5);
+    const extra = (this.surgeTier ?? 2) >= 2 ? Math.floor(game.lucidity.k * 2.5) : 0;
     for (let i = 0; i < w.n + extra; i++) {
       let px, pz, py = null;
       for (let tries = 0; tries < 12; tries++) {
@@ -1045,16 +1073,31 @@ export class Level {
         break;
       }
       if (w.rain) {
-        game.spawnEnemy(new THREE.Vector3(px, 17 + Math.random() * 6, pz), { falling: true, gravity: 0.12, hp: w.hp, variant: 'golconda' });
+        game.spawnEnemy(new THREE.Vector3(px, 17 + Math.random() * 6, pz), { falling: true, gravity: 0.12, hp: w.hp, variant: 'golconda', tier: this.surgeTier ?? 3 });
       } else {
         const y = py ?? this.groundY(px, pz);
-        game.spawnEnemy(new THREE.Vector3(px, y + 0.1, pz), { hp: w.hp });
+        game.spawnEnemy(new THREE.Vector3(px, y + 0.1, pz), { hp: w.hp, tier: this.surgeTier ?? 2 });
         game.vfx.dust(new THREE.Vector3(px, y, pz), 1.4);
         game.vfx.ring(new THREE.Vector3(px, y + 0.1, pz), 0.2, 3, 0.8, 0x7ff7ff, 0.8);
       }
     }
     game.ui.toast(w.msg || (w.rain ? 'It begins to rain men.' : 'Anxieties surface from the sand.'), 'warn');
     game.audio.sfx('bossRoar', { gain: 0.25, pitch: 12 });
+  }
+
+  // which region a point is in, and a quiet announcement when you cross into a new one
+  regionAt(x, z) { return (REGIONS[this.key] || []).find((r) => r.test(x, z)) || null; }
+  trackRegion() {
+    const pl = this.game.player;
+    if (!pl || pl.dead || !REGIONS[this.key]) return;
+    const r = this.regionAt(pl.pos.x, pl.pos.z);
+    if (r === this.region) return;
+    const first = !this.region;
+    this.region = r;
+    this.seenRegions = this.seenRegions || new Set();
+    if (!r || this.seenRegions.has(r.name)) return;
+    this.seenRegions.add(r.name);
+    if (!first && this.game.state === 'playing') this.game.ui.regionCard(r.name, r.sub);
   }
 
   enemiesAlive() { let n = 0; for (const e of this.game.entities) if (e.kind === 'enemy' && !e.dead) n++; return n; }
@@ -1188,6 +1231,7 @@ export class Level {
     if (this.sea && pl && !pl.dead && pl.pos.y < this.sea.y - 1.15) { game.vfx.dust(pl.pos.clone().setY(this.sea.y), 1.2, '#dfeef0'); pl.rescue(); }
     this.ambience(dt);
     this.footprints(dt);
+    this.trackRegion();
     // waves
     if (this.pendingWave && game.state === 'playing') {
       this.waveDelay -= dt;

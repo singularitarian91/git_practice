@@ -11,7 +11,8 @@ export const LINES = {
     "Hello, figment. Same dream, different night. Mind the clocks."],
   hintTake: ["See the clock? Aim at it and press Q. Take its melting. Clocks don't need it. Believe me, I've seen what she does to clocks."],
   hintGive: ["Now give it to something that shouldn't have it. Aim, and press E. A wall, perhaps. Walls are very full of themselves."],
-  hintCombat: ["Those are her worries. Faceless, drawers full of things never said. F cuts. Right mouse deflects, if you get the timing right. Hold it to guard."],
+  hintCombat: ["Those are her worries. Faceless, drawers full of things never said. F cuts. Shooting works too, but the knife is kinder."],
+  hintDeflect: ["See it wind up? Tap right mouse just as it lunges and you'll turn it right back. Hold it to guard, if you're not feeling brave."],
   hintPerilous: ["When one of them glows red, don't block it. Don't even try. Jump, or dash. Trust me on this."],
   hintFocus: ["Every blow you land fills your reverie. Hold X, somewhere quiet, and it mends you. It's called focus. I'm told it's very healthy."],
   hintDeathblow: ["It's kneeling. The red mark means press F. Finish it. It gives you back everything it was carrying."],
@@ -65,7 +66,7 @@ const RULES = {
   pogo: ['pogo', true], focus: ['focus', true], portal: ['portal', true], portalPass: ['portalPass', true],
   lucid50: ['lucid50', false, 60, 1], lucid75: ['lucid75', false, 60, 1], lucid90: ['lucid90', false, 60, 1],
   perilous: ['hintPerilous', true], enemiesNear: ['hintCombat', true], staggerSeen: ['hintDeathblow', true],
-  reverieFull: ['hintFocus', true],
+  reverieFull: ['hintFocus', true], lungeSeen: ['hintDeflect', true],
 };
 
 export class Narrator {

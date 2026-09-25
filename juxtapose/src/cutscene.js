@@ -1,10 +1,13 @@
 // Cutscenes: short letterboxed camera moves the dream uses to show you something
 // (the valley on arrival, a memory coming back, a way opening, the door). The
-// world holds still while they play; Space, Escape or a click skips to the end,
-// and anything a skipped shot would have started still happens.
+// world holds still while they play. Every shot stays up long enough to read its
+// caption; Space, Enter or a click moves on to the next shot, Escape skips the
+// rest, and anything a skipped shot would have started still happens.
 import * as THREE from 'three';
 
 const ease = (k) => k * k * (3 - 2 * k);
+// how long a caption needs on screen: a comfortable reading pace, plus a breath
+export const readTime = (text) => (text ? 2.2 + text.length / 11 : 0);
 const val = (v, k) => (typeof v === 'function' ? v(k) : Array.isArray(v) ? v[0].clone().lerp(v[1], ease(k)) : v);
 
 export class Cutscene {
@@ -13,13 +16,15 @@ export class Cutscene {
   constructor(game, shots, { onEnd } = {}) {
     this.game = game;
     this.shots = shots.filter(Boolean);
+    // never cut away from a line before it can be read; the camera move stretches to fit
+    for (const s of this.shots) s.dur = Math.max(s.dur, readTime(s.caption));
     this.onEnd = onEnd;
     this.i = -1; this.t = 0; this.total = 0;
     this.next();
   }
   next() {
     if (this.i >= 0) this.shots[this.i].end?.();
-    this.i++; this.t = 0;
+    this.i++; this.t = 0; this.shotT = 0;
     const s = this.shots[this.i];
     if (!s) return;
     s.at?.();
@@ -28,7 +33,10 @@ export class Cutscene {
   get done() { return this.i >= this.shots.length; }
   update(dt, input) {
     this.total += dt;
-    if (this.total > 0.6 && (input.hit('jump') || input.hit('pause') || input.click(0))) { this.skip(); return; }
+    this.shotT = (this.shotT || 0) + dt;
+    if (this.total > 0.6 && input.hit('pause')) { this.skip(); return; }
+    // next shot (the camera jumps to where it would have ended)
+    if (this.shotT > 0.5 && (input.hit('jump') || input.click(0) || input.pressed?.has('Enter'))) { this.next(); return; }
     const s = this.shots[this.i];
     if (!s) return;
     this.t += dt;
