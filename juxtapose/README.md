@@ -305,6 +305,8 @@ At load, each hero mesh replaces the look of the template with the same name. Na
 
 The suit was checked by testing every clip's limb axes against every garment triangle, with and without the aim overlay, both skinned and simulated. With cloth, the crossings fell from 732 to about 285. What remains is almost all in tucks and rolls (knees to the chest); idle, run, sprint, aim, fire and reload have none.
 
+The wood that is always under the suit (torso, pelvis, legs, upper arms) is not drawn at all, so it cannot show through the cloth; the two hakama legs overlap at the centre so no gap opens between them. What shows is the wood that shows on a dressed mannequin: head, neck, forearms at the cuff, hands, and the shoes.
+
 The procedural body is dropped when `figure_skin.glb` is present.
 
 Hosts that won't serve binary `.glb` files can serve `<name>.glb.gz.b64.txt` instead (`gzip -9 -n -c x.glb | base64 -w0`): the loader falls back to it, and to plain `<name>.glb.b64.txt` after that. Gzip takes the town kit from 10.5 MB to about 2.5 MB.

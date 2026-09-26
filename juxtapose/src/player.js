@@ -4,7 +4,7 @@
 import { ClothGarment } from './cloth.js';
 import * as THREE from 'three';
 import { RAPIER } from './physics.js';
-import { G, groups, ALL, TUNE, PROPS, PROP_INFO } from './config.js';
+import { LIFT, G, groups, ALL, TUNE, PROPS, PROP_INFO } from './config.js';
 import { FigureAnimator } from './animator.js';
 import { giveTo, takeFrom, takeCandidate, lucidityForGive } from './properties.js';
 import { rnd } from './vfx.js';
@@ -257,7 +257,7 @@ export class Player {
       else this.vel.set(0, -TUNE.poundSpeed * (this.self.has('heavy') ? 1.3 : 1), 0);
     } else if (this.state === 'climb') {
       this.climbT -= h;
-      this.vel.y = 7.5;
+      this.vel.y = 7.5 * LIFT;
       this.vel.x *= 0.9; this.vel.z *= 0.9;
       if (this.tryMantle(true)) return;
       if (this.climbT <= 0 || !this.wallAhead(0.9)) { this.state = 'air'; this.vel.addScaledVector(this.wall.n, 3); }
@@ -419,7 +419,7 @@ export class Player {
     this.jumpBuf = 0;
     this.self.delete('bursting');
     this.game.explode(this.pos.clone(), { radius: 3.8, damage: 55, source: 'self' });
-    this.vel.y = 17;
+    this.vel.y = 17 * LIFT;
     const f = this.wish().normalize();
     this.vel.x += f.x * 8; this.vel.z += f.z * 8;
     this.state = 'air'; this.grounded = false;
@@ -585,7 +585,7 @@ export class Player {
     const left = new THREE.Vector3(v.z, 0, -v.x); // +90 deg
     for (const side of [1, -1]) {
       const dir = left.clone().multiplyScalar(side);
-      const hit = this.game.physics.ray({ x: this.pos.x, y: this.pos.y + 1.0, z: this.pos.z }, dir, 0.95, this.rayMask());
+      const hit = this.game.physics.ray({ x: this.pos.x, y: this.pos.y + 1.0, z: this.pos.z }, dir, 1.15, this.rayMask()); // a forgiving catch: brush a wall and you run it
       if (!hit || Math.abs(hit.normal.y) > 0.3) continue;
       if (hit.entity && hit.entity.kind === 'enemy') continue;
       if (this.wall.lastN.dot(hit.normal) > 0.9 && this.wall.cool > -0.6) continue; // same wall again
@@ -596,7 +596,7 @@ export class Player {
       this.wall.along = along;
       const hs = Math.max(this.hspeed(), 9);
       this.vel.x = along.x * hs; this.vel.z = along.z * hs;
-      this.vel.y = Math.max(this.vel.y, 3.2);
+      this.vel.y = Math.max(this.vel.y, 3.2 * LIFT);
       this.jumpsUsed = 1; this.airDashUsed = false;
       // wall on the character's left if the wall normal points to our right
       const onLeft = new THREE.Vector3().crossVectors(UP, along).dot(hit.normal) < 0;
@@ -819,7 +819,7 @@ export class Player {
     const leave = (up) => {
       this.state = 'air';
       this.vel.copy(t).multiplyScalar(gr.dir * gr.speed);
-      this.vel.y = Math.max(this.vel.y, 0) + up;
+      this.vel.y = Math.max(this.vel.y, 0) + up * (up === TUNE.jumpVel ? 1 : LIFT);
       gr.cool = 0.35; gr.rail = null;
       this.fallFrom = this.pos.y;
       this.game.audio.sfx('grindEnd', { position: this.pos });
@@ -866,7 +866,7 @@ export class Player {
   applyEcho(p) {
     const game = this.game;
     switch (p) {
-      case 'floating': this.self.set('floating', 3); this.vel.y = Math.max(this.vel.y, 6); if (this.state !== 'air') this.state = 'air'; break;
+      case 'floating': this.self.set('floating', 3); this.vel.y = Math.max(this.vel.y, 6 * LIFT); if (this.state !== 'air') this.state = 'air'; break;
       case 'heavy': this.self.set('heavy', 4); break;
       case 'burning': this.self.set('burning', 3); break;
       case 'sleeping': this.drowsy = 3; break;
@@ -1274,7 +1274,7 @@ export class Player {
     else if (hs > 0.8 && this.state !== 'mantle' && this.state !== 'vault') targetYaw = Math.atan2(this.vel.x, this.vel.z);
     else if (this.state === 'mantle' || this.state === 'vault') targetYaw = Math.atan2(this.move.exitDir.x, this.move.exitDir.z);
     const prevYaw = this.yaw;
-    this.yaw = angleLerp(this.yaw, targetYaw, Math.min(1, dt * (this.aiming() ? 18 : 12)));
+    this.yaw = angleLerp(this.yaw, targetYaw, Math.min(1, dt * (this.aiming() ? 16 : 8))); // turns sweep round, not snap
     const turnRate = Math.atan2(Math.sin(this.yaw - prevYaw), Math.cos(this.yaw - prevYaw)) / Math.max(dt, 1e-3);
     // locomotion clip + speed sync
     if (this.state === 'ground' && !['JumpUp', 'Land', 'RollLand', 'PoundLand', 'Dash', 'Mantle', 'Vault'].includes(this.anim.base)) {
@@ -1324,7 +1324,7 @@ export class Player {
     const L = game.lucidity.k;
     const aiming = this.aiming();
     const pivotTarget = this.renderPos.clone().add(new THREE.Vector3(0, this.state === 'slide' ? 1.35 : (aiming ? 1.85 : 2.0), 0));
-    const follow = 1 - Math.exp(-dt * (16 - L * 9));
+    const follow = 1 - Math.exp(-dt * (10 - L * 5)); // a lazier chase: the camera trails, then settles
     this.camPivot.lerp(pivotTarget, follow);
     this.camPivot.y = THREE.MathUtils.lerp(this.camPivot.y, pivotTarget.y, 1 - Math.exp(-dt * 10));
     const f = this.camForward(new THREE.Vector3());
@@ -1561,7 +1561,7 @@ export class Player {
   pogoBounce(e, point) {
     const game = this.game;
     this.pogoT = 0;
-    this.vel.y = 12.5 * (this.keep('opendoor') ? 1.25 : 1);
+    this.vel.y = 12.5 * LIFT * (this.keep('opendoor') ? 1.25 : 1);
     this.jumpsUsed = 1;
     if (this.keep('opendoor')) this.airDashUsed = false;
     this.airDashUsed = this.keep('opendoor') ? false : this.airDashUsed;

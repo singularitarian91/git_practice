@@ -89,34 +89,41 @@ export const G = {
 export function groups(member, filter) { return ((member & 0xffff) << 16) | (filter & 0xffff); }
 export const ALL = 0xffff;
 
+// Movement is paced like Ratchet & Clank: a gentler run that builds and bleeds momentum, and
+// long, floaty jumps. Gravity is lower (18, was 26) and every launch speed is scaled by
+// LIFT = sqrt(18/26) so each jump, bounce and hop reaches the height the levels were built
+// for; run speeds drop by about as much as airtime grows, so jump distances hold too.
+const G_BUILT = 26, G_NOW = 18;
+export const LIFT = Math.sqrt(G_NOW / G_BUILT);
+
 export const TUNE = {
-  gravity: 26,
-  runSpeed: 8.6,
-  sprintSpeed: 11.2,
+  gravity: G_NOW,
+  runSpeed: 7.2,
+  sprintSpeed: 9.4,
   sprintAfter: 1.1,
-  groundAccel: 70,
-  groundDecel: 55,
-  airAccel: 22,
-  jumpVel: 10.2,
-  doubleJumpVel: 9.6,
-  coyote: 0.12,
-  jumpBuffer: 0.14,
-  maxFall: 42,
-  slideBoost: 3.5,
-  slideFriction: 5.5,
-  slideTime: 1.05,
-  dashSpeed: 24,
-  dashTime: 0.17,
+  groundAccel: 34,
+  groundDecel: 24,
+  airAccel: 15,
+  jumpVel: 10.2 * LIFT,
+  doubleJumpVel: 9.6 * LIFT,
+  coyote: 0.14,
+  jumpBuffer: 0.16,
+  maxFall: 42 * LIFT,
+  slideBoost: 3.2,
+  slideFriction: 4.5,
+  slideTime: 1.2,
+  dashSpeed: 20,
+  dashTime: 0.2,
   dashCooldown: 0.45,
-  wallRunTime: 1.35,
-  wallRunMinSpeed: 5,
-  wallJumpOut: 8.5,
-  wallJumpUp: 9.5,
+  wallRunTime: 1.5,
+  wallRunMinSpeed: 4.5,
+  wallJumpOut: 8.5 * LIFT,
+  wallJumpUp: 9.5 * LIFT,
   mantleMax: 2.5,
   vaultMax: 1.25,
   grindMinSpeed: 10,
-  poundSpeed: 38,
-  bedBounce: 19,
+  poundSpeed: 38 * LIFT,
+  bedBounce: 19 * LIFT,
   fireRate: 0.13,
   magazine: 8,
   reloadTime: 1.1,

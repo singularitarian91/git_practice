@@ -455,7 +455,7 @@ def hakama():
         s, c = np.sin(th), np.cos(th)
         for j, z in enumerate(zs):
             ao = np.interp(z, [0.13, 0.55, 0.86], [0.16, 0.15, 0.1])     # to the outside
-            ai = np.interp(z, [0.13, 0.55, 0.86], [0.1, 0.095, 0.1])      # to the other leg
+            ai = np.interp(z, [0.13, 0.55, 0.86], [0.125, 0.125, 0.125])  # past the centre: the legs overlap, no gap between
             b = np.interp(z, [0.13, 0.55, 0.86], [0.2, 0.18, 0.135])
             cx = sg * 0.115
             half = np.where(s * sg > 0, ao, ai)
@@ -676,6 +676,23 @@ def garment_weights(name, P, part, ring=None):
     return W, reach
 
 
+# pieces of the mannequin that are always under the suit: they are not drawn at all, so the
+# wood can never show through the cloth (the kimono, the coat and the hakama close over them)
+UNDER_SUIT = {'hips', 'spine', 'chest', 'thighL', 'thighR', 'shinL', 'shinR', 'upperarmL', 'upperarmR'}
+
+
+def strip_hidden(ob):
+    seg = json.loads(ob['seg'])
+    bm = bmesh.new(); bm.from_mesh(ob.data)
+    bm.verts.ensure_lookup_table()
+    gone = [v for v in bm.verts if seg[v.index] in UNDER_SUIT]
+    keep = [seg[v.index] for v in bm.verts if seg[v.index] not in UNDER_SUIT]
+    bmesh.ops.delete(bm, geom=gone, context='VERTS')
+    bm.to_mesh(ob.data); bm.free()
+    ob['seg'] = json.dumps(keep)
+    print(f'  body: {len(gone)} verts under the suit not drawn, {len(keep)} kept ({sorted(set(keep))})')
+
+
 def body_weights(ob):
     seg = json.loads(ob['seg'])
     return {b: (np.array(seg) == b).astype(float) for b in set(seg)}, None
@@ -742,6 +759,7 @@ def main():
         'Inner': (join([inner()], 'Inner'), fabric_material('Inner', None, 0.7, painted=paint_inner())),
         'Scarf': (join(scarf(), 'Scarf'), fabric_material('Scarf', 'scarf', 0.95)),
     }
+    strip_hidden(body)
     arm = armature()
     W, _ = body_weights(body)
     apply_weights(body, W, None)
