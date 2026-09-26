@@ -292,6 +292,7 @@ export class NPCs {
       await say('role.debt_explain');
       await say('role.tithe_crate');
       g.toast(`Goal: pay Corvin back ${DEBT_START.toLocaleString()} coins.`, 'quest');
+      g.toast('Fennick the fox has a spare fishing rod, and Mothwyn the moth makes bug nets. Your journal (J) and map (M) show where to find them.', 'quest');
     } else if (n.id === 'morrow') {
       await say('role.barrow_intro');
     }

@@ -13,6 +13,7 @@ export class Bugs {
     this.group = new THREE.Group();
     game.engine.scene.add(this.group);
     this.scale = new Map();
+    this.glintTex = makeGlintTexture();
   }
 
   eligible() {
@@ -92,7 +93,7 @@ export class Bugs {
   modelScale(id) {
     if (this.scale.has(id)) return this.scale.get(id);
     const b = this.game.lib.getBounds(id).getSize(new THREE.Vector3());
-    const k = 0.2 / Math.max(0.03, b.x, b.y, b.z);
+    const k = 0.3 / Math.max(0.03, b.x, b.y, b.z);
     this.scale.set(id, k);
     return k;
   }
@@ -107,7 +108,14 @@ export class Bugs {
     obj.scale.setScalar(this.modelScale(id));
     obj.traverse((o) => { if (o.isMesh) o.castShadow = false; });
     this.group.add(obj);
-    const b = { id, B: BUGS[id], obj, anchor: new THREE.Vector3(loc.x, loc.y, loc.z), pos: new THREE.Vector3(loc.x, loc.y, loc.z), r: loc.r, t: Math.random() * 10, fleeing: false, face: loc.face, ground: loc.ground, dartT: 0, dartTo: null };
+    // a soft twinkle so bugs can be spotted from the camera
+    const glint = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.glintTex, color: 0xffffff, transparent: true, opacity: 0, depthWrite: false,
+      depthTest: false, // shines through the leaves over a trunk beetle
+    }));
+    glint.renderOrder = 2;
+    this.group.add(glint);
+    const b = { id, B: BUGS[id], obj, glint, anchor: new THREE.Vector3(loc.x, loc.y, loc.z), pos: new THREE.Vector3(loc.x, loc.y, loc.z), r: loc.r, t: Math.random() * 10, fleeing: false, face: loc.face, ground: loc.ground, dartT: 0, dartTo: null };
     this.list.push(b);
   }
 
@@ -147,6 +155,7 @@ export class Bugs {
 
   remove(b) {
     b.obj.removeFromParent();
+    if (b.glint) { b.glint.removeFromParent(); b.glint.material.dispose(); }
     const i = this.list.indexOf(b);
     if (i >= 0) this.list.splice(i, 1);
   }
@@ -196,8 +205,42 @@ export class Bugs {
         }
       }
       b.obj.position.copy(b.pos);
+      if (b.glint) {
+        const pulse = 0.5 + 0.5 * Math.sin(b.t * 2.6 + i * 1.7);
+        // a little toward the camera so a tree trunk doesn't hide it
+        const cam = g.engine.camera.position;
+        const d = Math.max(0.001, cam.distanceTo(b.pos));
+        b.glint.position.set(b.pos.x + (cam.x - b.pos.x) / d * 0.3, b.pos.y + 0.1 + (cam.y - b.pos.y) / d * 0.3, b.pos.z + (cam.z - b.pos.z) / d * 0.3);
+        b.glint.scale.setScalar(0.55 + pulse * 0.35);
+        b.glint.material.opacity = b.fleeing ? Math.max(0, 0.8 - b.fleeT) : 0.35 + 0.6 * pulse * pulse;
+      }
       if (b.face != null && b.B.move === 'crawl') b.obj.rotation.set(0, b.face, 0);
       else b.obj.rotation.set(Math.sin(b.t * 20) * 0.15, b.t * 1.5 + i, Math.sin(b.t * 17) * 0.2);
     }
   }
+}
+
+// A small four-point sparkle with a warm halo.
+function makeGlintTexture() {
+  const S = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  g.addColorStop(0, 'rgba(255, 255, 240, 1)');
+  g.addColorStop(0.14, 'rgba(255, 226, 140, 0.9)');
+  g.addColorStop(0.4, 'rgba(255, 196, 90, 0.28)');
+  g.addColorStop(1, 'rgba(255, 180, 70, 0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, S, S);
+  // four-point star, tapering to the tips
+  x.fillStyle = 'rgba(255, 252, 230, 0.95)';
+  for (const r of [0, Math.PI / 2]) {
+    x.save(); x.translate(S / 2, S / 2); x.rotate(r);
+    x.beginPath(); x.moveTo(-S * 0.46, 0); x.lineTo(0, -2.2); x.lineTo(S * 0.46, 0); x.lineTo(0, 2.2); x.closePath(); x.fill();
+    x.restore();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }

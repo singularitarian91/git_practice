@@ -85,7 +85,7 @@ and menu. The hotbar slots are tappable, and so is the minimap.
 - Dialogue: 740+ pages of it.
 - A 3,000-coin debt to Corvin the raven, and a longhouse upgrade once it's paid.
 - Morrow the owl's Barrow museum, which collects fish, bugs and relics. He hates bugs.
-- Bug-catching with a net, fishing, digging up relics, and foraging.
+- Bug-catching with a net (bugs twinkle gold so you can spot them), fishing, digging up relics, and foraging. Fennick gives you a rod and Mothwyn a net when you first meet them.
 
 **From Valheim**
 - Nordic art direction: volumetric height fog, drifting ground mist, torches that glow in the fog, and bloom.

@@ -99,9 +99,19 @@ try {
     await shot('sleep_confirm');
     await key('KeyE'); await wait(4000); await sim(1);
     await shot('summary');
-    await key('Enter'); await wait(3000); await sim(1);
+    // the summary must be visible above the black fade, and its button clickable
+    const onTop = async () => ev(() => { const e = document.elementFromPoint(innerWidth / 2, innerHeight / 2); return !!(e && e.closest('.panel')); });
+    console.log('summary on top:', await onTop());
+    const wake = async () => { const b = await page.locator('.modal-layer .btn.big').last().boundingBox(); if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); return !!b; };
+    console.log('clicked wake up:', await wake()); await wait(3000); await sim(1);
     console.log('next morning:', JSON.stringify(await state()));
     await shot('morning');
+    // stay up too late: collapse at 2 am, then wake up the next day
+    await ev(() => { window.__gh.game.state.time = 25 * 60 + 59; });
+    await sim(3); await wait(3000); await sim(0.5);
+    await shot('passout_summary');
+    console.log('pass-out summary on top:', await onTop(), 'clicked:', await wake()); await wait(3000); await sim(1);
+    console.log('after pass-out:', JSON.stringify(await state()));
   } else if (scenario === 'night') {
     await teleport(-20, -40, 0);
     await sim(25);
@@ -143,6 +153,9 @@ try {
     await teleport(b[0], b[1] + 1.4, Math.PI);
     await ev(() => window.__gh.game.inventory.add('raspberry', 3));
     await key('KeyE'); await sim(0.4);
+    // text types out at the speaker's pace: finish it, then wait for the choices
+    await ev(() => { const u = window.__gh.game.ui; if (u.typing) u.finishTyping(); });
+    await page.waitForSelector('.dlg-choices.show', { timeout: 10000 });
     await shot('menu');
     await key('ArrowDown'); await key('KeyE'); await sim(0.4);
     await shot('gift_pick');
@@ -168,8 +181,9 @@ try {
       await click(0.3);
       console.log('phase after hook:', await ev(() => window.__gh.game.fishing.phase));
       await shot('minigame');
-      // hold the mouse to keep the zone up for a while, then force the result
-      await page.mouse.down(); await sim(1); await page.mouse.up(); await sim(0.5);
+      // hold the mouse briefly (long enough to see the zone rise, too short
+      // for the fish to escape), then force the result
+      await page.mouse.down(); await sim(0.3); await page.mouse.up(); await sim(0.1);
       await ev(() => { const u = window.__gh.game.ui.fishingUI; if (u.active) u.stop(true); });
       await sim(0.3);
       console.log('fish caught:', await ev(() => window.__gh.game.state.stats.fish));

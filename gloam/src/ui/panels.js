@@ -490,6 +490,8 @@ export function goals(g) {
   const met = Object.values(st.npcs).filter((n) => n.met).length;
   const out = [];
   out.push({ t: 'Speak with Corvin the raven', done: st.npcs.corvin.met });
+  out.push({ t: 'Get a fishing rod from Fennick the fox (the south dock in the morning, the beach by day, the Hearth after 5 pm)', done: st.npcs.fennick.met });
+  out.push({ t: 'Get a bug net from Mothwyn the moth (Birchmeadow in the morning, her house in the village after noon)', done: st.npcs.mothwyn.met });
   out.push({ t: 'Till soil in your field and plant seeds', done: Object.values(st.farm).some((t) => t.crop) || st.stats.crops > 0 });
   out.push({ t: 'Ship something in the tithe crate', done: st.stats.earned > 0 });
   out.push({ t: `Meet the villagers (${met}/6)`, done: met >= 6 });
@@ -589,10 +591,16 @@ function mapPanel(ui, g) {
     c.beginPath(); c.moveTo(hx, hy - 7); c.lineTo(hx + 6, hy - 1); c.lineTo(hx + 4.5, hy - 1); c.lineTo(hx + 4.5, hy + 6);
     c.lineTo(hx - 4.5, hy + 6); c.lineTo(hx - 4.5, hy - 1); c.lineTo(hx - 6, hy - 1); c.closePath();
     c.fill(); c.lineWidth = 1.2; c.strokeStyle = 'rgba(12,8,4,0.9)'; c.stroke();
+    c.font = '11px Alegreya, Georgia, serif';
+    c.textAlign = 'left';
     for (const n of g.npcs.list) {
       if (!n.visible) continue;
       const [x, y] = toPx(n.pos.x, n.pos.z);
       dot(x, y, 3.5, '#e6a44a');
+      c.fillStyle = 'rgba(10,10,10,0.7)';
+      c.fillText(n.cfg.name, x + 6, y + 4);
+      c.fillStyle = '#f3c77e';
+      c.fillText(n.cfg.name, x + 5, y + 3);
     }
     for (const e of g.enemies.list) {
       if (!e.alive) continue;
@@ -611,7 +619,7 @@ function mapPanel(ui, g) {
   };
   draw();
   const iv = setInterval(draw, 500);
-  f.body.appendChild(h('div', 'muted small', 'The arrow is you and the house is home. Amber dots are villagers; red ones are the Gloam.'));
+  f.body.appendChild(h('div', 'muted small', 'The arrow is you and the house is home. Amber dots are villagers (Fennick has a fishing rod for you, Mothwyn a bug net); red ones are the Gloam.'));
   return { name: 'map', el: f.el, onClose: () => clearInterval(iv) };
 }
 
@@ -649,7 +657,7 @@ function helpPanel(ui) {
     <div><h3>Living here</h3>
       <p>Till your field with the hoe, plant seeds, water them each day (or let the rain). Crops only grow in their season.</p>
       <p>Drop goods in the <b>tithe crate</b> by your hut; they're sold overnight. Pay Corvin back at his stall.</p>
-      <p>Chop trees, break rocks, forage, fish (${fishHow}), and catch bugs with the net.</p>
+      <p>Chop trees, break rocks, forage, fish (${fishHow}), and catch bugs with the net. Bugs twinkle gold: on tree trunks and over water by day, around lights and in the fields at night. Fennick the fox has a spare rod and Mothwyn the moth makes nets.</p>
       <p>After dark the <b>Gloam</b> hunts. Stay near fire — torches, braziers and the Great Hearth keep them away. Standing by a fire makes you <b>Rested</b>.</p>
       <p>Sleep at your hut door before 2 am. Your game saves each morning.</p>
     </div>

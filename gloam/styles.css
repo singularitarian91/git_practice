@@ -177,7 +177,8 @@ button { font-family: inherit; }
 .choice.sel::before { content: '▸'; position: absolute; left: 12px; color: var(--amber-hi); }
 
 /* ---------- modal panels ---------- */
-.modal-layer { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(4, 4, 6, 0.45); pointer-events: auto; }
+/* above the black fade (z 40) so the end-of-day summary shows over it */
+.modal-layer { position: absolute; inset: 0; z-index: 42; display: none; align-items: center; justify-content: center; background: rgba(4, 4, 6, 0.45); pointer-events: auto; }
 .modal-layer.show { display: flex; }
 .panel {
   width: min(880px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;

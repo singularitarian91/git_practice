@@ -69,11 +69,11 @@ for (const [id, f] of Object.entries(FISH)) def(id, f.name, 'fish', f.price, { m
 export const BUGS = {
   bug_moth: { name: 'Ash Moth', hours: [19, 4], seasons: ['spring', 'summer', 'autumn'], where: 'lights', price: 22, rarity: 10, move: 'flutter' },
   bug_deathshead: { name: "Death's-head Moth", hours: [21, 3], seasons: ['autumn'], where: 'lights', price: 150, rarity: 2, move: 'flutter' },
-  bug_firefly: { name: 'Gloam Firefly', hours: [20, 2], seasons: ['summer'], where: 'meadow', price: 45, rarity: 8, move: 'glow' },
+  bug_firefly: { name: 'Gloam Firefly', hours: [20, 2], seasons: ['spring', 'summer'], where: 'meadow', price: 45, rarity: 8, move: 'glow' },
   bug_beetle: { name: 'Bark Beetle', hours: [8, 17], seasons: ['spring', 'summer', 'autumn'], where: 'trees', price: 26, rarity: 9, move: 'crawl' },
   bug_grave_beetle: { name: 'Grave Beetle', hours: [19, 5], seasons: ['spring', 'summer', 'autumn', 'winter'], where: 'graveyard', price: 85, rarity: 4, move: 'crawl' },
-  bug_dragonfly: { name: 'Fen Dragonfly', hours: [9, 17], seasons: ['summer'], where: 'water', price: 38, rarity: 8, move: 'dart' },
-  bug_lanternfly: { name: 'Lanternfly', hours: [17, 21], seasons: ['summer', 'autumn'], where: 'forest', price: 64, rarity: 5, move: 'flutter' },
+  bug_dragonfly: { name: 'Fen Dragonfly', hours: [9, 17], seasons: ['spring', 'summer'], where: 'water', price: 38, rarity: 8, move: 'dart' },
+  bug_lanternfly: { name: 'Lanternfly', hours: [17, 21], seasons: ['spring', 'summer', 'autumn'], where: 'forest', price: 64, rarity: 5, move: 'flutter' },
   bug_mistmoth: { name: 'Mist Moth', hours: [20, 5], seasons: ['autumn', 'winter'], where: 'mistwood', price: 125, rarity: 3, move: 'flutter', fogBonus: true },
 };
 for (const [id, b] of Object.entries(BUGS)) def(id, b.name, 'bug', b.price, { model: id });

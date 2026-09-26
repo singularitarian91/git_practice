@@ -88,7 +88,7 @@ export class Game {
     this.lastMusic = null;
     this.prompt = null;
     // a small belt lantern so the night is playable (it does not ward off the Gloam)
-    this.playerLight = engine.lighting.add({ pos: this.player.pos, color: 0xffb870, intensity: 3.2, radius: 7, flicker: 0.25, halo: 0.2, nightOnly: true, safe: 0 });
+    this.playerLight = engine.lighting.add({ pos: this.player.pos, color: 0xffb870, intensity: 4, radius: 9, flicker: 0.25, halo: 0.2, nightOnly: true, safe: 0 });
   }
 
   get season() { return seasonOf(this.state); }
@@ -128,7 +128,7 @@ export class Game {
     this.engine.focus.copy(this.player.pos);
     this.engine.fadeTarget = this.player.pos;
     this.playerLight.pos.set(this.player.pos.x, this.player.pos.y + 1.4, this.player.pos.z);
-    this.playerLight.intensity = 3.2 * Math.min(1, this.darkness * 1.4);
+    this.playerLight.intensity = 4 * Math.min(1, this.darkness * 1.4);
     this.camera.handleInput(this.input, dt);
     this.camera.update(this.player.pos, dt);
     this.grass.update(this.player.pos, this.player.pos);

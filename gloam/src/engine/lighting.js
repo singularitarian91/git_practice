@@ -60,6 +60,7 @@ export class Lighting {
     this.hemi.intensity = atmo.hemiIntensity;
     this.sun.color.copy(atmo.lightColor);
     this.sun.intensity = atmo.lightIntensity;
+    this.sun.shadow.intensity = 1 - 0.5 * atmo.darkness; // moonlight casts soft shadows
 
     // place the shadow camera around the focus, snapped to shadow texels
     const dir = atmo.lightDir;

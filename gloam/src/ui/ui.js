@@ -223,8 +223,10 @@ export class UI {
     const el = h('div', `toast ${kind}`, msg);
     box.appendChild(el);
     while (box.children.length > 6) box.firstChild.remove();
-    setTimeout(() => el.classList.add('out'), kind === 'quest' || kind === 'new' ? 5200 : 3200);
-    setTimeout(() => el.remove(), kind === 'quest' || kind === 'new' ? 6000 : 4000);
+    // long messages stay up long enough to read
+    const life = Math.max(kind === 'quest' || kind === 'new' ? 5200 : 3200, String(msg).replace(/<[^>]*>/g, '').length * 55);
+    setTimeout(() => el.classList.add('out'), life);
+    setTimeout(() => el.remove(), life + 800);
   }
 
   pickup(id, n, isNew = false) {

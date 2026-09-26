@@ -327,7 +327,7 @@ export const DIALOGUE = {
       summer: [
         "Brightwane. The worst season. Bright, loud, and positively writhing with dragonflies.",
         "Summer nights are so brief. I barely have time to brood before the sky turns pale again. Hoo. Unfair.",
-        "The Fen Dragonfly is abroad in summer. Four wings. Who needs four wings? It is, hoo, showing off.",
+        "The Fen Dragonfly hums over the water from Thaw into Brightwane. Four wings. Who needs four wings? It is, hoo, showing off.",
       ],
       autumn: [
         "Rotfall. Now THIS is a season. Everything decays with such dignity.",

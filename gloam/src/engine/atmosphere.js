@@ -4,17 +4,17 @@ import { clamp, lerp, smoothstep } from './noise.js';
 
 // Key frames around the clock (colours authored in sRGB hex).
 const KEYS = [
-  { h: 0.0, zen: '#03050b', hor: '#0b111c', fog: '#0a0f17', sun: '#ff9a6a', sunI: 0.0, hemS: '#22304e', hemG: '#08090c', hemI: 0.7, exp: 1.35, cl: '#1b2233', cd: '#07090e' },
-  { h: 4.6, zen: '#04060d', hor: '#121827', fog: '#0e131c', sun: '#ff9a6a', sunI: 0.0, hemS: '#22304e', hemG: '#08090c', hemI: 0.7, exp: 1.35, cl: '#1e2536', cd: '#080a10' },
+  { h: 0.0, zen: '#04070f', hor: '#101827', fog: '#141c2a', sun: '#ff9a6a', sunI: 0.0, hemS: '#30426a', hemG: '#10131a', hemI: 0.95, exp: 1.5, cl: '#1f283b', cd: '#090c12' },
+  { h: 4.6, zen: '#050810', hor: '#151c2c', fog: '#161e2c', sun: '#ff9a6a', sunI: 0.0, hemS: '#30426a', hemG: '#10131a', hemI: 0.95, exp: 1.5, cl: '#222a3c', cd: '#0a0c12' },
   { h: 5.6, zen: '#141a2a', hor: '#4a3a44', fog: '#262a36', sun: '#ff9a6a', sunI: 0.15, hemS: '#3a4260', hemG: '#15141a', hemI: 0.65, exp: 1.25, cl: '#6a5058', cd: '#1c1a24' },
   { h: 6.6, zen: '#2d3d58', hor: '#b8785a', fog: '#5c6270', sun: '#ffb07a', sunI: 1.15, hemS: '#7888a4', hemG: '#3a3230', hemI: 0.85, exp: 1.1, cl: '#e0a080', cd: '#4a4250' },
   { h: 8.0, zen: '#3f5878', hor: '#9aa8b4', fog: '#76838f', sun: '#ffe0b8', sunI: 2.1, hemS: '#a6b6cc', hemG: '#4b4638', hemI: 1.0, exp: 1.0, cl: '#c8ccd2', cd: '#5a6068' },
   { h: 12.5, zen: '#48648a', hor: '#a4b0ba', fog: '#7f8b95', sun: '#fff0dc', sunI: 2.6, hemS: '#b0bfd2', hemG: '#524c3c', hemI: 1.1, exp: 1.0, cl: '#d4d8dc', cd: '#646a72' },
   { h: 16.0, zen: '#45597a', hor: '#b0a890', fog: '#7a8288', sun: '#ffd6a0', sunI: 2.25, hemS: '#aab4c4', hemG: '#524a38', hemI: 1.05, exp: 1.0, cl: '#d8ccb4', cd: '#625c5a' },
   { h: 18.3, zen: '#3a4766', hor: '#d08a52', fog: '#686872', sun: '#ff9a52', sunI: 1.45, hemS: '#8c8ca4', hemG: '#43362c', hemI: 0.9, exp: 1.05, cl: '#f0a870', cd: '#584650' },
-  { h: 19.4, zen: '#252d48', hor: '#8a4a4c', fog: '#383645', sun: '#ff6a3a', sunI: 0.45, hemS: '#4c4c6c', hemG: '#1e1a1c', hemI: 0.72, exp: 1.15, cl: '#b0605a', cd: '#2e2634' },
-  { h: 20.3, zen: '#111829', hor: '#2c3450', fog: '#1c2232', sun: '#ff6a3a', sunI: 0.0, hemS: '#2a3452', hemG: '#0c0c10', hemI: 0.6, exp: 1.3, cl: '#2c3246', cd: '#0e1018' },
-  { h: 21.6, zen: '#03050b', hor: '#0b111c', fog: '#0a0f17', sun: '#ff9a6a', sunI: 0.0, hemS: '#22304e', hemG: '#08090c', hemI: 0.7, exp: 1.35, cl: '#1b2233', cd: '#07090e' },
+  { h: 19.4, zen: '#252d48', hor: '#8a4a4c', fog: '#383645', sun: '#ff6a3a', sunI: 0.45, hemS: '#4c4c6c', hemG: '#1e1a1c', hemI: 0.9, exp: 1.25, cl: '#b0605a', cd: '#2e2634' },
+  { h: 20.3, zen: '#121a2c', hor: '#2e3654', fog: '#1e2638', sun: '#ff6a3a', sunI: 0.0, hemS: '#33426a', hemG: '#10121a', hemI: 1.05, exp: 1.5, cl: '#2e3448', cd: '#0f1119' },
+  { h: 21.6, zen: '#04070f', hor: '#101827', fog: '#141c2a', sun: '#ff9a6a', sunI: 0.0, hemS: '#30426a', hemG: '#10131a', hemI: 0.95, exp: 1.5, cl: '#1f283b', cd: '#090c12' },
 ];
 const COLOR_KEYS = ['zen', 'hor', 'fog', 'sun', 'hemS', 'hemG', 'cl', 'cd'];
 const NUM_KEYS = ['sunI', 'hemI', 'exp'];
@@ -82,9 +82,10 @@ export class Atmosphere {
     const az = Math.PI * dayFrac;
     const el = Math.sin(Math.PI * clamp(dayFrac, -0.3, 1.3)) * maxElev;
     s.sunDir.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)).normalize();
-    const nightFrac = (((hour - 20) % 24) + 24) % 24 / 10;
+    const nightFrac = (((hour - 19.2) % 24) + 24) % 24 / 10.8;
     const maz = Math.PI * nightFrac + 0.4;
-    const mel = Math.sin(Math.PI * clamp(nightFrac, -0.2, 1.2)) * THREE.MathUtils.degToRad(48);
+    const ms = Math.sin(Math.PI * clamp(nightFrac, -0.2, 1.2));
+    const mel = Math.sign(ms) * Math.pow(Math.abs(ms), 0.6) * THREE.MathUtils.degToRad(48); // climbs quickly after rising
     s.moonDir.set(Math.cos(maz) * Math.cos(mel), Math.sin(mel), Math.sin(maz) * Math.cos(mel) - 0.25).normalize();
 
     // weather greying of the sky
@@ -104,16 +105,19 @@ export class Atmosphere {
     s.moonVis = smoothstep(-0.05, 0.1, s.moonDir.y) * clamp(1.2 - W.cloud * 0.8, 0.15, 1) * nightness;
     s.aurora = season === 'winter' || dawn ? nightness * clamp(1.1 - W.cloud, 0, 1) * (season === 'winter' ? 1 : 0.5) : 0;
 
-    // directional light: sun by day, moon by night (cross-fade at the horizon)
+    // directional light: the sun or the moon, whichever is brighter (the moon
+    // rises at dusk, so there is no dark gap as the sun goes down)
     const sunUp = smoothstep(-0.02, 0.1, s.sunDir.y);
-    if (sunUp > 0.001) {
+    const sunI = k.sunI * 1.5 * W.sun * sunUp * (dawn ? 1.25 : 1);
+    const moonI = Math.max(0.3, smoothstep(0.0, 0.2, s.moonDir.y)) * clamp(1.1 - W.cloud * 0.6, 0.3, 1) * (1 - sunUp);
+    if (sunI >= moonI) {
       s.lightDir.copy(s.sunDir);
       s.lightColor.copy(k.sun);
-      s.lightIntensity = k.sunI * 1.5 * W.sun * sunUp * (dawn ? 1.25 : 1);
+      s.lightIntensity = sunI;
     } else {
       s.lightDir.copy(s.moonDir.y > 0.05 ? s.moonDir : tmpA.set(0.3, 0.8, 0.2));
       s.lightColor.set('#8fa6d6');
-      s.lightIntensity = 0.6 * smoothstep(0.0, 0.2, s.moonDir.y) * clamp(1.1 - W.cloud * 0.6, 0.3, 1);
+      s.lightIntensity = moonI;
     }
     if (s.lightDir.y < 0.08) s.lightDir.y = 0.08;
     s.lightDir.normalize();
@@ -123,7 +127,7 @@ export class Atmosphere {
     s.hemiIntensity = k.hemI * 1.45 * lerp(1, W.dark, 0.5) * (weather === 'snow' ? 1.2 : 1);
 
     // fog
-    s.fogColor.copy(k.fog).lerp(grey, g * 0.3).multiplyScalar(lerp(1, W.dark, 0.5) * 0.42);
+    s.fogColor.copy(k.fog).lerp(grey, g * 0.3).multiplyScalar(lerp(1, W.dark, 0.5) * lerp(0.42, 0.62, nightness)); // moonlit mist, not murk
     if (weather === 'snow') s.fogColor.lerp(tmpA.set(0.55, 0.6, 0.68), 0.35 * (1 - nightness * 0.8));
     s.fogSunColor.copy(k.sun).multiplyScalar(0.22 * s.sunVis * Math.min(1, k.sunI));
     const morningMist = smoothstep(5, 6.5, hour) * (1 - smoothstep(7.5, 10, hour));
@@ -137,7 +141,7 @@ export class Atmosphere {
     // grading
     s.exposure = k.exp * 1.5 * (weather === 'storm' ? 1.1 : 1);
     const golden = smoothstep(17, 18.5, hour) * (1 - smoothstep(19.2, 20, hour)) + smoothstep(5.8, 6.6, hour) * (1 - smoothstep(7, 8.5, hour));
-    s.lift.set(lerp(0.012, 0.004, nightness), lerp(0.014, 0.012, nightness), lerp(0.022, 0.04, nightness));
+    s.lift.set(lerp(0.012, 0.008, nightness), lerp(0.014, 0.016, nightness), lerp(0.022, 0.046, nightness));
     s.gain.set(lerp(1.02, 0.86, nightness) + golden * 0.06, lerp(1.0, 0.94, nightness), lerp(0.96, 1.12, nightness) - golden * 0.05);
     s.gamma.set(1, 1, 1);
     s.saturation = lerp(0.9, 0.72, nightness) * (weather === 'fog' ? 0.85 : 1) * (dawn ? 1.08 : 1);
